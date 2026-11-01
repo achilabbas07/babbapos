@@ -297,6 +297,7 @@ def test_post_finance_source_sets_required_transaction_date():
     assert "account_id" in connection.sql
     assert [row[1:3] for row in connection.rows] == [(entry_date, entry_date)] * 2
     assert [row[4] for row in connection.rows] == ["Kas Tunai", "Pendapatan"]
+    assert all(isinstance(row[3], str) and row[3].strip() for row in connection.rows)
     assert [row[6] for row in connection.rows] == ["1-10001", "4-40000"]
     assert [row[7] for row in connection.rows] == [
         UUID("00000000-0000-0000-0000-000000000001"),
@@ -312,6 +313,27 @@ def test_post_finance_source_sets_required_transaction_date():
     assert value_expressions is not None
     assert len(target_columns.group(1).split(",")) == len(value_expressions.group(1).split(","))
     assert max(map(int, re.findall(r"\$(\d+)", value_expressions.group(1)))) == len(connection.rows[0])
+
+
+def test_post_finance_source_rejects_blank_description():
+    class FakeConnection:
+        async def executemany(self, sql, rows):
+            raise AssertionError("Jurnal tidak boleh disimpan tanpa deskripsi.")
+
+    try:
+        asyncio.run(post_finance_source(
+            FakeConnection(),
+            "transaction",
+            "TRX-TEST",
+            date(2026, 10, 30),
+            " ",
+            "USR-ADMIN",
+            [("Kas Tunai", "asset", Decimal("100"), Decimal("0"))],
+        ))
+    except ValueError as error:
+        assert "Deskripsi" in str(error)
+    else:
+        raise AssertionError("Deskripsi kosong harus menggagalkan pemostingan.")
 
 
 def test_post_finance_source_rejects_missing_master_account_uuid():

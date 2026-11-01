@@ -316,6 +316,8 @@ async def post_finance_source(
 ) -> None:
     if not lines:
         return
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("Deskripsi general ledger wajib diisi.")
     if account_codes is not None and len(account_codes) != len(lines):
         raise ValueError("Kode akun harus sesuai dengan jumlah baris jurnal.")
 
