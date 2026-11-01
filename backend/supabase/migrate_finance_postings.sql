@@ -11,7 +11,7 @@ set
   account_code = account.account_code,
   account_id = nullif(to_jsonb(master_account)->>'id', '')::uuid,
   account_name = case account.account_code
-    when '1-10001' then 'Kas'
+    when '1-10001' then 'Kas Tunai'
     when '4-40000' then 'Pendapatan'
   end
 from public.chart_of_accounts as master_account
@@ -100,7 +100,7 @@ from transaction_entries
 cross join lateral (
   values
     (
-      case when method = 'Cash' then 'Kas' else 'Bank' end,
+      case when method = 'Cash' then 'Kas Tunai' else 'Bank' end,
       'asset',
       case when method = 'Cash' then '1-10001' end,
       total::numeric,

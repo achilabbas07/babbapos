@@ -126,7 +126,7 @@ def transaction_lines(total: float, method: str, items: list[dict]) -> list[Jour
     amount = _money(total)
     lines: list[JournalLine] = []
     if amount > 0:
-        cash_account = "Kas" if method == "Cash" else "Bank"
+        cash_account = "Kas Tunai" if method == "Cash" else "Bank"
         lines.extend([
             (cash_account, "asset", amount, Decimal("0")),
             ("Pendapatan", "revenue", Decimal("0"), amount),
@@ -359,6 +359,32 @@ async def post_finance_source(
             )
 
     entry_id = uuid4()
+    account_names_by_code = {
+        "1-10001": "Kas Tunai",
+        "4-40000": "Pendapatan",
+    }
+    rows = []
+    for index, (account_name, account_type, debit, credit) in enumerate(lines):
+        account_code = account_codes[index] if account_codes is not None else None
+        account_name = account_names_by_code.get(account_code, account_name)
+        if not isinstance(account_name, str) or not account_name.strip():
+            raise ValueError("Nama akun general ledger wajib diisi.")
+        rows.append((
+            entry_id,
+            entry_date,
+            entry_date,
+            description,
+            account_name,
+            account_type,
+            account_code,
+            account_ids.get(account_code),
+            debit,
+            credit,
+            created_by,
+            source_type,
+            source_id,
+        ))
+
     await connection.executemany(
         """
         insert into public.general_ledger
@@ -366,24 +392,7 @@ async def post_finance_source(
            debit, credit, created_by, source_type, source_id)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         """,
-        [
-            (
-                entry_id,
-                entry_date,
-                entry_date,
-                description,
-                account_name,
-                account_type,
-                account_codes[index] if account_codes is not None else None,
-                account_ids.get(account_codes[index]) if account_codes is not None else None,
-                debit,
-                credit,
-                created_by,
-                source_type,
-                source_id,
-            )
-            for index, (account_name, account_type, debit, credit) in enumerate(lines)
-        ],
+        rows,
     )
 
 

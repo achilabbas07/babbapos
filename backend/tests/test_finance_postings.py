@@ -129,7 +129,7 @@ def test_cash_sale_posts_revenue_and_cost_of_goods():
     )
 
     assert lines == [
-        ("Kas", "asset", Decimal("1000.00"), Decimal("0")),
+        ("Kas Tunai", "asset", Decimal("1000.00"), Decimal("0")),
         ("Pendapatan", "revenue", Decimal("0"), Decimal("1000.00")),
         ("Beban HPP", "expense", Decimal("38.00"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("38.00")),
@@ -296,7 +296,7 @@ def test_post_finance_source_sets_required_transaction_date():
     assert "account_code" in connection.sql
     assert "account_id" in connection.sql
     assert [row[1:3] for row in connection.rows] == [(entry_date, entry_date)] * 2
-    assert [row[4] for row in connection.rows] == ["Kas", "Pendapatan"]
+    assert [row[4] for row in connection.rows] == ["Kas Tunai", "Pendapatan"]
     assert [row[6] for row in connection.rows] == ["1-10001", "4-40000"]
     assert [row[7] for row in connection.rows] == [
         UUID("00000000-0000-0000-0000-000000000001"),
@@ -330,7 +330,7 @@ def test_post_finance_source_rejects_missing_master_account_uuid():
             date(2026, 10, 30),
             "Penjualan test",
             "USR-ADMIN",
-            [("Kas", "asset", Decimal("100"), Decimal("0"))],
+            [("Kas Tunai", "asset", Decimal("100"), Decimal("0"))],
             ["1-10001"],
         ))
     except RuntimeError as error:
