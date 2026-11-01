@@ -7,6 +7,7 @@ from core import User, db, now_iso, require_roles
 
 router = APIRouter(prefix="/api")
 STAFF = require_roles("admin", "kasir")
+CUSTOMER_STAFF = require_roles("admin", "kasir", "waiter")
 
 
 class PromoCheckIn(BaseModel):
@@ -68,6 +69,6 @@ async def check_promo(body: PromoCheckIn, request: Request, _: User = Depends(ST
 
 
 @router.post("/discounts/points")
-async def check_points(body: PointsCheckIn, request: Request, _: User = Depends(STAFF)):
+async def check_points(body: PointsCheckIn, request: Request, _: User = Depends(CUSTOMER_STAFF)):
     await verify_admin_pin(request, body.adminPin)
     return await points_discount(body.customerId)

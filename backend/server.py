@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 ADMIN = require_roles("admin")
 STAFF = require_roles("admin", "kasir")
+CUSTOMER_STAFF = require_roles("admin", "kasir", "waiter")
 ANY = require_roles(*ALL_ROLES)
 
 
@@ -607,14 +608,14 @@ async def top_customers(_: User = Depends(ANY)):
 
 
 @api.post("/customers")
-async def create_customer(body: CustomerIn, _: User = Depends(STAFF)):
+async def create_customer(body: CustomerIn, _: User = Depends(CUSTOMER_STAFF)):
     c = Customer(id=await next_id("CUST"), **body.model_dump())
     await db.customers.insert_one(c.to_mongo())
     return c
 
 
 @api.put("/customers/{cid}")
-async def update_customer(cid: str, body: CustomerIn, _: User = Depends(STAFF)):
+async def update_customer(cid: str, body: CustomerIn, _: User = Depends(CUSTOMER_STAFF)):
     await get_or_404("customers", cid, "Pelanggan")
     await db.customers.update_one({"_id": cid}, {"$set": body.model_dump()})
     return Customer.from_mongo(await db.customers.find_one({"_id": cid}))

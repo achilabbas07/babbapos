@@ -13,7 +13,7 @@ export const NAV = [
   { to: "/targets", label: "Target Sales", icon: Target, roles: ["admin", "waiter"] },
   { to: "/cash", label: "Kas & Shift", icon: Wallet, roles: STAFF },
   { to: "/transactions", label: "Transaksi", icon: History, roles: ADMIN },
-  { to: "/customers", label: "Pelanggan", icon: Users, roles: STAFF },
+  { to: "/customers", label: "Pelanggan", icon: Users, roles: ALL },
   { to: "/products", label: "Produk & Resep", icon: UtensilsCrossed, roles: ADMIN },
   { to: "/inventory", label: "Stok Bahan", icon: Boxes, roles: ADMIN },
   { to: "/purchases", label: "Pembelian", icon: Truck, roles: ADMIN },

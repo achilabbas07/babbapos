@@ -34,7 +34,7 @@ export default function Users() {
 
   return (
     <div>
-      <PageHeader title="Pengguna & PIN" subtitle="Admin: akses penuh · Kasir: kasir, meja, transaksi, pelanggan · Waiter: meja & open bill.">
+      <PageHeader title="Pengguna & PIN" subtitle="Admin: akses penuh · Kasir: kasir, meja, transaksi, pelanggan · Waiter: meja, open bill, pelanggan.">
         <Button data-testid="add-user-button" onClick={() => setDialog({ role: "kasir" })}><Plus className="mr-1 h-4 w-4" />Tambah Pengguna</Button>
       </PageHeader>
       <div className="overflow-x-auto rounded-2xl border border-border bg-card">

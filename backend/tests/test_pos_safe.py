@@ -105,7 +105,7 @@ class TestAuth:
         assert waiter.post(f"{BASE}/transactions", json=body).status_code == 403
         assert kasir.get(f"{BASE}/inventory").status_code == 403
         assert waiter.get(f"{BASE}/customers").status_code == 200  # list allowed
-        assert waiter.post(f"{BASE}/customers", json={"name": "TEST_x"}).status_code == 403
+        assert waiter.put(f"{BASE}/customers/{data['c']['id']}", json={"name": "TEST_Cust_Updated"}).status_code == 200
         assert kasir.get(f"{BASE}/schema").status_code == 403
         assert requests.get(f"{BASE}/products").status_code == 401
 

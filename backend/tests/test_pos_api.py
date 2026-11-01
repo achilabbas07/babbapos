@@ -239,12 +239,13 @@ class TestFinance:
 
 # ---------- Customers / Users ----------
 class TestPeople:
-    def test_customer_crud(self, admin, kasir):
+    def test_customer_crud(self, admin, kasir, waiter):
         c = kasir.post(f"{BASE}/customers", json={"name": "TEST_C", "wa": "0812"}).json()
         assert c["points"] == 0
-        r = kasir.put(f"{BASE}/customers/{c['id']}", json={"name": "TEST_C2", "wa": "0813", "email": "a@b.c"})
+        r = waiter.put(f"{BASE}/customers/{c['id']}", json={"name": "TEST_C2", "wa": "0813", "email": "a@b.c"})
         assert r.json()["name"] == "TEST_C2"
         assert kasir.delete(f"{BASE}/customers/{c['id']}").status_code == 403
+        assert waiter.delete(f"{BASE}/customers/{c['id']}").status_code == 403
         assert admin.delete(f"{BASE}/customers/{c['id']}").status_code == 200
 
     def test_user_crud(self, admin):
