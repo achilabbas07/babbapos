@@ -196,8 +196,8 @@ export default function FinanceDashboard() {
         {accountsError && <div className="mb-4"><FinanceError message={accountsError} onRetry={loadDashboard} /></div>}
         {accountsLoading ? <LoadingPanel /> : (
           <FinanceTable
-            rows={hasMutations ? accounts : []}
-            emptyText="Tidak ada mutasi jurnal pada rentang tanggal ini."
+            rows={accounts}
+            emptyText="Belum ada akun di Chart of Accounts."
             columns={[
               { key: "account_code", label: "Kode Akun" },
               { key: "account_name", label: "Nama Akun" },

@@ -42,26 +42,24 @@ async def get_chart_of_accounts(
     accounts = await pool.fetch(
         """
         select
-          min(coalesce(
+          coalesce(
             nullif(to_jsonb(account)->>'account_code', ''),
             nullif(to_jsonb(account)->>'kode_akun', ''),
             nullif(to_jsonb(account)->>'code', ''),
             nullif(to_jsonb(account)->>'kode', ''),
             ''
-          )) as account_code,
-          min(coalesce(
+          ) as account_code,
+          coalesce(
             nullif(to_jsonb(account)->>'normal_balance', ''),
             nullif(to_jsonb(account)->>'normal_side', ''),
             nullif(to_jsonb(account)->>'saldo_normal', ''),
             ''
-          )) as normal_balance,
+          ) as normal_balance,
           account_name,
-          min(account_category) as account_category
+          account_category
         from public.chart_of_accounts as account
         where nullif(btrim(account_name), '') is not null
-        group by account_name
-        having count(distinct account_category) = 1
-        order by account_code, account_name
+        order by account_code, account_name, account_category
         """
     )
     ledger_rows = await pool.fetch(
@@ -103,7 +101,7 @@ async def get_chart_of_accounts(
             "has_mutations": bool(mutation and mutation["mutation_count"]),
         })
         result.append(account)
-    return result
+    return sorted(result, key=lambda account: (account["account_code"], account["account_name"]))
 
 
 def _money(value: Any) -> Decimal:

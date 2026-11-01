@@ -30,13 +30,16 @@ def test_chart_account_categories_map_to_journal_types():
     assert account_type_from_category("Kategori Tidak Dikenal") is None
 
 
-def test_get_chart_of_accounts_uses_filtered_mutations_and_normal_balance():
+def test_get_chart_of_accounts_keeps_unmutated_master_accounts_and_sorts_by_code():
     class FakePool:
         async def fetch(self, query, *args):
             if "from public.chart_of_accounts" in query:
+                assert "transaction_date" not in query
+                assert args == ()
                 return [
-                    {"account_code": "1-10001", "normal_balance": "debit", "account_name": "Kas", "account_category": "Aset Lancar"},
                     {"account_code": "4-10001", "normal_balance": "credit", "account_name": "Penjualan", "account_category": "Pendapatan"},
+                    {"account_code": "1-10002", "normal_balance": "debit", "account_name": "Bank", "account_category": "Aset Lancar"},
+                    {"account_code": "1-10001", "normal_balance": "debit", "account_name": "Kas", "account_category": "Aset Lancar"},
                 ]
             assert "from public.general_ledger" in query
             assert "transaction_date >= $1" in query
@@ -58,6 +61,15 @@ def test_get_chart_of_accounts_uses_filtered_mutations_and_normal_balance():
             "account_type": "asset",
             "balance": Decimal("125000"),
             "has_mutations": True,
+        },
+        {
+            "account_code": "1-10002",
+            "normal_balance": "debit",
+            "account_name": "Bank",
+            "account_category": "Aset Lancar",
+            "account_type": "asset",
+            "balance": 0,
+            "has_mutations": False,
         },
         {
             "account_code": "4-10001",
