@@ -23,11 +23,25 @@ begin
         and new.credit > 0
         and new.debit = 0 then
         new.account_name := 'Pendapatan';
-      elsif new.account_id is not null then
+      end if;
+
+      if nullif(btrim(new.account_name), '') is null
+        and (new.account_code is not null or new.account_id is not null) then
         select account.account_name
         into new.account_name
         from public.chart_of_accounts as account
-        where nullif(to_jsonb(account)->>'id', '')::uuid = new.account_id
+        where (
+          new.account_code is not null
+          and coalesce(
+            nullif(to_jsonb(account)->>'account_code', ''),
+            nullif(to_jsonb(account)->>'kode_akun', ''),
+            nullif(to_jsonb(account)->>'code', ''),
+            nullif(to_jsonb(account)->>'kode', '')
+          ) = new.account_code
+        ) or (
+          new.account_id is not null
+          and to_jsonb(account)->>'id' = new.account_id::text
+        )
         limit 1;
       end if;
   end case;
