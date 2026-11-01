@@ -372,6 +372,11 @@ async def post_finance_source(
         account_code = account_codes[index] if account_codes is not None else None
         account_name = account_names_by_code.get(account_code, account_name)
         if not isinstance(account_name, str) or not account_name.strip():
+            if source_type == "transaction" and account_type == "asset" and debit > 0 and credit == 0:
+                account_name = "Kas Tunai"
+            elif source_type == "transaction" and account_type == "revenue" and credit > 0 and debit == 0:
+                account_name = "Pendapatan"
+        if not isinstance(account_name, str) or not account_name.strip():
             raise ValueError("Nama akun general ledger wajib diisi.")
         rows.append((
             entry_id,

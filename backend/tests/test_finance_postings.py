@@ -336,6 +336,30 @@ def test_post_finance_source_uses_fallback_for_missing_description():
     assert connection.rows[0][3] == "Transaksi Kasir POS - TRX-TEST"
 
 
+def test_post_finance_source_fills_missing_transaction_account_names():
+    class FakeConnection:
+        rows = []
+
+        async def executemany(self, sql, rows):
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    asyncio.run(post_finance_source(
+        connection,
+        "transaction",
+        "TRX-TEST",
+        date(2026, 10, 30),
+        "Penjualan TRX-TEST",
+        "USR-ADMIN",
+        [
+            (None, "asset", Decimal("100"), Decimal("0")),
+            (None, "revenue", Decimal("0"), Decimal("100")),
+        ],
+    ))
+
+    assert [row[4] for row in connection.rows] == ["Kas Tunai", "Pendapatan"]
+
+
 def test_post_finance_source_rejects_missing_master_account_uuid():
     class FakeConnection:
         async def fetch(self, sql, account_codes):
