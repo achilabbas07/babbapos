@@ -3,6 +3,43 @@ alter table public.general_ledger
   add column if not exists source_type text,
   add column if not exists source_id text,
   add column if not exists account_code text;
+alter table public.general_ledger
+  add column if not exists account_id uuid;
+
+update public.general_ledger as ledger
+set
+  account_code = account.account_code,
+  account_id = nullif(to_jsonb(master_account)->>'id', '')::uuid,
+  account_name = case account.account_code
+    when '1-10001' then 'Kas'
+    when '4-40001' then 'Pendapatan Penjualan'
+  end
+from public.chart_of_accounts as master_account
+cross join lateral (
+  select coalesce(
+    nullif(to_jsonb(master_account)->>'account_code', ''),
+    nullif(to_jsonb(master_account)->>'kode_akun', ''),
+    nullif(to_jsonb(master_account)->>'code', ''),
+    nullif(to_jsonb(master_account)->>'kode', '')
+  ) as account_code
+) as account
+where ledger.source_type = 'transaction'
+  and account.account_code in ('1-10001', '4-40001')
+  and (
+    ledger.account_code = account.account_code
+    or (
+      account.account_code = '1-10001'
+      and ledger.account_type = 'asset'
+      and ledger.debit > 0
+      and ledger.account_name in ('Kas', 'Akun belum diklasifikasikan')
+    )
+    or (
+      account.account_code = '4-40001'
+      and ledger.account_type = 'revenue'
+      and ledger.credit > 0
+      and ledger.account_name in ('Penjualan', 'Pendapatan Penjualan', 'Akun belum diklasifikasikan')
+    )
+  );
 
 update public.general_ledger
 set transaction_date = entry_date
@@ -37,8 +74,8 @@ with transaction_entries as materialized (
   where t.total > 0 or coalesce(cost.amount, 0) > 0
 )
 insert into public.general_ledger
-  (entry_id, transaction_date, entry_date, description, account_name, account_type, debit, credit,
-   created_by, source_type, source_id)
+  (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code, account_id,
+   debit, credit, created_by, source_type, source_id)
 select
   entry_id,
   entry_date,
@@ -46,6 +83,8 @@ select
   description,
   line.account_name,
   line.account_type,
+  line.account_code,
+  nullif(to_jsonb(master_account)->>'id', '')::uuid,
   line.debit,
   line.credit,
   created_by,
@@ -54,11 +93,34 @@ select
 from transaction_entries
 cross join lateral (
   values
-    (case when method = 'Cash' then 'Kas' else 'Bank' end, 'asset', total::numeric, 0::numeric),
-    ('Penjualan', 'revenue', 0::numeric, total::numeric),
-    ('Beban HPP', 'expense', cost_of_goods, 0::numeric),
-    ('Persediaan bahan baku', 'asset', 0::numeric, cost_of_goods)
-) as line(account_name, account_type, debit, credit)
+    (
+      case when method = 'Cash' then 'Kas' else 'Bank' end,
+      'asset',
+      case when method = 'Cash' then '1-10001' end,
+      total::numeric,
+      0::numeric
+    ),
+    (
+      'Pendapatan Penjualan',
+      'revenue',
+      case when method = 'Cash' then '4-40001' end,
+      0::numeric,
+      total::numeric
+    ),
+    ('Beban HPP', 'expense', null::text, cost_of_goods, 0::numeric),
+    ('Persediaan bahan baku', 'asset', null::text, 0::numeric, cost_of_goods)
+) as line(account_name, account_type, account_code, debit, credit)
+left join lateral (
+  select account.*
+  from public.chart_of_accounts as account
+  where coalesce(
+    nullif(to_jsonb(account)->>'account_code', ''),
+    nullif(to_jsonb(account)->>'kode_akun', ''),
+    nullif(to_jsonb(account)->>'code', ''),
+    nullif(to_jsonb(account)->>'kode', '')
+  ) = line.account_code
+  limit 1
+) as master_account on line.account_code is not null
 where line.debit > 0 or line.credit > 0
 on conflict do nothing;
 

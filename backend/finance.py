@@ -129,7 +129,7 @@ def transaction_lines(total: float, method: str, items: list[dict]) -> list[Jour
         cash_account = "Kas" if method == "Cash" else "Bank"
         lines.extend([
             (cash_account, "asset", amount, Decimal("0")),
-            ("Penjualan", "revenue", Decimal("0"), amount),
+            ("Pendapatan Penjualan", "revenue", Decimal("0"), amount),
         ])
 
     cost_of_goods = _money(sum(
@@ -319,13 +319,52 @@ async def post_finance_source(
     if account_codes is not None and len(account_codes) != len(lines):
         raise ValueError("Kode akun harus sesuai dengan jumlah baris jurnal.")
 
+    account_ids: dict[str, Any] = {}
+    required_codes = sorted({code for code in account_codes or [] if code})
+    if required_codes:
+        accounts = await connection.fetch(
+            """
+            select
+              coalesce(
+                nullif(to_jsonb(account)->>'account_code', ''),
+                nullif(to_jsonb(account)->>'kode_akun', ''),
+                nullif(to_jsonb(account)->>'code', ''),
+                nullif(to_jsonb(account)->>'kode', '')
+              ) as account_code,
+              nullif(to_jsonb(account)->>'id', '')::uuid as account_id
+            from public.chart_of_accounts as account
+            where coalesce(
+              nullif(to_jsonb(account)->>'account_code', ''),
+              nullif(to_jsonb(account)->>'kode_akun', ''),
+              nullif(to_jsonb(account)->>'code', ''),
+              nullif(to_jsonb(account)->>'kode', '')
+            ) = any($1::text[])
+            """,
+            required_codes,
+        )
+        for account in accounts:
+            code = account["account_code"]
+            account_id = account["account_id"]
+            if code in account_ids and account_ids[code] != account_id:
+                raise RuntimeError(f"Kode akun {code} memiliki lebih dari satu akun master.")
+            account_ids[code] = account_id
+
+        missing_codes = [
+            code for code in required_codes
+            if account_ids.get(code) is None
+        ]
+        if missing_codes:
+            raise RuntimeError(
+                f"UUID akun master tidak ditemukan untuk kode akun: {', '.join(missing_codes)}."
+            )
+
     entry_id = uuid4()
     await connection.executemany(
         """
         insert into public.general_ledger
-          (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code,
+          (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code, account_id,
            debit, credit, created_by, source_type, source_id)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         """,
         [
             (
@@ -336,6 +375,7 @@ async def post_finance_source(
                 account_name,
                 account_type,
                 account_codes[index] if account_codes is not None else None,
+                account_ids.get(account_codes[index]) if account_codes is not None else None,
                 debit,
                 credit,
                 created_by,

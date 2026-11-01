@@ -6,6 +6,7 @@ create table if not exists public.general_ledger (
   account_name  text not null check (length(btrim(account_name)) > 0),
   account_type  text not null check (account_type in ('asset', 'liability', 'equity', 'revenue', 'expense')),
   account_code  text,
+  account_id    uuid,
   debit         numeric(16, 2) not null default 0 check (debit >= 0),
   credit        numeric(16, 2) not null default 0 check (credit >= 0),
   created_by    text references public.users(id) on delete set null,
@@ -21,10 +22,14 @@ alter table public.general_ledger
   add column if not exists account_name text not null default 'Akun belum diklasifikasikan',
   add column if not exists account_type text not null default 'asset',
   add column if not exists account_code text,
+  add column if not exists account_id uuid,
   add column if not exists debit numeric(16, 2) not null default 0,
   add column if not exists credit numeric(16, 2) not null default 0,
   add column if not exists created_by text,
   add column if not exists created_at timestamptz not null default now();
+
+alter table public.general_ledger
+  alter column account_name drop default;
 
 alter table public.general_ledger
   add column if not exists entry_id uuid;

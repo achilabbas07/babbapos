@@ -2,6 +2,7 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 import re
+from uuid import UUID
 
 from finance import (
     account_type_from_category,
@@ -129,7 +130,7 @@ def test_cash_sale_posts_revenue_and_cost_of_goods():
 
     assert lines == [
         ("Kas", "asset", Decimal("1000.00"), Decimal("0")),
-        ("Penjualan", "revenue", Decimal("0"), Decimal("1000.00")),
+        ("Pendapatan Penjualan", "revenue", Decimal("0"), Decimal("1000.00")),
         ("Beban HPP", "expense", Decimal("38.00"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("38.00")),
     ]
@@ -149,7 +150,7 @@ def test_non_cash_sale_uses_bank_and_rounds_cost_to_cents():
 
     assert lines == [
         ("Bank", "asset", Decimal("500.00"), Decimal("0")),
-        ("Penjualan", "revenue", Decimal("0"), Decimal("500.00")),
+        ("Pendapatan Penjualan", "revenue", Decimal("0"), Decimal("500.00")),
         ("Beban HPP", "expense", Decimal("10.11"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("10.11")),
     ]
@@ -266,6 +267,14 @@ def test_post_finance_source_sets_required_transaction_date():
         sql = ""
         rows = []
 
+        async def fetch(self, sql, account_codes):
+            assert "from public.chart_of_accounts" in sql
+            assert account_codes == ["1-10001", "4-40001"]
+            return [
+                {"account_code": "1-10001", "account_id": UUID("00000000-0000-0000-0000-000000000001")},
+                {"account_code": "4-40001", "account_id": UUID("00000000-0000-0000-0000-000000000002")},
+            ]
+
         async def executemany(self, sql, rows):
             self.sql = sql
             self.rows = list(rows)
@@ -279,20 +288,55 @@ def test_post_finance_source_sets_required_transaction_date():
         entry_date,
         "Penjualan test",
         "USR-ADMIN",
-        [("Kas", "asset", Decimal("100"), Decimal("0"))],
-        ["1-10001"],
+        transaction_lines(100, "Cash", []),
+        transaction_account_codes(100, "Cash", []),
     ))
 
     assert "transaction_date, entry_date" in connection.sql
     assert "account_code" in connection.sql
-    assert connection.rows[0][1:3] == (entry_date, entry_date)
-    assert connection.rows[0][6] == "1-10001"
+    assert "account_id" in connection.sql
+    assert [row[1:3] for row in connection.rows] == [(entry_date, entry_date)] * 2
+    assert [row[4] for row in connection.rows] == ["Kas", "Pendapatan Penjualan"]
+    assert [row[6] for row in connection.rows] == ["1-10001", "4-40001"]
+    assert [row[7] for row in connection.rows] == [
+        UUID("00000000-0000-0000-0000-000000000001"),
+        UUID("00000000-0000-0000-0000-000000000002"),
+    ]
+    assert [(row[8], row[9]) for row in connection.rows] == [
+        (Decimal("100.00"), Decimal("0")),
+        (Decimal("0"), Decimal("100.00")),
+    ]
     target_columns = re.search(r"insert into public\.general_ledger\s*\((.*?)\)\s*values", connection.sql, re.DOTALL)
     value_expressions = re.search(r"\bvalues\s*\((.*?)\)", connection.sql, re.DOTALL)
     assert target_columns is not None
     assert value_expressions is not None
     assert len(target_columns.group(1).split(",")) == len(value_expressions.group(1).split(","))
     assert max(map(int, re.findall(r"\$(\d+)", value_expressions.group(1)))) == len(connection.rows[0])
+
+
+def test_post_finance_source_rejects_missing_master_account_uuid():
+    class FakeConnection:
+        async def fetch(self, sql, account_codes):
+            return []
+
+        async def executemany(self, sql, rows):
+            raise AssertionError("Jurnal tidak boleh disimpan tanpa UUID akun master.")
+
+    try:
+        asyncio.run(post_finance_source(
+            FakeConnection(),
+            "transaction",
+            "TRX-TEST",
+            date(2026, 10, 30),
+            "Penjualan test",
+            "USR-ADMIN",
+            [("Kas", "asset", Decimal("100"), Decimal("0"))],
+            ["1-10001"],
+        ))
+    except RuntimeError as error:
+        assert "1-10001" in str(error)
+    else:
+        raise AssertionError("UUID akun master yang hilang harus menggagalkan pemostingan.")
 
 
 def test_dashboard_neraca_kas_reads_summary_view():
