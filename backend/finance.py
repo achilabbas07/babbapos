@@ -309,15 +309,17 @@ async def post_finance_source(
     source_type: str,
     source_id: str,
     entry_date: date,
-    description: str,
+    description: Optional[str],
     created_by: Optional[str],
     lines: Sequence[JournalLine],
     account_codes: Optional[Sequence[Optional[str]]] = None,
 ) -> None:
     if not lines:
         return
-    if not isinstance(description, str) or not description.strip():
-        raise ValueError("Deskripsi general ledger wajib diisi.")
+    description = description.strip() if isinstance(description, str) else ""
+    if not description:
+        description_label = "Transaksi Kasir POS" if source_type == "transaction" else source_type.replace("_", " ").capitalize()
+        description = f"{description_label} - {source_id}"
     if account_codes is not None and len(account_codes) != len(lines):
         raise ValueError("Kode akun harus sesuai dengan jumlah baris jurnal.")
 

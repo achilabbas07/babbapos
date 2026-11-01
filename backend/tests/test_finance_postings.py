@@ -315,25 +315,25 @@ def test_post_finance_source_sets_required_transaction_date():
     assert max(map(int, re.findall(r"\$(\d+)", value_expressions.group(1)))) == len(connection.rows[0])
 
 
-def test_post_finance_source_rejects_blank_description():
+def test_post_finance_source_uses_fallback_for_missing_description():
     class FakeConnection:
-        async def executemany(self, sql, rows):
-            raise AssertionError("Jurnal tidak boleh disimpan tanpa deskripsi.")
+        rows = []
 
-    try:
-        asyncio.run(post_finance_source(
-            FakeConnection(),
-            "transaction",
-            "TRX-TEST",
-            date(2026, 10, 30),
-            " ",
-            "USR-ADMIN",
-            [("Kas Tunai", "asset", Decimal("100"), Decimal("0"))],
-        ))
-    except ValueError as error:
-        assert "Deskripsi" in str(error)
-    else:
-        raise AssertionError("Deskripsi kosong harus menggagalkan pemostingan.")
+        async def executemany(self, sql, rows):
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    asyncio.run(post_finance_source(
+        connection,
+        "transaction",
+        "TRX-TEST",
+        date(2026, 10, 30),
+        None,
+        "USR-ADMIN",
+        [("Kas Tunai", "asset", Decimal("100"), Decimal("0"))],
+    ))
+
+    assert connection.rows[0][3] == "Transaksi Kasir POS - TRX-TEST"
 
 
 def test_post_finance_source_rejects_missing_master_account_uuid():
