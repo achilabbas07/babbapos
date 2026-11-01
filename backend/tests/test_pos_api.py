@@ -240,13 +240,20 @@ class TestFinance:
 # ---------- Customers / Users ----------
 class TestPeople:
     def test_customer_crud(self, admin, kasir, waiter):
-        c = kasir.post(f"{BASE}/customers", json={"name": "TEST_C", "wa": "0812"}).json()
+        created = []
+        for role_client, role in ((admin, "admin"), (kasir, "kasir"), (waiter, "waiter")):
+            response = role_client.post(f"{BASE}/customers", json={"name": f"TEST_C_{role}", "wa": "0812"})
+            assert response.status_code == 200, response.text
+            created.append(response.json())
+
+        c = next(customer for customer in created if customer["name"] == "TEST_C_kasir")
         assert c["points"] == 0
         r = waiter.put(f"{BASE}/customers/{c['id']}", json={"name": "TEST_C2", "wa": "0813", "email": "a@b.c"})
         assert r.json()["name"] == "TEST_C2"
-        assert kasir.delete(f"{BASE}/customers/{c['id']}").status_code == 403
-        assert waiter.delete(f"{BASE}/customers/{c['id']}").status_code == 403
-        assert admin.delete(f"{BASE}/customers/{c['id']}").status_code == 200
+        for customer in created:
+            assert kasir.delete(f"{BASE}/customers/{customer['id']}").status_code == 403
+            assert waiter.delete(f"{BASE}/customers/{customer['id']}").status_code == 403
+            assert admin.delete(f"{BASE}/customers/{customer['id']}").status_code == 200
 
     def test_user_crud(self, admin):
         assert admin.post(f"{BASE}/users", json={"name": "TEST_dup", "role": "kasir", "pin": "2222"}).status_code == 409

@@ -1,4 +1,4 @@
-import { errMsg } from "./api";
+import { errMsg, getBackendConfigError } from "./api";
 
 describe("errMsg", () => {
   it("uses backend error messages from 500 responses", () => {
@@ -14,5 +14,16 @@ describe("errMsg", () => {
   it("explains how to recover from a server network error", () => {
     expect(errMsg({ message: "Network Error" }))
       .toContain("Periksa koneksi internet dan coba lagi");
+  });
+});
+
+describe("getBackendConfigError", () => {
+  it("rejects a localhost backend for a public frontend", () => {
+    expect(getBackendConfigError("http://localhost:8001", "babbapos.vercel.app"))
+      .toContain("Backend produksi masih diarahkan ke localhost");
+  });
+
+  it("allows localhost during local development", () => {
+    expect(getBackendConfigError("http://localhost:8001", "localhost")).toBe("");
   });
 });

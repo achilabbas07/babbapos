@@ -93,6 +93,8 @@ REACT_APP_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 
 `REACT_APP_BACKEND_URL` adalah origin backend tanpa akhiran `/api` (contoh lokal di atas memakai port yang digunakan tes backend proyek ini). Pastikan backend benar-benar berjalan pada alamat tersebut. Jika backend berada di port/host lain, gunakan alamat yang sesuai. Simpan `.env` di `frontend/.env`, bukan di root repository. Setelah mengubahnya, hentikan dan jalankan ulang dev server (`npm start`); CRA hanya membaca environment ketika proses dimulai.
 
+Untuk deployment Vercel, atur `REACT_APP_BACKEND_URL` di **Project Settings -> Environment Variables** ke origin backend produksi (tanpa `/api` dan bukan `localhost`), untuk environment Production dan Preview sesuai kebutuhan. Perubahan environment memerlukan deployment ulang karena CRA menyematkan nilainya ke bundle saat build. Frontend pada host publik akan menolak konfigurasi backend `localhost` dan menampilkan pesan konfigurasi alih-alih mengirim request ke komputer pengguna.
+
 Login POS menampilkan grid pengguna dari `GET /api/auth/users`. Setelah pengguna dipilih, frontend mengirim ID pengguna dan PIN 4-6 digit ke `POST /api/auth/login`. Backend memverifikasi PIN terhadap hash bcrypt dan mengembalikan token serta data pengguna. Token disimpan di `localStorage` dan dikirim untuk otorisasi request POS; pemeriksaan akses tetap dilakukan backend. `POST /api/login` juga tersedia untuk klien yang mengirim nama dan PIN.
 
 Variabel Supabase di atas masih digunakan fitur POS lain yang memanggil RPC Supabase, tetapi tidak diperlukan untuk login. Nilai anon/publishable key memang digunakan di browser; keamanan database harus ditegakkan dengan RLS. Jangan pernah gunakan `service_role` key di frontend.
