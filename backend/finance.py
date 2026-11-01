@@ -65,6 +65,7 @@ async def get_chart_of_accounts(
     ledger_rows = await pool.fetch(
         """
         select
+          account_code,
           account_name,
           account_type,
           sum(debit) as total_debit,
@@ -73,25 +74,38 @@ async def get_chart_of_accounts(
         from public.general_ledger
         where ($1::date is null or transaction_date >= $1)
           and ($2::date is null or transaction_date <= $2)
-        group by account_name, account_type
+        group by account_code, account_name, account_type
         """,
         start_date,
         end_date,
     )
-    balances = {
-        (row["account_name"], row["account_type"]): {
-            "debit": row["total_debit"],
-            "credit": row["total_credit"],
-            "mutation_count": row["mutation_count"],
-        }
-        for row in ledger_rows
-    }
+    balances_by_code: dict[tuple[str, str], dict[str, Any]] = {}
+    balances_by_name: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in ledger_rows:
+        balances = balances_by_code if row["account_code"] else balances_by_name
+        key = (
+            (row["account_code"], row["account_type"])
+            if row["account_code"]
+            else (row["account_name"], row["account_type"])
+        )
+        if key not in balances:
+            balances[key] = {
+                "debit": row["total_debit"],
+                "credit": row["total_credit"],
+                "mutation_count": row["mutation_count"],
+            }
+        else:
+            balances[key]["debit"] += row["total_debit"]
+            balances[key]["credit"] += row["total_credit"]
+            balances[key]["mutation_count"] += row["mutation_count"]
 
     result = []
     for account_row in accounts:
         account = dict(account_row)
         account_type = account_type_from_category(account["account_category"])
-        mutation = balances.get((account["account_name"], account_type))
+        mutation = balances_by_code.get((account["account_code"], account_type))
+        if mutation is None:
+            mutation = balances_by_name.get((account["account_name"], account_type))
         normal_balance = _normal_balance_side(account, account_type)
         debit = mutation["debit"] if mutation else 0
         credit = mutation["credit"] if mutation else 0
@@ -128,6 +142,18 @@ def transaction_lines(total: float, method: str, items: list[dict]) -> list[Jour
             ("Persediaan bahan baku", "asset", Decimal("0"), cost_of_goods),
         ])
     return lines
+
+
+def transaction_account_codes(
+    total: float,
+    method: str,
+    items: list[dict],
+) -> list[Optional[str]]:
+    lines = transaction_lines(total, method, items)
+    account_codes: list[Optional[str]] = [None] * len(lines)
+    if _money(total) > 0 and method == "Cash":
+        account_codes[:2] = ["1-10001", "4-40001"]
+    return account_codes
 
 
 def purchase_lines(total_cost: float) -> list[JournalLine]:
@@ -286,17 +312,20 @@ async def post_finance_source(
     description: str,
     created_by: Optional[str],
     lines: Sequence[JournalLine],
+    account_codes: Optional[Sequence[Optional[str]]] = None,
 ) -> None:
     if not lines:
         return
+    if account_codes is not None and len(account_codes) != len(lines):
+        raise ValueError("Kode akun harus sesuai dengan jumlah baris jurnal.")
 
     entry_id = uuid4()
     await connection.executemany(
         """
         insert into public.general_ledger
-          (entry_id, transaction_date, entry_date, description, account_name, account_type, debit, credit,
-           created_by, source_type, source_id)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code,
+           debit, credit, created_by, source_type, source_id)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         """,
         [
             (
@@ -306,13 +335,14 @@ async def post_finance_source(
                 description,
                 account_name,
                 account_type,
+                account_codes[index] if account_codes is not None else None,
                 debit,
                 credit,
                 created_by,
                 source_type,
                 source_id,
             )
-            for account_name, account_type, debit, credit in lines
+            for index, (account_name, account_type, debit, credit) in enumerate(lines)
         ],
     )
 

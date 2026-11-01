@@ -28,6 +28,7 @@ from finance import (
     post_purchase_journal,
     post_finance_source,
     purchase_journal_lines,
+    transaction_account_codes,
     transaction_lines,
 )
 
@@ -940,6 +941,7 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
                     f"Penjualan {trx.id}",
                     user.id,
                     transaction_lines(trx.total, trx.method, items),
+                    transaction_account_codes(trx.total, trx.method, items),
                 )
                 await consume_checkout_stock(conn, items)
     except asyncpg.PostgresError as err:

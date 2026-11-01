@@ -1,7 +1,8 @@
 alter table public.general_ledger
   add column if not exists transaction_date date,
   add column if not exists source_type text,
-  add column if not exists source_id text;
+  add column if not exists source_id text,
+  add column if not exists account_code text;
 
 update public.general_ledger
 set transaction_date = entry_date

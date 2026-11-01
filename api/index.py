@@ -19,7 +19,10 @@ from finance import (
     get_chart_of_accounts,
     get_recent_finance_transactions,
     post_cash_expense_journal,
+    post_finance_source,
     post_purchase_payment_journal,
+    transaction_account_codes,
+    transaction_lines,
 )
 
 import logging
@@ -793,6 +796,16 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         async with db.pool.acquire() as conn:
             async with conn.transaction():
                 await db.transactions.insert_one(trx.to_mongo(), connection=conn)
+                await post_finance_source(
+                    conn,
+                    "transaction",
+                    trx.id,
+                    date.fromisoformat(trx.date[:10]),
+                    f"Penjualan {trx.id}",
+                    user.id,
+                    transaction_lines(trx.total, trx.method, items),
+                    transaction_account_codes(trx.total, trx.method, items),
+                )
                 await consume_checkout_stock(conn, items)
     except asyncpg.PostgresError as err:
         message = getattr(err, "message", None) or str(err)

@@ -17,6 +17,7 @@ from finance import (
     debt_payment_lines,
     purchase_journal_lines,
     purchase_lines,
+    transaction_account_codes,
     transaction_lines,
 )
 
@@ -46,8 +47,8 @@ def test_get_chart_of_accounts_keeps_unmutated_master_accounts_and_sorts_by_code
             assert "transaction_date <= $2" in query
             assert args == (date(2026, 10, 1), date(2026, 10, 31))
             return [
-                {"account_name": "Kas", "account_type": "asset", "total_debit": Decimal("150000"), "total_credit": Decimal("25000"), "mutation_count": 2},
-                {"account_name": "Penjualan", "account_type": "revenue", "total_debit": Decimal("0"), "total_credit": Decimal("300000"), "mutation_count": 1},
+                {"account_code": None, "account_name": "Kas", "account_type": "asset", "total_debit": Decimal("150000"), "total_credit": Decimal("25000"), "mutation_count": 2},
+                {"account_code": None, "account_name": "Penjualan", "account_type": "revenue", "total_debit": Decimal("0"), "total_credit": Decimal("300000"), "mutation_count": 1},
             ]
 
     rows = asyncio.run(get_chart_of_accounts(FakePool(), date(2026, 10, 1), date(2026, 10, 31)))
@@ -83,6 +84,42 @@ def test_get_chart_of_accounts_keeps_unmutated_master_accounts_and_sorts_by_code
     ]
 
 
+def test_chart_of_accounts_matches_finance_postings_by_code():
+    class FakePool:
+        async def fetch(self, query, *args):
+            if "from public.chart_of_accounts" in query:
+                return [{
+                    "account_code": "4-40001",
+                    "normal_balance": "credit",
+                    "account_name": "Pendapatan Penjualan",
+                    "account_category": "Pendapatan",
+                }]
+            return [
+                {
+                    "account_code": "4-40001",
+                    "account_name": "Penjualan",
+                    "account_type": "revenue",
+                    "total_debit": Decimal("0"),
+                    "total_credit": Decimal("700"),
+                    "mutation_count": 1,
+                },
+                {
+                    "account_code": "4-40001",
+                    "account_name": "Penjualan Lama",
+                    "account_type": "revenue",
+                    "total_debit": Decimal("0"),
+                    "total_credit": Decimal("300"),
+                    "mutation_count": 1,
+                },
+            ]
+
+    rows = asyncio.run(get_chart_of_accounts(FakePool()))
+
+    assert rows[0]["account_name"] == "Pendapatan Penjualan"
+    assert rows[0]["balance"] == Decimal("1000")
+    assert rows[0]["has_mutations"] is True
+
+
 def test_cash_sale_posts_revenue_and_cost_of_goods():
     lines = transaction_lines(
         1000,
@@ -96,6 +133,15 @@ def test_cash_sale_posts_revenue_and_cost_of_goods():
         ("Beban HPP", "expense", Decimal("38.00"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("38.00")),
     ]
+
+
+def test_cash_sale_uses_required_account_codes():
+    assert transaction_account_codes(
+        1000,
+        "Cash",
+        [{"hpp": 12.5, "qty": 2}],
+    ) == ["1-10001", "4-40001", None, None]
+    assert transaction_account_codes(1000, "QRIS", []) == [None, None]
 
 
 def test_non_cash_sale_uses_bank_and_rounds_cost_to_cents():
@@ -234,10 +280,13 @@ def test_post_finance_source_sets_required_transaction_date():
         "Penjualan test",
         "USR-ADMIN",
         [("Kas", "asset", Decimal("100"), Decimal("0"))],
+        ["1-10001"],
     ))
 
     assert "transaction_date, entry_date" in connection.sql
+    assert "account_code" in connection.sql
     assert connection.rows[0][1:3] == (entry_date, entry_date)
+    assert connection.rows[0][6] == "1-10001"
     target_columns = re.search(r"insert into public\.general_ledger\s*\((.*?)\)\s*values", connection.sql, re.DOTALL)
     value_expressions = re.search(r"\bvalues\s*\((.*?)\)", connection.sql, re.DOTALL)
     assert target_columns is not None
