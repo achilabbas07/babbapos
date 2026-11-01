@@ -61,10 +61,14 @@ def create_token(user_id: str) -> str:
 
 
 async def next_id(prefix: str, width: int = 3) -> str:
-    doc = await db.counters.find_one_and_update(
-        {"_id": prefix}, {"$inc": {"seq": 1}}, upsert=True, return_document=ReturnDocument.AFTER
-    )
-    return f"{prefix}-{doc['seq']:0{width}d}"
+    if prefix == "CUST":
+        seq = await db.next_customer_seq()
+    else:
+        doc = await db.counters.find_one_and_update(
+            {"_id": prefix}, {"$inc": {"seq": 1}}, upsert=True, return_document=ReturnDocument.AFTER
+        )
+        seq = doc["seq"]
+    return f"{prefix}-{seq:0{width}d}"
 
 
 class BaseDocument(BaseModel):

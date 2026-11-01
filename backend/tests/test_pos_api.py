@@ -2,6 +2,7 @@
 # inventory, purchases, expenses, reports, customers, users, schema
 import math
 import os
+import re
 import uuid
 
 import pytest
@@ -240,11 +241,22 @@ class TestFinance:
 # ---------- Customers / Users ----------
 class TestPeople:
     def test_customer_crud(self, admin, kasir, waiter):
+        existing_ids = kasir.get(f"{BASE}/customers").json()
+        existing_sequences = [
+            int(match.group(1))
+            for customer in existing_ids
+            if (match := re.fullmatch(r"CUST-(\d+)", customer["id"]))
+        ]
+        highest_existing_sequence = max(existing_sequences, default=0)
+
         created = []
         for role_client, role in ((admin, "admin"), (kasir, "kasir"), (waiter, "waiter")):
             response = role_client.post(f"{BASE}/customers", json={"name": f"TEST_C_{role}", "wa": "0812"})
             assert response.status_code == 200, response.text
-            created.append(response.json())
+            customer = response.json()
+            match = re.fullmatch(r"CUST-(\d+)", customer["id"])
+            assert match and int(match.group(1)) > highest_existing_sequence
+            created.append(customer)
 
         c = next(customer for customer in created if customer["name"] == "TEST_C_kasir")
         assert c["points"] == 0

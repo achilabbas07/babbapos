@@ -241,6 +241,20 @@ class PGDatabase:
         for r in rows:
             self.columns.setdefault(r["table_name"], {})[r["column_name"]] = r["data_type"]
 
+    async def next_customer_seq(self) -> int:
+        await self.connect()
+        return await self.pool.fetchval(
+            """
+            insert into public.counters (id, seq)
+            select 'CUST', coalesce(max(substring(id from '^CUST-([0-9]+)$')::bigint), 0) + 1
+            from public.customers
+            where id ~ '^CUST-[0-9]+$'
+            on conflict (id) do update
+            set seq = greatest(counters.seq + 1, excluded.seq)
+            returning seq
+            """
+        )
+
     async def close(self):
         if self.pool:
             await self.pool.close()
