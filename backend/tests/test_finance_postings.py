@@ -7,6 +7,7 @@ from uuid import UUID
 from finance import (
     account_type_from_category,
     expense_lines,
+    get_account_by_payment_method,
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
     get_recent_finance_transactions,
@@ -142,7 +143,98 @@ def test_cash_sale_uses_required_account_codes():
         "Cash",
         [{"hpp": 12.5, "qty": 2}],
     ) == ["1-10001", "4-40000", None, None]
-    assert transaction_account_codes(1000, "QRIS", []) == [None, None]
+    assert transaction_account_codes(1000, "QRIS", []) == ["1-10002", "4-40000"]
+
+
+def test_payment_methods_map_to_the_project_chart_of_accounts_codes():
+    assert get_account_by_payment_method("Tunai") == "1-10001"
+    assert get_account_by_payment_method("Cash") == "1-10001"
+    for method in ("QRIS", "Debit", "Card", "Credit", "Credit Card"):
+        assert get_account_by_payment_method(method) == "1-10002"
+
+
+def test_unknown_payment_methods_are_rejected():
+    try:
+        get_account_by_payment_method("Transfer")
+    except ValueError as error:
+        assert "tidak didukung" in str(error)
+    else:
+        raise AssertionError("Metode pembayaran yang tidak dikenal harus ditolak.")
+
+
+def test_payment_aliases_are_normalized_for_transaction_storage():
+    from finance import normalize_payment_method
+
+    assert normalize_payment_method(" Tunai ") == "Cash"
+    assert normalize_payment_method("Credit") == "Card"
+    assert normalize_payment_method("Credit Card") == "Card"
+
+
+def test_payment_fee_is_posted_to_mdr_expense_account_and_balances_sale():
+    lines = transaction_lines(1000, "QRIS", [], admin_fee=25)
+    codes = transaction_account_codes(1000, "QRIS", [], admin_fee=25)
+
+    assert lines == [
+        ("Bank", "asset", Decimal("975.00"), Decimal("0")),
+        ("Beban MDR", "expense", Decimal("25.00"), Decimal("0")),
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("1000.00")),
+    ]
+    assert codes == ["1-10002", "6-60203", "4-40000"]
+
+
+def test_qris_and_mdr_lines_keep_master_account_codes_and_names():
+    class FakeConnection:
+        rows = []
+
+        async def fetch(self, query, account_codes):
+            names = {
+                "1-10002": "Kas Bank / QRIS",
+                "4-40000": "Penjualan",
+                "6-60203": "Beban Administrasi Bank",
+            }
+            return [
+                {
+                    "account_code": code,
+                    "account_name": name,
+                    "account_id": UUID(f"00000000-0000-0000-0000-{index:012d}"),
+                }
+                for index, (code, name) in enumerate(names.items(), start=1)
+                if code in account_codes
+            ]
+
+        async def executemany(self, query, rows):
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    lines = transaction_lines(1000, "QRIS", [], admin_fee=25)
+    codes = transaction_account_codes(1000, "QRIS", [], admin_fee=25)
+    asyncio.run(post_finance_source(
+        connection,
+        "transaction",
+        "TRX-MDR-TEST",
+        date(2026, 11, 2),
+        "Penjualan dengan MDR",
+        "USR-ADMIN",
+        lines,
+        codes,
+    ))
+
+    assert [row[4] for row in connection.rows] == [
+        "Kas Bank / QRIS",
+        "Beban Administrasi Bank",
+        "Pendapatan",
+    ]
+    assert [row[6] for row in connection.rows] == ["1-10002", "6-60203", "4-40000"]
+    assert sum(row[8] for row in connection.rows) == sum(row[9] for row in connection.rows)
+
+
+def test_payment_fee_must_not_exceed_sale_total():
+    try:
+        transaction_lines(100, "Card", [], admin_fee=101)
+    except ValueError as error:
+        assert "Biaya admin/MDR" in str(error)
+    else:
+        raise AssertionError("Biaya admin/MDR melebihi total harus ditolak.")
 
 
 def test_non_cash_sale_uses_bank_and_rounds_cost_to_cents():

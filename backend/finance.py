@@ -173,15 +173,60 @@ def _money(value: Any) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def transaction_lines(total: float, method: str, items: list[dict]) -> list[JournalLine]:
-    amount = _money(total)
+def normalize_payment_method(payment_method: str) -> str:
+    if not isinstance(payment_method, str):
+        raise ValueError("Metode pembayaran tidak valid.")
+
+    methods = {
+        "cash": "Cash",
+        "tunai": "Cash",
+        "qris": "QRIS",
+        "debit": "Debit",
+        "card": "Card",
+        "credit": "Card",
+        "credit card": "Card",
+    }
+    method = methods.get(payment_method.strip().casefold())
+    if method is None:
+        raise ValueError(f"Metode pembayaran tidak didukung: {payment_method!r}.")
+    return method
+
+
+def get_account_by_payment_method(payment_method: str) -> str:
+    method = normalize_payment_method(payment_method)
+    return "1-10001" if method == "Cash" else "1-10002"
+
+
+def _transaction_amounts(total: Any, admin_fee: Any) -> tuple[Decimal, Decimal]:
+    try:
+        amount = _money(total)
+        fee = _money(admin_fee)
+    except (InvalidOperation, TypeError, ValueError) as error:
+        raise ValueError("Total transaksi atau biaya admin/MDR tidak valid.") from error
+    if not amount.is_finite() or amount < 0:
+        raise ValueError("Total transaksi harus berupa nilai positif yang valid.")
+    if not fee.is_finite() or fee < 0 or fee > amount:
+        raise ValueError("Biaya admin/MDR harus bernilai antara nol dan total transaksi.")
+    return amount, fee
+
+
+def transaction_lines(
+    total: float,
+    method: str,
+    items: list[dict],
+    admin_fee: Any = 0,
+) -> list[JournalLine]:
+    amount, fee = _transaction_amounts(total, admin_fee)
+    payment_account_code = get_account_by_payment_method(method)
     lines: list[JournalLine] = []
     if amount > 0:
-        cash_account = "Kas Tunai" if method == "Cash" else "Bank"
-        lines.extend([
-            (cash_account, "asset", amount, Decimal("0")),
-            ("Pendapatan", "revenue", Decimal("0"), amount),
-        ])
+        settlement_amount = amount - fee
+        if settlement_amount > 0:
+            payment_account_name = "Kas Tunai" if payment_account_code == "1-10001" else "Bank"
+            lines.append((payment_account_name, "asset", settlement_amount, Decimal("0")))
+        if fee > 0:
+            lines.append(("Beban MDR", "expense", fee, Decimal("0")))
+        lines.append(("Pendapatan", "revenue", Decimal("0"), amount))
 
     cost_of_goods = _money(sum(
         Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
@@ -199,11 +244,22 @@ def transaction_account_codes(
     total: float,
     method: str,
     items: list[dict],
+    admin_fee: Any = 0,
 ) -> list[Optional[str]]:
-    lines = transaction_lines(total, method, items)
-    account_codes: list[Optional[str]] = [None] * len(lines)
-    if _money(total) > 0 and method == "Cash":
-        account_codes[:2] = ["1-10001", "4-40000"]
+    amount, fee = _transaction_amounts(total, admin_fee)
+    payment_account_code = get_account_by_payment_method(method)
+    account_codes: list[Optional[str]] = []
+    if amount > 0:
+        if amount - fee > 0:
+            account_codes.append(payment_account_code)
+        if fee > 0:
+            account_codes.append("6-60203")
+        account_codes.append("4-40000")
+    if _money(sum(
+        Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
+        for item in items
+    )) > 0:
+        account_codes.extend([None, None])
     return account_codes
 
 
@@ -375,6 +431,7 @@ async def post_finance_source(
         raise ValueError("Kode akun harus sesuai dengan jumlah baris jurnal.")
 
     account_ids: dict[str, Any] = {}
+    master_account_names: dict[str, str] = {}
     required_codes = sorted({code for code in account_codes or [] if code})
     if required_codes:
         accounts = await connection.fetch(
@@ -386,6 +443,10 @@ async def post_finance_source(
                 nullif(to_jsonb(account)->>'code', ''),
                 nullif(to_jsonb(account)->>'kode', '')
               ) as account_code,
+              coalesce(
+                nullif(btrim(to_jsonb(account)->>'nama_akun'), ''),
+                nullif(btrim(to_jsonb(account)->>'account_name'), '')
+              ) as account_name,
               nullif(to_jsonb(account)->>'id', '')::uuid as account_id
             from public.chart_of_accounts as account
             where coalesce(
@@ -403,6 +464,9 @@ async def post_finance_source(
             if code in account_ids and account_ids[code] != account_id:
                 raise RuntimeError(f"Kode akun {code} memiliki lebih dari satu akun master.")
             account_ids[code] = account_id
+            account_name = account.get("account_name")
+            if isinstance(account_name, str) and account_name.strip():
+                master_account_names[code] = account_name.strip()
 
         missing_codes = [
             code for code in required_codes
@@ -421,7 +485,11 @@ async def post_finance_source(
     rows = []
     for index, (account_name, account_type, debit, credit) in enumerate(lines):
         account_code = account_codes[index] if account_codes is not None else None
-        account_name = account_names_by_code.get(account_code, account_name)
+        account_name = (
+            account_names_by_code.get(account_code)
+            or master_account_names.get(account_code)
+            or account_name
+        )
         if not isinstance(account_name, str) or not account_name.strip():
             if source_type == "transaction" and account_type == "asset" and debit > 0 and credit == 0:
                 account_name = "Kas Tunai"

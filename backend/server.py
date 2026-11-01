@@ -24,6 +24,7 @@ from finance import (
     get_chart_of_accounts,
     get_laporan_arus_kas,
     get_recent_finance_transactions,
+    normalize_payment_method,
     post_cash_expense_journal,
     post_debt_payment_journal,
     post_purchase_journal,
@@ -43,7 +44,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.middleware.cors import CORSMiddleware
 import os
 
@@ -202,6 +203,11 @@ class TransactionIn(OpenBillIn):
     promoCode: Optional[str] = None
     redeemPoints: bool = False
     discountPin: Optional[str] = None
+
+    @field_validator("method", mode="before")
+    @classmethod
+    def normalize_payment_method(cls, value):
+        return normalize_payment_method(value)
 
 
 class PurchaseItemIn(BaseModel):
