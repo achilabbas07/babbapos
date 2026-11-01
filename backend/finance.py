@@ -1,10 +1,61 @@
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional, Sequence
 from uuid import uuid4
 
 # Struktur data untuk baris jurnal umum
 JournalLine = tuple[str, str, Decimal, Decimal]
+
+
+async def get_account_balances(pool: Any) -> list[dict[str, Any]]:
+    rows = await pool.fetch(
+        """
+        select
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'kode_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'account_code'), '')
+          ) as kode_akun,
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'nama_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'account_name'), '')
+          ) as nama_akun,
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'kategori_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'account_category'), '')
+          ) as kategori_akun,
+          to_jsonb(account)->>'saldo_terupdate' as saldo_terupdate
+        from public.chart_of_accounts as account
+        order by kode_akun
+        """
+    )
+
+    accounts = []
+    seen_codes = set()
+    for row in rows:
+        account = dict(row)
+        code = str(account.get("kode_akun") or "").strip()
+        name = str(account.get("nama_akun") or "").strip()
+        category = str(account.get("kategori_akun") or "").strip()
+        if not code or not name or not category:
+            raise ValueError("Chart of Accounts berisi kode, nama, atau kategori akun kosong.")
+        if code in seen_codes:
+            raise ValueError(f"Chart of Accounts berisi kode akun duplikat: {code}.")
+        seen_codes.add(code)
+
+        try:
+            balance = Decimal(str(account["saldo_terupdate"]))
+        except (InvalidOperation, KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"Saldo akun {code} bukan nilai numerik yang valid.") from error
+        if not balance.is_finite():
+            raise ValueError(f"Saldo akun {code} bukan nilai numerik yang valid.")
+
+        accounts.append({
+            "kode_akun": code,
+            "nama_akun": name,
+            "kategori_akun": category,
+            "saldo_terupdate": balance,
+        })
+    return accounts
 
 
 def account_type_from_category(account_category: Optional[str]) -> Optional[str]:

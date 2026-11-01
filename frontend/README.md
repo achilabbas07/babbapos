@@ -97,6 +97,8 @@ Untuk deployment Vercel, atur `REACT_APP_BACKEND_URL` di **Project Settings -> E
 
 Login POS menampilkan grid pengguna dari `GET /api/auth/users`. Setelah pengguna dipilih, frontend mengirim ID pengguna dan PIN 4-6 digit ke `POST /api/auth/login`. Backend memverifikasi PIN terhadap hash bcrypt dan mengembalikan token serta data pengguna. Token disimpan di `localStorage` dan dikirim untuk otorisasi request POS; pemeriksaan akses tetap dilakukan backend. `POST /api/login` juga tersedia untuk klien yang mengirim nama dan PIN.
 
+Menu **Daftar Akun** mengambil data Chart of Accounts dari `GET /api/finance/account-balances` melalui backend FastAPI. Endpoint khusus admin ini membaca kode, nama, kategori, dan `saldo_terupdate` dari tabel `chart_of_accounts`, mengurutkan berdasarkan kode akun, dan menampilkan saldo dalam Rupiah. Endpoint ini hanya membaca saldo tersimpan; pembaruan saldo tetap mengikuti alur transaksi dan trigger database yang sudah ada.
+
 Variabel Supabase di atas masih digunakan fitur POS lain yang memanggil RPC Supabase, tetapi tidak diperlukan untuk login. Nilai anon/publishable key memang digunakan di browser; keamanan database harus ditegakkan dengan RLS. Jangan pernah gunakan `service_role` key di frontend.
 
 Contoh client yang dipakai proyek:

@@ -19,6 +19,7 @@ from finance import (
     account_type_from_category,
     debt_payment_lines,
     expense_lines,
+    get_account_balances,
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
     get_laporan_arus_kas,
@@ -1421,6 +1422,12 @@ async def finance_accounts(_: User = Depends(ADMIN)):
         }
         for row in rows
     ]
+
+
+@api.get("/finance/account-balances")
+async def finance_account_balances(_: User = Depends(ADMIN)):
+    await db.connect()
+    return await get_account_balances(db.pool)
 
 
 @api.get("/finance/chart-of-accounts")

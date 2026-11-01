@@ -23,6 +23,7 @@ import Targets from "@/pages/Targets";
 import Profile from "@/pages/Profile";
 import { ProfileProvider } from "@/context/ProfileContext";
 import Journal from "@/pages/finance/Journal";
+import FinanceAccounts from "@/pages/finance/FinanceAccounts";
 import FinanceDashboard from "@/pages/finance/FinanceDashboard";
 import ProfitAndLoss from "@/pages/finance/ProfitAndLoss";
 import CashFlowStatement from "@/pages/finance/CashFlowStatement";
@@ -32,7 +33,7 @@ const PAGES = {
   "/pos": POS, "/tables": Tables, "/open-bills": OpenBills, "/transactions": Transactions, "/customers": Customers,
   "/products": Products, "/inventory": Inventory, "/purchases": Purchases, "/expenses": Expenses, "/reports": Reports,
   "/users": Users, "/cash": Cash, "/shifts": Shifts, "/targets": Targets, "/profile": Profile,
-  "/admin/jurnal": Journal, "/admin/dashboard-keuangan": FinanceDashboard, "/admin/laba-rugi": ProfitAndLoss,
+  "/admin/jurnal": Journal, "/admin/daftar-akun": FinanceAccounts, "/admin/dashboard-keuangan": FinanceDashboard, "/admin/laba-rugi": ProfitAndLoss,
   "/admin/arus-kas": CashFlowStatement,
 };
 
