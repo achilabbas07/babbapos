@@ -129,7 +129,7 @@ def transaction_lines(total: float, method: str, items: list[dict]) -> list[Jour
         cash_account = "Kas" if method == "Cash" else "Bank"
         lines.extend([
             (cash_account, "asset", amount, Decimal("0")),
-            ("Pendapatan Penjualan", "revenue", Decimal("0"), amount),
+            ("Pendapatan", "revenue", Decimal("0"), amount),
         ])
 
     cost_of_goods = _money(sum(
@@ -152,7 +152,7 @@ def transaction_account_codes(
     lines = transaction_lines(total, method, items)
     account_codes: list[Optional[str]] = [None] * len(lines)
     if _money(total) > 0 and method == "Cash":
-        account_codes[:2] = ["1-10001", "4-40001"]
+        account_codes[:2] = ["1-10001", "4-40000"]
     return account_codes
 
 

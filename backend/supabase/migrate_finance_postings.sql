@@ -12,7 +12,7 @@ set
   account_id = nullif(to_jsonb(master_account)->>'id', '')::uuid,
   account_name = case account.account_code
     when '1-10001' then 'Kas'
-    when '4-40001' then 'Pendapatan Penjualan'
+    when '4-40000' then 'Pendapatan'
   end
 from public.chart_of_accounts as master_account
 cross join lateral (
@@ -24,9 +24,15 @@ cross join lateral (
   ) as account_code
 ) as account
 where ledger.source_type = 'transaction'
-  and account.account_code in ('1-10001', '4-40001')
+  and account.account_code in ('1-10001', '4-40000')
   and (
     ledger.account_code = account.account_code
+    or (
+      account.account_code = '4-40000'
+      and ledger.account_code = '4-40001'
+      and ledger.account_type = 'revenue'
+      and ledger.credit > 0
+    )
     or (
       account.account_code = '1-10001'
       and ledger.account_type = 'asset'
@@ -34,10 +40,10 @@ where ledger.source_type = 'transaction'
       and ledger.account_name in ('Kas', 'Akun belum diklasifikasikan')
     )
     or (
-      account.account_code = '4-40001'
+      account.account_code = '4-40000'
       and ledger.account_type = 'revenue'
       and ledger.credit > 0
-      and ledger.account_name in ('Penjualan', 'Pendapatan Penjualan', 'Akun belum diklasifikasikan')
+      and ledger.account_name in ('Penjualan', 'Pendapatan Penjualan', 'Pendapatan', 'Akun belum diklasifikasikan')
     )
   );
 
@@ -101,9 +107,9 @@ cross join lateral (
       0::numeric
     ),
     (
-      'Pendapatan Penjualan',
+      'Pendapatan',
       'revenue',
-      case when method = 'Cash' then '4-40001' end,
+      case when method = 'Cash' then '4-40000' end,
       0::numeric,
       total::numeric
     ),

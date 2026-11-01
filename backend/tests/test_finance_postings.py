@@ -90,14 +90,14 @@ def test_chart_of_accounts_matches_finance_postings_by_code():
         async def fetch(self, query, *args):
             if "from public.chart_of_accounts" in query:
                 return [{
-                    "account_code": "4-40001",
+                    "account_code": "4-40000",
                     "normal_balance": "credit",
-                    "account_name": "Pendapatan Penjualan",
+                    "account_name": "Pendapatan",
                     "account_category": "Pendapatan",
                 }]
             return [
                 {
-                    "account_code": "4-40001",
+                    "account_code": "4-40000",
                     "account_name": "Penjualan",
                     "account_type": "revenue",
                     "total_debit": Decimal("0"),
@@ -105,7 +105,7 @@ def test_chart_of_accounts_matches_finance_postings_by_code():
                     "mutation_count": 1,
                 },
                 {
-                    "account_code": "4-40001",
+                    "account_code": "4-40000",
                     "account_name": "Penjualan Lama",
                     "account_type": "revenue",
                     "total_debit": Decimal("0"),
@@ -116,7 +116,7 @@ def test_chart_of_accounts_matches_finance_postings_by_code():
 
     rows = asyncio.run(get_chart_of_accounts(FakePool()))
 
-    assert rows[0]["account_name"] == "Pendapatan Penjualan"
+    assert rows[0]["account_name"] == "Pendapatan"
     assert rows[0]["balance"] == Decimal("1000")
     assert rows[0]["has_mutations"] is True
 
@@ -130,7 +130,7 @@ def test_cash_sale_posts_revenue_and_cost_of_goods():
 
     assert lines == [
         ("Kas", "asset", Decimal("1000.00"), Decimal("0")),
-        ("Pendapatan Penjualan", "revenue", Decimal("0"), Decimal("1000.00")),
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("1000.00")),
         ("Beban HPP", "expense", Decimal("38.00"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("38.00")),
     ]
@@ -141,7 +141,7 @@ def test_cash_sale_uses_required_account_codes():
         1000,
         "Cash",
         [{"hpp": 12.5, "qty": 2}],
-    ) == ["1-10001", "4-40001", None, None]
+    ) == ["1-10001", "4-40000", None, None]
     assert transaction_account_codes(1000, "QRIS", []) == [None, None]
 
 
@@ -150,7 +150,7 @@ def test_non_cash_sale_uses_bank_and_rounds_cost_to_cents():
 
     assert lines == [
         ("Bank", "asset", Decimal("500.00"), Decimal("0")),
-        ("Pendapatan Penjualan", "revenue", Decimal("0"), Decimal("500.00")),
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("500.00")),
         ("Beban HPP", "expense", Decimal("10.11"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("10.11")),
     ]
@@ -269,10 +269,10 @@ def test_post_finance_source_sets_required_transaction_date():
 
         async def fetch(self, sql, account_codes):
             assert "from public.chart_of_accounts" in sql
-            assert account_codes == ["1-10001", "4-40001"]
+            assert account_codes == ["1-10001", "4-40000"]
             return [
                 {"account_code": "1-10001", "account_id": UUID("00000000-0000-0000-0000-000000000001")},
-                {"account_code": "4-40001", "account_id": UUID("00000000-0000-0000-0000-000000000002")},
+                {"account_code": "4-40000", "account_id": UUID("00000000-0000-0000-0000-000000000002")},
             ]
 
         async def executemany(self, sql, rows):
@@ -296,8 +296,8 @@ def test_post_finance_source_sets_required_transaction_date():
     assert "account_code" in connection.sql
     assert "account_id" in connection.sql
     assert [row[1:3] for row in connection.rows] == [(entry_date, entry_date)] * 2
-    assert [row[4] for row in connection.rows] == ["Kas", "Pendapatan Penjualan"]
-    assert [row[6] for row in connection.rows] == ["1-10001", "4-40001"]
+    assert [row[4] for row in connection.rows] == ["Kas", "Pendapatan"]
+    assert [row[6] for row in connection.rows] == ["1-10001", "4-40000"]
     assert [row[7] for row in connection.rows] == [
         UUID("00000000-0000-0000-0000-000000000001"),
         UUID("00000000-0000-0000-0000-000000000002"),
