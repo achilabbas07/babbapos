@@ -20,6 +20,7 @@ from finance import (
     debt_payment_lines,
     expense_lines,
     get_dashboard_neraca_kas,
+    get_chart_of_accounts,
     get_laporan_arus_kas,
     get_recent_finance_transactions,
     post_cash_expense_journal,
@@ -1417,6 +1418,20 @@ async def finance_accounts(_: User = Depends(ADMIN)):
     ]
 
 
+@api.get("/finance/chart-of-accounts")
+async def finance_chart_of_accounts(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    _: User = Depends(ADMIN),
+):
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(422, "Tanggal mulai dan tanggal selesai harus diisi bersama.")
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
+    await db.connect()
+    return await get_chart_of_accounts(db.pool, start_date, end_date)
+
+
 @api.get("/finance/cash-flow")
 async def finance_cash_flow(_: User = Depends(ADMIN)):
     await db.connect()
@@ -1447,10 +1462,18 @@ async def finance_dashboard_summary(response: Response, _: User = Depends(ADMIN)
 
 
 @app.get("/api/v1/finance/recent-transactions")
-async def finance_recent_transactions(_: User = Depends(ADMIN)):
+async def finance_recent_transactions(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    _: User = Depends(ADMIN),
+):
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(422, "Tanggal mulai dan tanggal selesai harus diisi bersama.")
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
     try:
         await db.connect()
-        data = await get_recent_finance_transactions(db.pool)
+        data = await get_recent_finance_transactions(db.pool, start_date, end_date)
     except Exception as error:
         logger.exception("Failed to load recent finance transactions")
         raise HTTPException(500, "Gagal memuat transaksi keuangan terbaru.") from error

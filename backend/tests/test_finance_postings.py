@@ -7,6 +7,7 @@ from finance import (
     account_type_from_category,
     expense_lines,
     get_dashboard_neraca_kas,
+    get_chart_of_accounts,
     get_recent_finance_transactions,
     post_cash_expense_journal,
     post_debt_payment_journal,
@@ -27,6 +28,47 @@ def test_chart_account_categories_map_to_journal_types():
     assert account_type_from_category("Pendapatan Operasional") == "revenue"
     assert account_type_from_category("Beban Gaji") == "expense"
     assert account_type_from_category("Kategori Tidak Dikenal") is None
+
+
+def test_get_chart_of_accounts_uses_filtered_mutations_and_normal_balance():
+    class FakePool:
+        async def fetch(self, query, *args):
+            if "from public.chart_of_accounts" in query:
+                return [
+                    {"account_code": "1-10001", "normal_balance": "debit", "account_name": "Kas", "account_category": "Aset Lancar"},
+                    {"account_code": "4-10001", "normal_balance": "credit", "account_name": "Penjualan", "account_category": "Pendapatan"},
+                ]
+            assert "from public.general_ledger" in query
+            assert "transaction_date >= $1" in query
+            assert "transaction_date <= $2" in query
+            assert args == (date(2026, 10, 1), date(2026, 10, 31))
+            return [
+                {"account_name": "Kas", "account_type": "asset", "total_debit": Decimal("150000"), "total_credit": Decimal("25000"), "mutation_count": 2},
+                {"account_name": "Penjualan", "account_type": "revenue", "total_debit": Decimal("0"), "total_credit": Decimal("300000"), "mutation_count": 1},
+            ]
+
+    rows = asyncio.run(get_chart_of_accounts(FakePool(), date(2026, 10, 1), date(2026, 10, 31)))
+
+    assert rows == [
+        {
+            "account_code": "1-10001",
+            "normal_balance": "debit",
+            "account_name": "Kas",
+            "account_category": "Aset Lancar",
+            "account_type": "asset",
+            "balance": Decimal("125000"),
+            "has_mutations": True,
+        },
+        {
+            "account_code": "4-10001",
+            "normal_balance": "credit",
+            "account_name": "Penjualan",
+            "account_category": "Pendapatan",
+            "account_type": "revenue",
+            "balance": Decimal("300000"),
+            "has_mutations": True,
+        },
+    ]
 
 
 def test_cash_sale_posts_revenue_and_cost_of_goods():
@@ -222,18 +264,22 @@ def test_recent_finance_transactions_returns_five_latest_journal_rows():
     class FakeConnection:
         sql = ""
 
-        async def fetch(self, sql):
+        async def fetch(self, sql, *args):
             self.sql = sql
+            self.args = args
             return [
                 {"tanggal": "2026-10-31T12:00:00+00:00", "keterangan": f"Jurnal {index}", "kode_akun": "1-10001", "debit": 0, "kredit": 100}
                 for index in range(5)
             ]
 
     connection = FakeConnection()
-    result = asyncio.run(get_recent_finance_transactions(connection))
+    result = asyncio.run(get_recent_finance_transactions(connection, date(2026, 10, 1), date(2026, 10, 31)))
 
     assert len(result) == 5
     assert result[0]["keterangan"] == "Jurnal 0"
     assert "from public.jurnal_transaksi" in connection.sql
+    assert "tanggal >= $1::date" in connection.sql
+    assert "tanggal < ($2::date + interval '1 day')" in connection.sql
+    assert connection.args == (date(2026, 10, 1), date(2026, 10, 31))
     assert "order by tanggal desc, id desc" in connection.sql
     assert "limit 5" in connection.sql

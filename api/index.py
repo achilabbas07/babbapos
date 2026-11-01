@@ -15,12 +15,17 @@ from variants import (
     product_num,
     variant_hpp,
 )
-from finance import post_cash_expense_journal, post_purchase_payment_journal
+from finance import (
+    get_chart_of_accounts,
+    get_recent_finance_transactions,
+    post_cash_expense_journal,
+    post_purchase_payment_journal,
+)
 
 import logging
 import asyncpg
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -994,6 +999,39 @@ async def report_summary(start: str, end: str, tz_offset: int = 0, _: User = Dep
 
 # ---------- Schema ----------
 COLLECTIONS = ["products", "tables", "transactions", "customers", "inventory", "recipes", "purchases", "expenses", "users", "open_bills", "void_logs", "shifts", "cash_movements", "sales_targets", "waiter_shifts", "order_logs"]
+
+
+@api.get("/finance/chart-of-accounts")
+async def finance_chart_of_accounts(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    _: User = Depends(ADMIN),
+):
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(422, "Tanggal mulai dan tanggal selesai harus diisi bersama.")
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
+    await db.connect()
+    return await get_chart_of_accounts(db.pool, start_date, end_date)
+
+
+@api.get("/v1/finance/recent-transactions")
+async def finance_recent_transactions(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    _: User = Depends(ADMIN),
+):
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(422, "Tanggal mulai dan tanggal selesai harus diisi bersama.")
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
+    try:
+        await db.connect()
+        data = await get_recent_finance_transactions(db.pool, start_date, end_date)
+    except Exception as error:
+        logger.exception("Failed to load recent finance transactions")
+        raise HTTPException(500, "Gagal memuat transaksi keuangan terbaru.") from error
+    return {"status": "success", "data": data}
 
 
 @api.get("/schema")

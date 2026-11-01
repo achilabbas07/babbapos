@@ -25,6 +25,87 @@ def account_type_from_category(account_category: Optional[str]) -> Optional[str]
     return None
 
 
+def _normal_balance_side(account: dict, account_type: Optional[str]) -> str:
+    normal_balance = str(account.get("normal_balance") or "").strip().lower()
+    if normal_balance in {"debit", "debet", "dr"}:
+        return "debit"
+    if normal_balance in {"credit", "kredit", "cr"}:
+        return "credit"
+    return "debit" if account_type in {"asset", "expense"} else "credit"
+
+
+async def get_chart_of_accounts(
+    pool: Any,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> list[dict]:
+    accounts = await pool.fetch(
+        """
+        select
+          min(coalesce(
+            nullif(to_jsonb(account)->>'account_code', ''),
+            nullif(to_jsonb(account)->>'kode_akun', ''),
+            nullif(to_jsonb(account)->>'code', ''),
+            nullif(to_jsonb(account)->>'kode', ''),
+            ''
+          )) as account_code,
+          min(coalesce(
+            nullif(to_jsonb(account)->>'normal_balance', ''),
+            nullif(to_jsonb(account)->>'normal_side', ''),
+            nullif(to_jsonb(account)->>'saldo_normal', ''),
+            ''
+          )) as normal_balance,
+          account_name,
+          min(account_category) as account_category
+        from public.chart_of_accounts as account
+        where nullif(btrim(account_name), '') is not null
+        group by account_name
+        having count(distinct account_category) = 1
+        order by account_code, account_name
+        """
+    )
+    ledger_rows = await pool.fetch(
+        """
+        select
+          account_name,
+          account_type,
+          sum(debit) as total_debit,
+          sum(credit) as total_credit,
+          count(*) as mutation_count
+        from public.general_ledger
+        where ($1::date is null or transaction_date >= $1)
+          and ($2::date is null or transaction_date <= $2)
+        group by account_name, account_type
+        """,
+        start_date,
+        end_date,
+    )
+    balances = {
+        (row["account_name"], row["account_type"]): {
+            "debit": row["total_debit"],
+            "credit": row["total_credit"],
+            "mutation_count": row["mutation_count"],
+        }
+        for row in ledger_rows
+    }
+
+    result = []
+    for account_row in accounts:
+        account = dict(account_row)
+        account_type = account_type_from_category(account["account_category"])
+        mutation = balances.get((account["account_name"], account_type))
+        normal_balance = _normal_balance_side(account, account_type)
+        debit = mutation["debit"] if mutation else 0
+        credit = mutation["credit"] if mutation else 0
+        account.update({
+            "account_type": account_type,
+            "balance": debit - credit if normal_balance == "debit" else credit - debit,
+            "has_mutations": bool(mutation and mutation["mutation_count"]),
+        })
+        result.append(account)
+    return result
+
+
 def _money(value: Any) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -297,13 +378,21 @@ async def get_dashboard_neraca_kas(connection: Any) -> dict[str, Any]:
     return dict(row)
 
 
-async def get_recent_finance_transactions(connection: Any) -> list[dict[str, Any]]:
+async def get_recent_finance_transactions(
+    connection: Any,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> list[dict[str, Any]]:
     rows = await connection.fetch(
         """
         select tanggal, keterangan, kode_akun, debit, kredit
         from public.jurnal_transaksi
+        where ($1::date is null or tanggal >= $1::date)
+          and ($2::date is null or tanggal < ($2::date + interval '1 day'))
         order by tanggal desc, id desc
         limit 5
-        """
+        """,
+        start_date,
+        end_date,
     )
     return [dict(row) for row in rows]
