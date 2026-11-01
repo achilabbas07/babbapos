@@ -901,7 +901,10 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
             promo = await promo_discount(body.promoCode, subtotal)
         if body.redeemPoints:
             pts = await points_discount(customer_id)
-    total = max(0, subtotal - promo["discount"] - pts["discount"])
+    final_total = subtotal - promo["discount"] - pts["discount"]
+    if final_total is None or final_total <= 0:
+        raise HTTPException(400, "Nilai transaksi tidak valid")
+    total = final_total
     if body.method == "Cash" and body.cashGiven < total:
         raise HTTPException(400, "Uang tunai kurang dari total")
     cash = body.cashGiven if body.method == "Cash" else total
