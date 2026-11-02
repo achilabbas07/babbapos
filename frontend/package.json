@@ -69,7 +69,8 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "test": "craco test"
+    "test": "craco test",
+    "lint": "eslint src"
   },
   "browserslist": {
     "production": [
@@ -98,6 +99,7 @@
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.4",
     "eslint-plugin-react-hooks": "5.2.0",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "15.15.0",
     "postcss": "8.5.28",
     "tailwindcss": "3.4.17"

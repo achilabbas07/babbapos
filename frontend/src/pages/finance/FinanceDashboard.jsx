@@ -30,6 +30,8 @@ export default function FinanceDashboard() {
   const [accounts, setAccounts] = useState([]);
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [accountsError, setAccountsError] = useState("");
+  const [dashboardSummary, setDashboardSummary] = useState({});
+  const [dashboardSummaryError, setDashboardSummaryError] = useState("");
   const requestId = useRef(0);
 
   const hasMutations = accounts.some((account) => account.has_mutations);
@@ -46,6 +48,19 @@ export default function FinanceDashboard() {
     }
     return totals;
   }, { cashBank: 0, inventory: 0, totalAssets: 0, liabilitiesEquity: 0 }), [accounts]);
+  const inventoryBalance = Number(
+    dashboardSummary?.persediaan_bahan_baku
+      ?? dashboardSummary?.inventory
+      ?? summary.inventory
+      ?? 0,
+  ) || 0;
+  const liabilitiesEquityBalance = Number(
+    dashboardSummary?.total_liabilitas_ekuitas
+      ?? dashboardSummary?.liabilitiesEquity
+      ?? dashboardSummary?.totalLiabilitiesEquity
+      ?? summary.liabilitiesEquity
+      ?? 0,
+  ) || 0;
 
   const assetComposition = useMemo(() => [
     { name: "Kas & Bank", balance: summary.cashBank },
@@ -59,6 +74,7 @@ export default function FinanceDashboard() {
     requestId.current = currentRequestId;
     setAccountsError("");
     setTransactionsError("");
+    setDashboardSummaryError("");
     setAccountsLoading(true);
     setTransactionsLoading(true);
 
@@ -66,15 +82,17 @@ export default function FinanceDashboard() {
       const message = "Tanggal mulai tidak boleh setelah tanggal akhir.";
       setAccountsError(message);
       setTransactionsError(message);
+      setDashboardSummaryError(message);
       setAccountsLoading(false);
       setTransactionsLoading(false);
       return;
     }
 
     const params = { start_date: startDate, end_date: endDate };
-    const [accountsResult, transactionsResult] = await Promise.allSettled([
+    const [accountsResult, transactionsResult, summaryResult] = await Promise.allSettled([
       api.get("/finance/chart-of-accounts", { params }),
       api.get("/v1/finance/recent-transactions", { params }),
+      api.get("/v1/finance/dashboard-summary"),
     ]);
 
     if (requestId.current !== currentRequestId) return;
@@ -87,6 +105,13 @@ export default function FinanceDashboard() {
       setTransactions(transactionsResult.value.data.data);
     } else {
       setTransactionsError(errMsg(transactionsResult.reason));
+    }
+    if (summaryResult.status === "fulfilled") {
+      const payload = summaryResult.value?.data?.data ?? summaryResult.value?.data;
+      setDashboardSummary(payload && typeof payload === "object" ? payload : {});
+    } else {
+      setDashboardSummary({});
+      setDashboardSummaryError(errMsg(summaryResult.reason));
     }
     setAccountsLoading(false);
     setTransactionsLoading(false);
@@ -115,10 +140,11 @@ export default function FinanceDashboard() {
         </label>
       </section>
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {dashboardSummaryError && <div className="sm:col-span-2 xl:col-span-4"><FinanceError message={dashboardSummaryError} onRetry={loadDashboard} /></div>}
         <StatCard label="Mutasi kas & bank" value={rp(summary.cashBank)} />
         <StatCard label="Mutasi total aset" value={rp(summary.totalAssets)} />
-        <StatCard label="Mutasi persediaan" value={rp(summary.inventory)} />
-        <StatCard label="Mutasi liabilitas + ekuitas" value={rp(summary.liabilitiesEquity)} />
+        <StatCard label="Mutasi persediaan" value={rp(inventoryBalance || 0)} />
+        <StatCard label="Mutasi liabilitas + ekuitas" value={rp(liabilitiesEquityBalance || 0)} />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <section className="rounded-2xl border border-border bg-white p-5 shadow-sm">

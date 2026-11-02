@@ -58,9 +58,9 @@ export function errMsg(e) {
   return `${String(detail)}${stage}`;
 }
 
-const rpFmt = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+const rpFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
 const numFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
-export const rp = (v) => rpFmt.format(v || 0);
+export const rp = (v) => `rp. ${rpFmt.format(Number(v) || 0)}`;
 export const num = (v) => numFmt.format(v || 0);
 export const itemName = (i) => i.variantName || i.productName;
 export const itemKey = (i) => `${i.productId}:${i.variantId ?? ""}`;
