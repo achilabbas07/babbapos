@@ -17,6 +17,8 @@ from finance import (
     post_purchase_journal,
     post_purchase_payment_journal,
     post_finance_source,
+    post_hpp_checkout,
+    post_stok_pembelian,
     debt_payment_lines,
     purchase_journal_lines,
     purchase_lines,
@@ -271,6 +273,83 @@ def test_checkout_journal_insert_errors_propagate():
         assert str(error) == "journal insert failed"
     else:
         raise AssertionError("Kegagalan insert jurnal harus diteruskan ke transaksi checkout.")
+
+
+def test_post_stok_pembelian_inserts_inventory_and_payable_journal_pair():
+    class FakeConnection:
+        async def executemany(self, query, rows):
+            self.query = query
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    asyncio.run(post_stok_pembelian(connection, {
+        "purchase_id": "PO-001",
+        "total_harga": "12500.50",
+    }))
+
+    assert "$1, $2, $3, $4" in connection.query
+    assert connection.rows == [
+        ("PO-001", "1-10003", "DEBIT", 12500.5),
+        ("PO-001", "2-20001", "KREDIT", 12500.5),
+    ]
+
+
+def test_post_hpp_checkout_inserts_expense_and_inventory_journal_pair():
+    class FakeConnection:
+        async def executemany(self, query, rows):
+            self.query = query
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    asyncio.run(post_hpp_checkout(connection, {
+        "id": 123,
+        "total_hpp": 875.25,
+    }))
+
+    assert "$1, $2, $3, $4" in connection.query
+    assert connection.rows == [
+        ("123", "5-50000", "DEBIT", 875.25),
+        ("123", "1-10003", "KREDIT", 875.25),
+    ]
+
+
+def test_new_journal_functions_reject_missing_ids_and_non_positive_amounts():
+    class FakeConnection:
+        async def executemany(self, _query, _rows):
+            raise AssertionError("Invalid journal data must not execute SQL.")
+
+    invalid_calls = (
+        (post_stok_pembelian, {"total_harga": 100}),
+        (post_stok_pembelian, {"id": "PO-001", "total_harga": 0}),
+        (post_stok_pembelian, {"id": "PO-001", "total_harga": "invalid"}),
+        (post_hpp_checkout, {"total_hpp": 100}),
+        (post_hpp_checkout, {"id": "TRX-001", "total_hpp": -1}),
+        (post_hpp_checkout, {"id": "TRX-001", "total_hpp": float("inf")}),
+    )
+    for journal_func, payload in invalid_calls:
+        try:
+            asyncio.run(journal_func(FakeConnection(), payload))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Data jurnal tidak valid harus ditolak.")
+
+
+def test_new_journal_functions_propagate_database_errors():
+    class FailingConnection:
+        async def executemany(self, _query, _rows):
+            raise RuntimeError("journal insert failed")
+
+    for journal_func, payload in (
+        (post_stok_pembelian, {"id": "PO-001", "total_harga": 100}),
+        (post_hpp_checkout, {"id": "TRX-001", "total_hpp": 100}),
+    ):
+        try:
+            asyncio.run(journal_func(FailingConnection(), payload))
+        except RuntimeError as error:
+            assert str(error) == "journal insert failed"
+        else:
+            raise AssertionError("Database error harus diteruskan ke transaksi utama.")
 
 
 def test_unknown_payment_methods_are_rejected():

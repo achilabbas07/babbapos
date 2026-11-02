@@ -1,3 +1,4 @@
+import math
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -196,6 +197,79 @@ def normalize_payment_method(payment_method: str) -> str:
 def get_account_by_payment_method(payment_method: str) -> str:
     method = normalize_payment_method(payment_method)
     return "1-10001" if method == "Cash" else "1-10002"
+
+
+def _required_journal_id(payload: Any, *keys: str, label: str) -> str:
+    if not isinstance(payload, dict):
+        raise ValueError(f"Data {label} tidak valid.")
+    value = next((payload.get(key) for key in keys if payload.get(key) is not None), None)
+    if value is None or not str(value).strip():
+        raise ValueError(f"ID {label} wajib diisi.")
+    return str(value)
+
+
+def _positive_journal_amount(value: Any, label: str) -> float:
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"Nominal {label} harus lebih besar dari 0.")
+    try:
+        amount = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"Nominal {label} harus berupa angka yang valid.") from error
+    if not math.isfinite(amount) or amount <= 0:
+        raise ValueError(f"Nominal {label} harus lebih besar dari 0.")
+    return amount
+
+
+async def post_stok_pembelian(connection: Any, purchase_data: Any) -> None:
+    if not isinstance(purchase_data, dict):
+        raise ValueError("Data pembelian tidak valid.")
+    purchase_id = _required_journal_id(
+        purchase_data,
+        "purchase_id",
+        "id",
+        label="pembelian",
+    )
+    amount = _positive_journal_amount(
+        purchase_data.get("total_harga"),
+        "pembelian",
+    )
+    await connection.executemany(
+        """
+        insert into public.jurnal_entries
+          (transaction_id, account_code, position, amount)
+        values ($1, $2, $3, $4)
+        """,
+        [
+            (purchase_id, "1-10003", "DEBIT", amount),
+            (purchase_id, "2-20001", "KREDIT", amount),
+        ],
+    )
+
+
+async def post_hpp_checkout(connection: Any, checkout_data: Any) -> None:
+    if not isinstance(checkout_data, dict):
+        raise ValueError("Data transaksi tidak valid.")
+    transaction_id = _required_journal_id(
+        checkout_data,
+        "transaction_id",
+        "id",
+        label="transaksi",
+    )
+    amount = _positive_journal_amount(
+        checkout_data.get("total_hpp"),
+        "HPP",
+    )
+    await connection.executemany(
+        """
+        insert into public.jurnal_entries
+          (transaction_id, account_code, position, amount)
+        values ($1, $2, $3, $4)
+        """,
+        [
+            (transaction_id, "5-50000", "DEBIT", amount),
+            (transaction_id, "1-10003", "KREDIT", amount),
+        ],
+    )
 
 
 async def post_checkout_journal_entries(

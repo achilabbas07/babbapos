@@ -28,8 +28,10 @@ from finance import (
     post_cash_expense_journal,
     post_checkout_journal_entries,
     post_debt_payment_journal,
+    post_hpp_checkout,
     post_finance_source,
     post_purchase_journal,
+    post_stok_pembelian,
     purchase_journal_lines,
     transaction_account_codes,
     transaction_lines,
@@ -963,6 +965,16 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
                     transaction_account_codes(trx.total, trx.method, items),
                 )
                 await consume_checkout_stock(conn, items)
+                total_hpp = sum(
+                    Decimal(str(item.get("hpp", 0) or 0))
+                    * Decimal(str(item.get("qty", 0) or 0))
+                    for item in items
+                )
+                if total_hpp > 0:
+                    await post_hpp_checkout(
+                        conn,
+                        {"transaction_id": trx.id, "total_hpp": total_hpp},
+                    )
     except asyncpg.PostgresError as err:
         message = getattr(err, "message", None) or str(err)
         raise HTTPException(400, f"Checkout gagal: {message}") from err
@@ -1037,6 +1049,14 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
                 body.sumber_dana_akun,
                 f"Pembelian persediaan {purchase.id} - {purchase.supplier}",
             )
+            if body.metode_pembayaran == "credit":
+                await post_stok_pembelian(
+                    conn,
+                    {
+                        "purchase_id": purchase.id,
+                        "total_harga": purchase.total_cost,
+                    },
+                )
     for inv_id in ids:
         await recalc_hpp_for_inventory(inv_id)
     return purchase
