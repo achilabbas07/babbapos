@@ -218,6 +218,44 @@ def test_missing_checkout_payment_method_uses_non_cash_account():
     ]
 
 
+def test_checkout_journal_sanitizes_id_aliases_payment_method_and_formatted_amounts():
+    class FakeConnection:
+        async def executemany(self, query, rows):
+            self.query = query
+            self.rows = list(rows)
+
+    for payload, expected_id, expected_account, expected_amount in (
+        ({"id": 123, "method": " Tunai ", "total": "Rp 1.250,50"}, "123", "1-10001", 1250.5),
+        ({"no_invoice": "INV-4", "metode_pembayaran": "QRIS", "total": "1.250"}, "INV-4", "1-10002", 1250.0),
+    ):
+        connection = FakeConnection()
+        asyncio.run(post_checkout_journal_entries(connection, payload))
+
+        assert "$1, $2, $3, $4" in connection.query
+        assert connection.rows == [
+            (expected_id, expected_account, "DEBIT", expected_amount),
+            (expected_id, "4-40000", "KREDIT", expected_amount),
+        ]
+
+
+def test_checkout_journal_rejects_non_positive_or_unparseable_amounts():
+    class FakeConnection:
+        async def executemany(self, _query, _rows):
+            raise AssertionError("Invalid amount must not execute SQL.")
+
+    for total in ("Rp -", "0", "-100", "NaN"):
+        try:
+            asyncio.run(post_checkout_journal_entries(FakeConnection(), {
+                "transaction_id": "TRX-001",
+                "payment_method": "Cash",
+                "total": total,
+            }))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Nominal tidak valid harus ditolak.")
+
+
 def test_checkout_journal_insert_errors_propagate():
     class FailingConnection:
         async def executemany(self, _query, _rows):

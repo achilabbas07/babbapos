@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional, Sequence
@@ -204,39 +205,64 @@ async def post_checkout_journal_entries(
     if not isinstance(payload, dict):
         raise ValueError("Payload jurnal checkout tidak valid.")
 
-    transaction_id = payload.get("transaction_id")
-    payment_method = payload.get("payment_method")
-    total = payload.get("total")
+    transaction_id = (
+        payload.get("transaction_id")
+        or payload.get("id")
+        or payload.get("no_invoice")
+    )
     if transaction_id is None or not str(transaction_id).strip():
         raise ValueError("ID transaksi wajib diisi untuk membuat jurnal checkout.")
+
+    payment_method = (
+        payload.get("payment_method")
+        or payload.get("method")
+        or payload.get("metode_pembayaran")
+        or ""
+    )
+    payment_method = str(payment_method).strip().lower()
+    cash_account_code = "1-10001" if payment_method in {"tunai", "cash"} else "1-10002"
+
+    total = payload.get("total")
+    if total is None:
+        total = payload.get("amount", payload.get("nominal"))
     if total is None:
         raise ValueError("Total transaksi wajib diisi untuk membuat jurnal checkout.")
 
     try:
-        amount = _money(total)
-        amount_float = float(amount)
+        if isinstance(total, str):
+            if total.strip().startswith("-"):
+                raise ValueError("Nominal negatif tidak valid.")
+            cleaned_total = re.sub(r"[^\d.]", "", total)
+            if not cleaned_total:
+                raise ValueError("Nominal kosong setelah sanitasi.")
+
+            if "," in total:
+                integer_part, decimal_part = total.rsplit(",", 1)
+                decimal_digits = re.sub(r"\D", "", decimal_part)
+                integer_digits = re.sub(r"\D", "", integer_part)
+                if len(decimal_digits) in (1, 2):
+                    cleaned_total = f"{integer_digits}.{decimal_digits}"
+                else:
+                    cleaned_total = re.sub(r"\.", "", cleaned_total)
+            elif cleaned_total.count(".") > 1:
+                cleaned_total = cleaned_total.replace(".", "")
+            elif "." in cleaned_total:
+                integer_part, decimal_part = cleaned_total.rsplit(".", 1)
+                if len(decimal_part) == 3 and integer_part:
+                    cleaned_total = cleaned_total.replace(".", "")
+
+            amount = float(cleaned_total)
+        else:
+            amount = float(total)
     except (InvalidOperation, TypeError, ValueError, OverflowError) as error:
         raise ValueError("Total transaksi bukan nilai nominal yang valid.") from error
-    if not amount.is_finite() or amount <= 0:
-        raise ValueError("Total transaksi harus berupa nilai positif yang valid.")
-    if amount_float == float("inf"):
-        raise ValueError("Total transaksi melebihi batas nilai yang didukung.")
 
-    payment_method = str(payment_method or "").strip().casefold()
-    cash_account_code = "1-10001" if payment_method in {"tunai", "cash"} else "1-10002"
+    if not amount > 0 or amount == float("inf"):
+        raise ValueError("Total transaksi harus berupa nilai positif yang valid.")
+
     journal_entries = [
-        {
-            "transaction_id": str(transaction_id),
-            "account_code": cash_account_code,
-            "position": "DEBIT",
-            "amount": amount_float,
-        },
-        {
-            "transaction_id": str(transaction_id),
-            "account_code": "4-40000",
-            "position": "KREDIT",
-            "amount": amount_float,
-        },
+        (str(transaction_id), cash_account_code, str("DEBIT"), amount),
+        (str(transaction_id), "4-40000", str("KREDIT"), amount),
     ]
     await connection.executemany(
         """
@@ -244,15 +270,7 @@ async def post_checkout_journal_entries(
           (transaction_id, account_code, position, amount)
         values ($1, $2, $3, $4)
         """,
-        [
-            (
-                str(entry.get("transaction_id")),
-                str(entry.get("account_code")),
-                str(entry.get("position")),
-                float(entry.get("amount")),
-            )
-            for entry in journal_entries
-        ],
+        journal_entries,
     )
 
 
