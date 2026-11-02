@@ -57,10 +57,10 @@ export default function FinanceAccounts() {
               { key: "nama_akun", label: "Nama Akun" },
               { key: "kategori_akun", label: "Kategori Akun" },
               {
-                key: "saldo_terupdate",
-                label: "Saldo Ter-update",
+                key: "current_balance",
+                label: "Saldo Saat Ini",
                 className: "text-right whitespace-nowrap",
-                render: (row) => <Money value={row.saldo_terupdate} />,
+                render: (row) => <Money value={row.current_balance} />,
               },
             ]}
           />
