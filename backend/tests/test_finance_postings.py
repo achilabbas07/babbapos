@@ -284,14 +284,21 @@ def test_post_stok_pembelian_inserts_inventory_and_payable_journal_pair():
     connection = FakeConnection()
     asyncio.run(post_stok_pembelian(connection, {
         "purchase_id": "PO-001",
+        "supplier_id": UUID("00000000-0000-0000-0000-000000000123"),
         "total_harga": "12500.50",
     }))
 
+    assert "insert into public.jurnal_transaksi" in connection.query
+    assert "(kode_akun, debit, kredit, keterangan)" in connection.query
     assert "$1, $2, $3, $4" in connection.query
-    assert connection.rows == [
-        ("PO-001", "1-10003", "DEBIT", 12500.5),
-        ("PO-001", "2-20001", "KREDIT", 12500.5),
+    assert [(row[:3]) for row in connection.rows] == [
+        ("1-10003", Decimal("12500.50"), Decimal("0")),
+        ("2-20001", Decimal("0"), Decimal("12500.50")),
     ]
+    descriptions = [row[3] for row in connection.rows]
+    assert descriptions[0] == descriptions[1]
+    assert "Supplier: 00000000-0000-0000-0000-000000000123" in descriptions[0]
+    assert re.search(r"Group: [0-9a-f-]{36}$", descriptions[0])
 
 
 def test_post_hpp_checkout_inserts_expense_and_inventory_journal_pair():
@@ -306,11 +313,17 @@ def test_post_hpp_checkout_inserts_expense_and_inventory_journal_pair():
         "total_hpp": 875.25,
     }))
 
+    assert "insert into public.jurnal_transaksi" in connection.query
+    assert "(kode_akun, debit, kredit, keterangan)" in connection.query
     assert "$1, $2, $3, $4" in connection.query
-    assert connection.rows == [
-        ("123", "5-50000", "DEBIT", 875.25),
-        ("123", "1-10003", "KREDIT", 875.25),
+    assert [(row[:3]) for row in connection.rows] == [
+        ("5-50000", Decimal("875.25"), Decimal("0")),
+        ("1-10003", Decimal("0"), Decimal("875.25")),
     ]
+    descriptions = [row[3] for row in connection.rows]
+    assert descriptions[0] == descriptions[1]
+    assert "Transaction: 123" in descriptions[0]
+    assert re.search(r"Group: [0-9a-f-]{36}$", descriptions[0])
 
 
 def test_new_journal_functions_reject_missing_ids_and_non_positive_amounts():

@@ -208,12 +208,12 @@ def _required_journal_id(payload: Any, *keys: str, label: str) -> str:
     return str(value)
 
 
-def _positive_journal_amount(value: Any, label: str) -> float:
+def _positive_journal_amount(value: Any, label: str) -> Decimal:
     if value is None or isinstance(value, bool):
         raise ValueError(f"Nominal {label} harus lebih besar dari 0.")
     try:
-        amount = float(value)
-    except (TypeError, ValueError, OverflowError) as error:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as error:
         raise ValueError(f"Nominal {label} harus berupa angka yang valid.") from error
     if not math.isfinite(amount) or amount <= 0:
         raise ValueError(f"Nominal {label} harus lebih besar dari 0.")
@@ -233,15 +233,21 @@ async def post_stok_pembelian(connection: Any, purchase_data: Any) -> None:
         purchase_data.get("total_harga"),
         "pembelian",
     )
+    supplier_id = purchase_data.get("supplier_id")
+    description = f"Pembelian Stok Kredit | Purchase: {purchase_id}"
+    if supplier_id is not None:
+        description += f" | Supplier: {str(supplier_id)}"
+    group_id = str(uuid4())
+    description += f" | Group: {group_id}"
     await connection.executemany(
         """
-        insert into public.jurnal_entries
-          (transaction_id, account_code, position, amount)
+        insert into public.jurnal_transaksi
+          (kode_akun, debit, kredit, keterangan)
         values ($1, $2, $3, $4)
         """,
         [
-            (purchase_id, "1-10003", "DEBIT", amount),
-            (purchase_id, "2-20001", "KREDIT", amount),
+            ("1-10003", amount, Decimal("0"), description),
+            ("2-20001", Decimal("0"), amount, description),
         ],
     )
 
@@ -259,15 +265,17 @@ async def post_hpp_checkout(connection: Any, checkout_data: Any) -> None:
         checkout_data.get("total_hpp"),
         "HPP",
     )
+    group_id = str(uuid4())
+    description = f"HPP Checkout | Transaction: {transaction_id} | Group: {group_id}"
     await connection.executemany(
         """
-        insert into public.jurnal_entries
-          (transaction_id, account_code, position, amount)
+        insert into public.jurnal_transaksi
+          (kode_akun, debit, kredit, keterangan)
         values ($1, $2, $3, $4)
         """,
         [
-            (transaction_id, "5-50000", "DEBIT", amount),
-            (transaction_id, "1-10003", "KREDIT", amount),
+            ("5-50000", amount, Decimal("0"), description),
+            ("1-10003", Decimal("0"), amount, description),
         ],
     )
 
