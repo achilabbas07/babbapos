@@ -12,6 +12,7 @@ from finance import (
     get_chart_of_accounts,
     get_recent_finance_transactions,
     post_cash_expense_journal,
+    post_cash_movement_journal,
     post_checkout_journal_entries,
     post_debt_payment_journal,
     post_purchase_journal,
@@ -539,6 +540,54 @@ def test_cash_expense_posts_cash_credit_to_jurnal_transaksi():
         Decimal("150000.00"),
         "Pembayaran Tunai Kasir: Tagihan Listrik & Air",
     )
+
+
+def test_cash_movement_posts_category_mapped_balanced_pair_with_group_id():
+    class FakeConnection:
+        async def executemany(self, sql, rows):
+            self.sql = sql
+            self.rows = list(rows)
+
+    for category, debit_code in (
+        ("Pembelian Bahan Baku", "1-10003"),
+        ("Biaya Operasional", "6-60000"),
+        ("Biaya Angkut/Pengiriman", "5-50000"),
+    ):
+        connection = FakeConnection()
+        group_id = asyncio.run(post_cash_movement_journal(
+            connection,
+            Decimal("1234.56"),
+            category,
+            "Catatan kasir",
+        ))
+
+        assert "insert into public.jurnal_transaksi" in connection.sql
+        assert [row[:3] for row in connection.rows] == [
+            (debit_code, Decimal("1234.56"), Decimal("0.00")),
+            ("1-10001", Decimal("0.00"), Decimal("1234.56")),
+        ]
+        assert connection.rows[0][3] == connection.rows[1][3]
+        assert connection.rows[0][3].startswith(f"{category} - Catatan kasir | Group_ID: ")
+        assert connection.rows[0][3].endswith(group_id)
+        assert str(UUID(group_id)) == group_id
+
+
+def test_cash_movement_rejects_unmapped_category_without_posting():
+    class FakeConnection:
+        async def executemany(self, _sql, _rows):
+            raise AssertionError("Kategori yang tidak dipetakan tidak boleh diposting.")
+
+    try:
+        asyncio.run(post_cash_movement_journal(
+            FakeConnection(),
+            Decimal("100.00"),
+            "Kategori Lain",
+            "Catatan",
+        ))
+    except ValueError as error:
+        assert "belum dipetakan" in str(error)
+    else:
+        raise AssertionError("Kategori yang tidak dipetakan harus ditolak.")
 
 
 def test_purchase_payment_uses_selected_funding_account():

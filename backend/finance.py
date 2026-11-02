@@ -8,6 +8,26 @@ from uuid import uuid4
 # Struktur data untuk baris jurnal umum
 JournalLine = tuple[str, str, Decimal, Decimal]
 
+ACCOUNT_PERSEDIAAN_BAHAN_ID = "1-10003"
+ACCOUNT_BEBAN_OPERASIONAL_ID = "6-60000"
+ACCOUNT_HPP_ID = "5-50000"
+ACCOUNT_KAS_TUNAI_ID = "1-10001"
+
+KATEGORI_PENGELUARAN_MAP = {
+    "pembelian bahan baku": {
+        "debit": ACCOUNT_PERSEDIAAN_BAHAN_ID,
+        "kredit": ACCOUNT_KAS_TUNAI_ID,
+    },
+    "biaya operasional": {
+        "debit": ACCOUNT_BEBAN_OPERASIONAL_ID,
+        "kredit": ACCOUNT_KAS_TUNAI_ID,
+    },
+    "biaya angkut/pengiriman": {
+        "debit": ACCOUNT_HPP_ID,
+        "kredit": ACCOUNT_KAS_TUNAI_ID,
+    },
+}
+
 
 async def get_account_balances(pool: Any) -> list[dict[str, Any]]:
     rows = await pool.fetch(
@@ -550,6 +570,41 @@ async def post_cash_expense_journal(
         _money(amount),
         f"Pembayaran Tunai Kasir: {description}",
     )
+
+
+async def post_cash_movement_journal(
+    connection: Any,
+    amount: Any,
+    category: str,
+    note: str,
+) -> str:
+    normalized_category = " ".join(category.casefold().split()) if isinstance(category, str) else ""
+    accounts = KATEGORI_PENGELUARAN_MAP.get(normalized_category)
+    if accounts is None:
+        raise ValueError(f"Kategori kas keluar belum dipetakan ke akun jurnal: {category!r}.")
+
+    value = _positive_journal_amount(amount, "kas keluar").quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+    if value <= 0:
+        raise ValueError("Nominal kas keluar harus lebih besar dari 0.01.")
+
+    group_id = str(uuid4())
+    description = " - ".join(part.strip() for part in (category, note) if part.strip())
+    description = f"{description} | Group_ID: {group_id}"
+    await connection.executemany(
+        """
+        insert into public.jurnal_transaksi
+          (kode_akun, debit, kredit, keterangan)
+        values ($1, $2, $3, $4)
+        """,
+        [
+            (accounts["debit"], value, Decimal("0.00"), description),
+            (accounts["kredit"], Decimal("0.00"), value, description),
+        ],
+    )
+    return group_id
 
 
 async def post_purchase_payment_journal(
