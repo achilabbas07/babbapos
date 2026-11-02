@@ -170,13 +170,52 @@ def test_checkout_journal_entries_insert_balanced_pair_with_required_account_cod
         ("Card", "1-10002"),
     ):
         connection = FakeConnection()
-        asyncio.run(post_checkout_journal_entries(connection, "TRX-001", 12500, method))
+        asyncio.run(post_checkout_journal_entries(connection, {
+            "transaction_id": "TRX-001",
+            "payment_method": method,
+            "total": 12500,
+        }))
 
         assert "insert into public.jurnal_entries" in connection.query
         assert connection.rows == [
-            ("TRX-001", cash_code, "DEBIT", Decimal("12500.00")),
-            ("TRX-001", "4-40000", "KREDIT", Decimal("12500.00")),
+            ("TRX-001", cash_code, "DEBIT", 12500.0),
+            ("TRX-001", "4-40000", "KREDIT", 12500.0),
         ]
+
+
+def test_checkout_journal_payload_with_missing_required_fields_is_rejected():
+    class FakeConnection:
+        async def executemany(self, _query, _rows):
+            raise AssertionError("Invalid payload must not execute SQL.")
+
+    for payload in (
+        {},
+        {"transaction_id": "TRX-001", "payment_method": "Cash"},
+        {"transaction_id": "TRX-001", "payment_method": "Cash", "total": "invalid"},
+    ):
+        try:
+            asyncio.run(post_checkout_journal_entries(FakeConnection(), payload))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Payload checkout yang tidak lengkap harus ditolak.")
+
+
+def test_missing_checkout_payment_method_uses_non_cash_account():
+    class FakeConnection:
+        async def executemany(self, _query, rows):
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    asyncio.run(post_checkout_journal_entries(connection, {
+        "transaction_id": 123,
+        "total": "150.50",
+    }))
+
+    assert connection.rows == [
+        ("123", "1-10002", "DEBIT", 150.5),
+        ("123", "4-40000", "KREDIT", 150.5),
+    ]
 
 
 def test_checkout_journal_insert_errors_propagate():
@@ -185,7 +224,11 @@ def test_checkout_journal_insert_errors_propagate():
             raise RuntimeError("journal insert failed")
 
     try:
-        asyncio.run(post_checkout_journal_entries(FailingConnection(), "TRX-001", 12500, "Cash"))
+        asyncio.run(post_checkout_journal_entries(FailingConnection(), {
+            "transaction_id": "TRX-001",
+            "payment_method": "Cash",
+            "total": 12500,
+        }))
     except RuntimeError as error:
         assert str(error) == "journal insert failed"
     else:

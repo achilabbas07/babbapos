@@ -946,9 +946,11 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
                 await db.transactions.insert_one(trx.to_mongo(), connection=conn)
                 await post_checkout_journal_entries(
                     conn,
-                    trx.id,
-                    trx.total,
-                    trx.method,
+                    {
+                        "transaction_id": trx.id,
+                        "payment_method": trx.method,
+                        "total": trx.total,
+                    },
                 )
                 await post_finance_source(
                     conn,
@@ -964,6 +966,8 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
     except asyncpg.PostgresError as err:
         message = getattr(err, "message", None) or str(err)
         raise HTTPException(400, f"Checkout gagal: {message}") from err
+    except ValueError as err:
+        raise HTTPException(400, f"Checkout gagal: {err}") from err
     if not body.partial:
         old_items, old_w = (bill.items_json, (bill.waiterId, bill.waiterName)) if bill else ([], (None, ""))
         await log_order_diff(old_items, old_w, items, (wid, wname), "payment" if bill else "direct", trx.id)

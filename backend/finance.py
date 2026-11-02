@@ -199,26 +199,43 @@ def get_account_by_payment_method(payment_method: str) -> str:
 
 async def post_checkout_journal_entries(
     connection: Any,
-    transaction_id: str,
-    total: Any,
-    payment_method: str,
+    payload: Any,
 ) -> None:
-    amount = _money(total)
+    if not isinstance(payload, dict):
+        raise ValueError("Payload jurnal checkout tidak valid.")
+
+    transaction_id = payload.get("transaction_id")
+    payment_method = payload.get("payment_method")
+    total = payload.get("total")
+    if transaction_id is None or not str(transaction_id).strip():
+        raise ValueError("ID transaksi wajib diisi untuk membuat jurnal checkout.")
+    if total is None:
+        raise ValueError("Total transaksi wajib diisi untuk membuat jurnal checkout.")
+
+    try:
+        amount = _money(total)
+        amount_float = float(amount)
+    except (InvalidOperation, TypeError, ValueError, OverflowError) as error:
+        raise ValueError("Total transaksi bukan nilai nominal yang valid.") from error
     if not amount.is_finite() or amount <= 0:
         raise ValueError("Total transaksi harus berupa nilai positif yang valid.")
+    if amount_float == float("inf"):
+        raise ValueError("Total transaksi melebihi batas nilai yang didukung.")
 
+    payment_method = str(payment_method or "").strip().casefold()
+    cash_account_code = "1-10001" if payment_method in {"tunai", "cash"} else "1-10002"
     journal_entries = [
         {
-            "transaction_id": transaction_id,
-            "account_code": get_account_by_payment_method(payment_method),
+            "transaction_id": str(transaction_id),
+            "account_code": cash_account_code,
             "position": "DEBIT",
-            "amount": amount,
+            "amount": amount_float,
         },
         {
-            "transaction_id": transaction_id,
+            "transaction_id": str(transaction_id),
             "account_code": "4-40000",
             "position": "KREDIT",
-            "amount": amount,
+            "amount": amount_float,
         },
     ]
     await connection.executemany(
@@ -229,10 +246,10 @@ async def post_checkout_journal_entries(
         """,
         [
             (
-                entry["transaction_id"],
-                entry["account_code"],
-                entry["position"],
-                entry["amount"],
+                str(entry.get("transaction_id")),
+                str(entry.get("account_code")),
+                str(entry.get("position")),
+                float(entry.get("amount")),
             )
             for entry in journal_entries
         ],
