@@ -548,6 +548,9 @@ def test_cash_expense_posts_cash_credit_to_jurnal_transaksi():
 
 def test_cash_movement_posts_category_mapped_balanced_pair_with_group_id():
     class FakeConnection:
+        async def fetch(self, _sql, *_args):
+            return []
+
         async def executemany(self, sql, rows):
             self.sql = sql
             self.rows = list(rows)
@@ -576,8 +579,62 @@ def test_cash_movement_posts_category_mapped_balanced_pair_with_group_id():
         assert str(UUID(group_id)) == group_id
 
 
+def test_cash_movement_resolves_trimmed_case_insensitive_database_category():
+    class FakeConnection:
+        async def fetch(self, sql, *args):
+            self.lookup_sql = sql
+            self.lookup_args = args
+            return [{"account_code": "6-60153"}]
+
+        async def executemany(self, sql, rows):
+            self.sql = sql
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    asyncio.run(post_cash_movement_journal(
+        connection,
+        Decimal("25000"),
+        "  uang makan  ",
+        "Makan staf",
+    ))
+
+    assert "from public.expense_categories" in connection.lookup_sql
+    assert "trim(name) ilike trim($1)" in connection.lookup_sql.lower()
+    assert connection.lookup_args == ("uang makan",)
+    assert connection.rows[0][:3] == (
+        "6-60153",
+        Decimal("25000.00"),
+        Decimal("0.00"),
+    )
+
+
+def test_cash_movement_uses_logged_local_fallback_when_category_lookup_fails(caplog):
+    class DisconnectedConnection:
+        async def fetch(self, _sql, *_args):
+            raise ConnectionError("database connection lost")
+
+        async def executemany(self, sql, rows):
+            self.sql = sql
+            self.rows = list(rows)
+
+    connection = DisconnectedConnection()
+    asyncio.run(post_cash_movement_journal(
+        connection,
+        Decimal("25000"),
+        " UANG MAKAN ",
+        "Makan staf",
+    ))
+
+    assert connection.rows[0][0] == "6-60153"
+    assert connection.rows[1][0] == "1-10001"
+    assert "mencoba pemetaan lokal" in caplog.text
+
+
 def test_cash_movement_rejects_unmapped_category_without_posting():
     class FakeConnection:
+        async def fetch(self, _sql, *_args):
+            return []
+
         async def executemany(self, _sql, _rows):
             raise AssertionError("Kategori yang tidak dipetakan tidak boleh diposting.")
 

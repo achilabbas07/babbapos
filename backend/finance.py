@@ -6,6 +6,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional, Sequence
 from uuid import uuid4
 
+import asyncpg
+
 # Struktur data untuk baris jurnal umum
 JournalLine = tuple[str, str, Decimal, Decimal]
 logger = logging.getLogger(__name__)
@@ -15,19 +17,13 @@ ACCOUNT_BEBAN_OPERASIONAL_ID = "6-60000"
 ACCOUNT_HPP_ID = "5-50000"
 ACCOUNT_KAS_TUNAI_ID = "1-10001"
 
-KATEGORI_PENGELUARAN_MAP = {
-    "pembelian bahan baku": {
-        "debit": ACCOUNT_PERSEDIAAN_BAHAN_ID,
-        "kredit": ACCOUNT_KAS_TUNAI_ID,
-    },
-    "biaya operasional": {
-        "debit": ACCOUNT_BEBAN_OPERASIONAL_ID,
-        "kredit": ACCOUNT_KAS_TUNAI_ID,
-    },
-    "biaya angkut/pengiriman": {
-        "debit": ACCOUNT_HPP_ID,
-        "kredit": ACCOUNT_KAS_TUNAI_ID,
-    },
+KATEGORI_PENGELUARAN_FALLBACK = {
+    "pembelian bahan baku": ACCOUNT_PERSEDIAAN_BAHAN_ID,
+    "biaya operasional": ACCOUNT_BEBAN_OPERASIONAL_ID,
+    "biaya angkut/pengiriman": ACCOUNT_HPP_ID,
+    "uang makan": "6-60153",
+    "belanja bahan baku": ACCOUNT_HPP_ID,
+    "operasional harian": "6-60203",
 }
 
 
@@ -589,16 +585,69 @@ async def post_cash_expense_journal(
     )
 
 
+async def _cash_movement_account_code(connection: Any, category: str) -> str:
+    normalized_category = " ".join(category.strip().casefold().split())
+    escaped_category = (
+        category.strip()
+        .replace("!", "!!")
+        .replace("%", "!%")
+        .replace("_", "!_")
+    )
+
+    try:
+        rows = await connection.fetch(
+            """
+            select nullif(btrim(account_code), '') as account_code
+            from public.expense_categories
+            where trim(name) ilike trim($1) escape '!'
+            limit 2
+            """,
+            escaped_category,
+        )
+    except (
+        asyncpg.PostgresConnectionError,
+        asyncpg.InterfaceError,
+        ConnectionError,
+        OSError,
+        TimeoutError,
+    ):
+        logger.exception(
+            "Gagal membaca public.expense_categories untuk kategori kas keluar %r; "
+            "mencoba pemetaan lokal.",
+            normalized_category,
+        )
+    else:
+        if len(rows) > 1:
+            raise ValueError(
+                f"Kategori kas keluar {category.strip()!r} memiliki lebih dari satu "
+                "pemetaan di public.expense_categories."
+            )
+        if rows:
+            account_code = rows[0]["account_code"]
+            if not account_code:
+                raise ValueError(
+                    f"Kode akun kategori kas keluar {category.strip()!r} kosong."
+                )
+            return str(account_code).strip()
+
+    account_code = KATEGORI_PENGELUARAN_FALLBACK.get(normalized_category)
+    if account_code is None:
+        raise ValueError(
+            f"Kategori kas keluar belum dipetakan ke akun jurnal: {category!r}."
+        )
+    return account_code
+
+
 async def post_cash_movement_journal(
     connection: Any,
     amount: Any,
     category: str,
     note: str,
 ) -> str:
-    normalized_category = " ".join(category.casefold().split()) if isinstance(category, str) else ""
-    accounts = KATEGORI_PENGELUARAN_MAP.get(normalized_category)
-    if accounts is None:
-        raise ValueError(f"Kategori kas keluar belum dipetakan ke akun jurnal: {category!r}.")
+    if not isinstance(category, str) or not category.strip():
+        raise ValueError("Kategori kas keluar wajib diisi.")
+    category = category.strip()
+    debit_account_code = await _cash_movement_account_code(connection, category)
 
     value = _positive_journal_amount(amount, "kas keluar").quantize(
         Decimal("0.01"),
@@ -617,8 +666,8 @@ async def post_cash_movement_journal(
         values ($1, $2, $3, $4)
         """,
         [
-            (accounts["debit"], value, Decimal("0.00"), description),
-            (accounts["kredit"], Decimal("0.00"), value, description),
+            (debit_account_code, value, Decimal("0.00"), description),
+            (ACCOUNT_KAS_TUNAI_ID, Decimal("0.00"), value, description),
         ],
     )
     return group_id
