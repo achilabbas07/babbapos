@@ -12,6 +12,7 @@ from finance import (
     get_chart_of_accounts,
     get_recent_finance_transactions,
     post_cash_expense_journal,
+    post_checkout_journal_entries,
     post_debt_payment_journal,
     post_purchase_journal,
     post_purchase_payment_journal,
@@ -151,6 +152,44 @@ def test_payment_methods_map_to_the_project_chart_of_accounts_codes():
     assert get_account_by_payment_method("Cash") == "1-10001"
     for method in ("QRIS", "Debit", "Card", "Credit", "Credit Card"):
         assert get_account_by_payment_method(method) == "1-10002"
+
+
+def test_checkout_journal_entries_insert_balanced_pair_with_required_account_codes():
+    class FakeConnection:
+        query = None
+        rows = None
+
+        async def executemany(self, query, rows):
+            self.query = query
+            self.rows = list(rows)
+
+    for method, cash_code in (
+        ("Cash", "1-10001"),
+        ("QRIS", "1-10002"),
+        ("Debit", "1-10002"),
+        ("Card", "1-10002"),
+    ):
+        connection = FakeConnection()
+        asyncio.run(post_checkout_journal_entries(connection, "TRX-001", 12500, method))
+
+        assert "insert into public.jurnal_entries" in connection.query
+        assert connection.rows == [
+            ("TRX-001", cash_code, "DEBIT", Decimal("12500.00")),
+            ("TRX-001", "4-40000", "KREDIT", Decimal("12500.00")),
+        ]
+
+
+def test_checkout_journal_insert_errors_propagate():
+    class FailingConnection:
+        async def executemany(self, _query, _rows):
+            raise RuntimeError("journal insert failed")
+
+    try:
+        asyncio.run(post_checkout_journal_entries(FailingConnection(), "TRX-001", 12500, "Cash"))
+    except RuntimeError as error:
+        assert str(error) == "journal insert failed"
+    else:
+        raise AssertionError("Kegagalan insert jurnal harus diteruskan ke transaksi checkout.")
 
 
 def test_unknown_payment_methods_are_rejected():

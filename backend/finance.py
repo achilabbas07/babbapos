@@ -197,6 +197,48 @@ def get_account_by_payment_method(payment_method: str) -> str:
     return "1-10001" if method == "Cash" else "1-10002"
 
 
+async def post_checkout_journal_entries(
+    connection: Any,
+    transaction_id: str,
+    total: Any,
+    payment_method: str,
+) -> None:
+    amount = _money(total)
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("Total transaksi harus berupa nilai positif yang valid.")
+
+    journal_entries = [
+        {
+            "transaction_id": transaction_id,
+            "account_code": get_account_by_payment_method(payment_method),
+            "position": "DEBIT",
+            "amount": amount,
+        },
+        {
+            "transaction_id": transaction_id,
+            "account_code": "4-40000",
+            "position": "KREDIT",
+            "amount": amount,
+        },
+    ]
+    await connection.executemany(
+        """
+        insert into public.jurnal_entries
+          (transaction_id, account_code, position, amount)
+        values ($1, $2, $3, $4)
+        """,
+        [
+            (
+                entry["transaction_id"],
+                entry["account_code"],
+                entry["position"],
+                entry["amount"],
+            )
+            for entry in journal_entries
+        ],
+    )
+
+
 def _transaction_amounts(total: Any, admin_fee: Any) -> tuple[Decimal, Decimal]:
     try:
         amount = _money(total)

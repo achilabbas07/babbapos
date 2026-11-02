@@ -26,9 +26,10 @@ from finance import (
     get_recent_finance_transactions,
     normalize_payment_method,
     post_cash_expense_journal,
+    post_checkout_journal_entries,
     post_debt_payment_journal,
-    post_purchase_journal,
     post_finance_source,
+    post_purchase_journal,
     purchase_journal_lines,
     transaction_account_codes,
     transaction_lines,
@@ -943,6 +944,12 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         async with db.pool.acquire() as conn:
             async with conn.transaction():
                 await db.transactions.insert_one(trx.to_mongo(), connection=conn)
+                await post_checkout_journal_entries(
+                    conn,
+                    trx.id,
+                    trx.total,
+                    trx.method,
+                )
                 await post_finance_source(
                     conn,
                     "transaction",
