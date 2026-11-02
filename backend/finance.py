@@ -545,15 +545,6 @@ async def post_finance_source(
             if isinstance(account_name, str) and account_name.strip():
                 master_account_names[code] = account_name.strip()
 
-        missing_codes = [
-            code for code in required_codes
-            if account_ids.get(code) is None
-        ]
-        if missing_codes:
-            raise RuntimeError(
-                f"UUID akun master tidak ditemukan untuk kode akun: {', '.join(missing_codes)}."
-            )
-
     entry_id = uuid4()
     account_names_by_code = {
         "1-10001": "Kas Tunai",

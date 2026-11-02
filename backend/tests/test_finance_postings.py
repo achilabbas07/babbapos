@@ -572,29 +572,32 @@ def test_post_finance_source_fills_missing_transaction_account_names():
     assert [row[4] for row in connection.rows] == ["Kas Tunai", "Pendapatan"]
 
 
-def test_post_finance_source_rejects_missing_master_account_uuid():
+def test_post_finance_source_keeps_posting_when_master_account_uuid_is_missing():
     class FakeConnection:
         async def fetch(self, sql, account_codes):
             return []
 
         async def executemany(self, sql, rows):
-            raise AssertionError("Jurnal tidak boleh disimpan tanpa UUID akun master.")
+            self.rows = list(rows)
 
-    try:
-        asyncio.run(post_finance_source(
-            FakeConnection(),
-            "transaction",
-            "TRX-TEST",
-            date(2026, 10, 30),
-            "Penjualan test",
-            "USR-ADMIN",
-            [("Kas Tunai", "asset", Decimal("100"), Decimal("0"))],
-            ["1-10001"],
-        ))
-    except RuntimeError as error:
-        assert "1-10001" in str(error)
-    else:
-        raise AssertionError("UUID akun master yang hilang harus menggagalkan pemostingan.")
+    connection = FakeConnection()
+    asyncio.run(post_finance_source(
+        connection,
+        "transaction",
+        "TRX-TEST",
+        date(2026, 10, 30),
+        "Penjualan test",
+        "USR-ADMIN",
+        [
+            ("Kas Tunai", "asset", Decimal("100"), Decimal("0")),
+            ("Pendapatan", "revenue", Decimal("0"), Decimal("100")),
+        ],
+        ["1-10001", "4-40000"],
+    ))
+
+    assert [row[4] for row in connection.rows] == ["Kas Tunai", "Pendapatan"]
+    assert [row[6] for row in connection.rows] == ["1-10001", "4-40000"]
+    assert [row[7] for row in connection.rows] == [None, None]
 
 
 def test_dashboard_neraca_kas_reads_summary_view():
