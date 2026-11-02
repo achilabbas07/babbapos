@@ -299,7 +299,7 @@ def test_post_stok_pembelian_inserts_inventory_and_payable_journal_pair():
     descriptions = [row[3] for row in connection.rows]
     assert descriptions[0] == descriptions[1]
     assert "Supplier: 00000000-0000-0000-0000-000000000123" in descriptions[0]
-    assert re.search(r"Group: [0-9a-f-]{36}$", descriptions[0])
+    assert re.search(r"Group_ID: [0-9a-f-]{36}$", descriptions[0])
 
 
 def test_post_hpp_checkout_inserts_expense_and_inventory_journal_pair():
@@ -503,14 +503,18 @@ def test_purchase_and_debt_payment_code_journals_use_required_account_codes():
         purchase_connection, 1200, "cash", "1-10002", "Pembelian PO-002"
     ))
     assert purchase_connection.rows == [
-        ("1-10003", Decimal("1200.00"), Decimal("0"), "Pembelian PO-002"),
-        ("1-10002", Decimal("0"), Decimal("1200.00"), "Pembelian PO-002"),
+        ("1-10003", Decimal("1200.00"), Decimal("0"), purchase_connection.rows[0][3]),
+        ("1-10002", Decimal("0"), Decimal("1200.00"), purchase_connection.rows[0][3]),
     ]
+    assert purchase_connection.rows[0][3] == purchase_connection.rows[1][3]
+    assert re.search(r"Group_ID: [0-9a-f-]{36}$", purchase_connection.rows[0][3])
 
     asyncio.run(post_purchase_journal(
         purchase_connection, 1200, "credit", None, "Pembelian PO-001"
     ))
     assert [row[0] for row in purchase_connection.rows] == ["1-10003", "2-20001"]
+    assert purchase_connection.rows[0][3] == purchase_connection.rows[1][3]
+    assert re.search(r"Group_ID: [0-9a-f-]{36}$", purchase_connection.rows[0][3])
     assert "insert into public.jurnal_transaksi" in purchase_connection.sql
 
     payment_connection = FakeConnection()

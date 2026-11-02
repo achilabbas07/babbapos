@@ -31,7 +31,6 @@ from finance import (
     post_hpp_checkout,
     post_finance_source,
     post_purchase_journal,
-    post_stok_pembelian,
     purchase_journal_lines,
     transaction_account_codes,
     transaction_lines,
@@ -1026,37 +1025,37 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
                         status_pembayaran="belum_lunas" if body.metode_pembayaran == "credit" else "lunas",
                         sisa_utang=total_cost if body.metode_pembayaran == "credit" else 0,
                         userId=user.id, userName=user.name)
-    async with db.pool.acquire() as conn:
-        async with conn.transaction():
-            await db.purchases.insert_one(purchase.to_mongo(), connection=conn)
-            await post_finance_source(
-                conn,
-                "purchase",
-                purchase.id,
-                date.fromisoformat(purchase.date[:10]),
-                f"Pembelian persediaan {purchase.id}",
-                user.id,
-                purchase_journal_lines(
+    try:
+        async with db.pool.acquire() as conn:
+            async with conn.transaction():
+                await db.purchases.insert_one(purchase.to_mongo(), connection=conn)
+                await post_finance_source(
+                    conn,
+                    "purchase",
+                    purchase.id,
+                    date.fromisoformat(purchase.date[:10]),
+                    f"Pembelian persediaan {purchase.id}",
+                    user.id,
+                    purchase_journal_lines(
+                        purchase.total_cost,
+                        body.metode_pembayaran,
+                        body.sumber_dana_akun,
+                    ),
+                )
+                await post_purchase_journal(
+                    conn,
                     purchase.total_cost,
                     body.metode_pembayaran,
                     body.sumber_dana_akun,
-                ),
-            )
-            await post_purchase_journal(
-                conn,
-                purchase.total_cost,
-                body.metode_pembayaran,
-                body.sumber_dana_akun,
-                f"Pembelian persediaan {purchase.id} - {purchase.supplier}",
-            )
-            if body.metode_pembayaran == "credit":
-                await post_stok_pembelian(
-                    conn,
-                    {
-                        "purchase_id": purchase.id,
-                        "total_harga": purchase.total_cost,
-                    },
+                    f"Pembelian persediaan {purchase.id} - {purchase.supplier}",
                 )
+    except asyncpg.PostgresError:
+        logger.exception(
+            "Gagal menyimpan pembelian %s dengan metode %s",
+            purchase.id,
+            body.metode_pembayaran,
+        )
+        raise
     for inv_id in ids:
         await recalc_hpp_for_inventory(inv_id)
     return purchase

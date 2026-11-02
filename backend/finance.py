@@ -270,7 +270,7 @@ async def post_stok_pembelian(connection: Any, purchase_data: Any) -> None:
     if supplier_id is not None:
         description += f" | Supplier: {str(supplier_id)}"
     group_id = str(uuid4())
-    description += f" | Group: {group_id}"
+    description += f" | Group_ID: {group_id}"
     await connection.executemany(
         """
         insert into public.jurnal_transaksi
@@ -517,9 +517,14 @@ async def post_purchase_journal(
         if funding_account_code not in {"1-10001", "1-10002"}:
             raise ValueError("Sumber dana pembelian tunai tidak valid.")
         credit_code = funding_account_code
-    value = _money(amount)
+    value = _positive_journal_amount(amount, "pembelian").quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
     if value <= 0:
         return
+    group_id = str(uuid4())
+    description = f"{description.strip()} | Group_ID: {group_id}"
     await connection.executemany(
         """
         insert into public.jurnal_transaksi

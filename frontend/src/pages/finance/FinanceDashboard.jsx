@@ -191,27 +191,6 @@ export default function FinanceDashboard() {
           )}
         </section>
       </div>
-      <section className="mt-4 rounded-2xl border border-border bg-white p-5 shadow-sm">
-        <h2 className="mb-4 text-base font-semibold">Daftar Akun (Chart of Accounts)</h2>
-        {accountsError && <div className="mb-4"><FinanceError message={accountsError} onRetry={loadDashboard} /></div>}
-        {accountsLoading ? <LoadingPanel /> : (
-          <FinanceTable
-            rows={accounts}
-            emptyText="Belum ada akun di Chart of Accounts."
-            columns={[
-              { key: "account_code", label: "Kode Akun" },
-              { key: "account_name", label: "Nama Akun" },
-              { key: "account_category", label: "Kategori / Tipe Akun" },
-              {
-                key: "balance",
-                label: "Saldo Ter-update",
-                className: "text-right whitespace-nowrap",
-                render: (row) => <Money value={row.balance} />,
-              },
-            ]}
-          />
-        )}
-      </section>
     </div>
   );
 }
