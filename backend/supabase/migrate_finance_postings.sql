@@ -51,6 +51,8 @@ update public.general_ledger
 set transaction_date = entry_date
 where transaction_date is null;
 
+set constraints all immediate;
+
 alter table public.general_ledger
   alter column transaction_date set default current_date,
   alter column transaction_date set not null;
