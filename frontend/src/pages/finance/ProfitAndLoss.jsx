@@ -6,6 +6,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { api, errMsg, rp } from "@/lib/api";
 import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared";
 import FinanceDateFilter from "./FinanceDateFilter";
+import { normalizeProfitLossData } from "./profitAndLossData";
 
 export default function ProfitAndLoss() {
   const { profile, appName } = useProfile();
@@ -20,8 +21,9 @@ export default function ProfitAndLoss() {
     setLoading(true);
     try {
       const { data } = await api.get("/finance/profit-loss", { params: filters });
-      setRows(data.rows);
-      setSummary(data.summary);
+      const report = normalizeProfitLossData(data);
+      setRows(report.rows);
+      setSummary(report.summary);
     } catch (requestError) {
       setError(errMsg(requestError));
     } finally {
