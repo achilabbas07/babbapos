@@ -1,4 +1,4 @@
-import { errMsg, getBackendConfigError } from "./api";
+import { errMsg, getBackendConfigError, rp } from "./api";
 
 describe("errMsg", () => {
   it("uses backend error messages from 500 responses", () => {
@@ -26,4 +26,18 @@ describe("getBackendConfigError", () => {
   it("allows localhost during local development", () => {
     expect(getBackendConfigError("http://localhost:8001", "localhost")).toBe("");
   });
+});
+
+describe("rp", () => {
+  it("formats Rupiah with standard Indonesian thousands separators", () => {
+    expect(rp(1234567)).toBe("Rp 1.234.567");
+    expect(rp("1234567")).toBe("Rp 1.234.567");
+  });
+
+  it.each([null, undefined, "", "   ", "not a number", NaN, Infinity])(
+    "falls back safely for invalid input %s",
+    (value) => {
+      expect(rp(value)).toBe("Rp 0");
+    }
+  );
 });

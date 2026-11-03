@@ -60,7 +60,14 @@ export function errMsg(e) {
 
 const rpFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
 const numFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
-export const rp = (v) => `rp. ${rpFmt.format(Number(v) || 0)}`;
+export const rp = (v) => {
+  const amount = typeof v === "number"
+    ? v
+    : typeof v === "string" && v.trim() !== ""
+      ? Number(v)
+      : Number.NaN;
+  return `Rp ${rpFmt.format(Number.isFinite(amount) ? amount : 0)}`;
+};
 export const num = (v) => numFmt.format(v || 0);
 export const itemName = (i) => i.variantName || i.productName;
 export const itemKey = (i) => `${i.productId}:${i.variantId ?? ""}`;
