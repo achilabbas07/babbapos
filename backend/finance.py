@@ -205,48 +205,39 @@ def _money(value: Any) -> Decimal:
 
 async def get_profit_and_loss_report(
     pool: Any,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
 ) -> dict[str, Any]:
     rows = await pool.fetch(
         """
-        with classified_ledger as (
-          select
-            account_code,
-            account_name,
-            case left(btrim(account_code), 1)
-              when '4' then 'revenue'
-              when '5' then 'cogs'
-              when '6' then 'expense'
-            end as account_type,
-            debit,
-            credit
-          from public.general_ledger
-          where left(btrim(account_code), 1) in ('4', '5', '6')
-            and ($1::date is null or transaction_date >= $1)
-            and ($2::date is null or transaction_date < $2)
-        )
-        select
-          account_code,
-          account_name,
-          account_type,
-          sum(case when account_type = 'revenue' then credit - debit else debit - credit end) as balance
-        from classified_ledger
-        group by account_code, account_name, account_type
-        having sum(case when account_type = 'revenue' then credit - debit else debit - credit end) <> 0
-        order by account_code, account_name
-        """,
-        start_date,
-        end_date,
+        select account_name, account_type, balance
+        from public.view_profit_and_loss
+        order by account_type, account_name
+        """
     )
-    report_rows = [dict(row) for row in rows]
-    totals = {
-        account_type: sum(
-            (Decimal(str(row["balance"])) for row in report_rows if row["account_type"] == account_type),
-            Decimal("0"),
-        )
-        for account_type in ("revenue", "cogs", "expense")
+    account_type_aliases = {
+        "revenue": "revenue",
+        "cost_of_goods_sold": "cogs",
+        "cogs": "cogs",
+        "operating_expense": "expense",
+        "expense": "expense",
     }
+    report_rows = []
+    totals = {"revenue": Decimal("0"), "cogs": Decimal("0"), "expense": Decimal("0")}
+    for row in rows:
+        report_row = dict(row)
+        account_type = account_type_aliases.get(str(report_row.get("account_type") or "").strip().lower())
+        if account_type is None:
+            raise ValueError(f"Tipe akun laporan laba-rugi tidak didukung: {report_row.get('account_type')!r}.")
+        try:
+            balance = Decimal(str(report_row["balance"]))
+        except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+            raise ValueError("Saldo akun laporan laba-rugi tidak valid.") from error
+        if not balance.is_finite() or not isinstance(report_row.get("account_name"), str):
+            raise ValueError("Akun atau saldo laporan laba-rugi tidak valid.")
+        report_row["account_type"] = account_type
+        report_row["balance"] = balance
+        report_rows.append(report_row)
+        totals[account_type] += balance
+
     return {
         "rows": report_rows,
         "summary": {

@@ -44,9 +44,9 @@ create index if not exists general_ledger_date_type_idx
 alter table public.general_ledger enable row level security;
 revoke all on table public.general_ledger from public, anon, authenticated;
 
+drop view if exists public.view_balance_sheet;
 drop view if exists public.view_profit_and_loss_summary;
 drop view if exists public.view_profit_and_loss;
-drop view if exists public.view_balance_sheet;
 drop view if exists public.view_arus_kas_bulanan;
 
 create or replace view public.view_arus_kas_bulanan as

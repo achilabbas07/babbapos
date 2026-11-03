@@ -1,52 +1,66 @@
 import asyncio
-from datetime import date
 from decimal import Decimal
 
 from finance import get_profit_and_loss_report
 
 
-def test_profit_loss_uses_account_code_prefixes_and_separates_hpp():
+def test_profit_loss_preserves_rows_from_view_and_accepts_standard_types():
     class FakePool:
         async def fetch(self, query, *args):
             normalized_query = " ".join(query.lower().split())
-            assert "where left(btrim(account_code), 1) in ('4', '5', '6')" in normalized_query
-            assert "account_type in" not in normalized_query
-            assert "when '5' then 'cogs'" in normalized_query
-            assert "when account_type = 'revenue' then credit - debit else debit - credit" in normalized_query
-            assert args == (date(2026, 11, 1), date(2026, 12, 1))
+            assert "from public.view_profit_and_loss" in normalized_query
+            assert "select account_name, account_type, balance" in normalized_query
+            assert "account_id" not in normalized_query
+            assert "entry_id" not in normalized_query
+            assert "transaction_date" not in normalized_query
+            assert args == ()
             return [
                 {
-                    "account_code": "4-40001",
                     "account_name": "Penjualan",
                     "account_type": "revenue",
                     "balance": Decimal("1000.00"),
                 },
                 {
-                    "account_code": "5-50001",
-                    "account_name": "Beban HPP - Tissu",
-                    "account_type": "cogs",
+                    "account_name": "HPP Barang",
+                    "account_type": "cost_of_goods_sold",
                     "balance": Decimal("200.00"),
                 },
                 {
-                    "account_code": "6-60001",
-                    "account_name": "Uang Makan",
-                    "account_type": "expense",
+                    "account_name": "Beban HPP - Tissu",
+                    "account_type": "cost_of_goods_sold",
+                    "balance": Decimal("30.00"),
+                },
+                {
+                    "account_name": "Beban Operasional",
+                    "account_type": "operating_expense",
                     "balance": Decimal("50.00"),
+                },
+                {
+                    "account_name": "Uang Makan",
+                    "account_type": "operating_expense",
+                    "balance": Decimal("10.00"),
                 },
             ]
 
-    report = asyncio.run(
-        get_profit_and_loss_report(
-            FakePool(),
-            start_date=date(2026, 11, 1),
-            end_date=date(2026, 12, 1),
-        )
-    )
+    report = asyncio.run(get_profit_and_loss_report(FakePool()))
 
     assert report["summary"] == {
         "revenue": Decimal("1000.00"),
-        "hpp": Decimal("200.00"),
-        "expenses": Decimal("50.00"),
-        "net_profit": Decimal("750.00"),
+        "hpp": Decimal("230.00"),
+        "expenses": Decimal("60.00"),
+        "net_profit": Decimal("710.00"),
     }
-    assert [row["account_type"] for row in report["rows"]] == ["revenue", "cogs", "expense"]
+    assert [row["account_name"] for row in report["rows"]] == [
+        "Penjualan",
+        "HPP Barang",
+        "Beban HPP - Tissu",
+        "Beban Operasional",
+        "Uang Makan",
+    ]
+    assert [row["account_type"] for row in report["rows"]] == [
+        "revenue",
+        "cogs",
+        "cogs",
+        "expense",
+        "expense",
+    ]
