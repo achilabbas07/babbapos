@@ -10,9 +10,19 @@ const isAssetAccount = (row) => {
     || /^(kas|cash|bank|piutang|persediaan|inventori|aset|aktiva|peralatan|gedung|kendaraan)\b/.test(accountName);
 };
 
-export const normalizeProfitLossData = (data) => {
+const isHppAccount = (row) => (
+  /\b(hpp|harga pokok penjualan|cost of goods sold|cogs)\b/i.test(row.account_name)
+);
+
+export const normalizeProfitLossData = (data, dashboardHPP) => {
   if (!Array.isArray(data?.rows)) {
     throw new Error("Format rincian laporan laba-rugi dari server tidak valid.");
+  }
+  const hpp = typeof dashboardHPP === "number" || (typeof dashboardHPP === "string" && dashboardHPP.trim() !== "")
+    ? Number(dashboardHPP)
+    : Number.NaN;
+  if (!Number.isFinite(hpp)) {
+    throw new Error("Nilai HPP dari ringkasan laporan tidak valid.");
   }
 
   const validRows = data.rows.map((row) => {
@@ -29,7 +39,7 @@ export const normalizeProfitLossData = (data) => {
   });
 
   const eligibleRows = validRows.filter((row) => (
-    !isAssetAccount(row) && ["revenue", "expense"].includes(row.account_type)
+    !isAssetAccount(row) && !isHppAccount(row) && ["revenue", "expense"].includes(row.account_type)
   ));
   const revenueRows = eligibleRows.filter((row) => row.account_type === "revenue");
   const namedSalesRows = revenueRows.filter((row) => (
@@ -47,9 +57,18 @@ export const normalizeProfitLossData = (data) => {
   }
 
   const expenses = eligibleRows.filter((row) => row.account_type === "expense");
-  const rows = [...revenues, ...expenses];
+  const hppRow = { account_name: "HPP", account_type: "cogs", balance: hpp };
+  const rows = [...revenues, hppRow, ...expenses];
   const revenue = revenues.reduce((total, row) => total + row.balance, 0);
   const expense = expenses.reduce((total, row) => total + row.balance, 0);
 
-  return { rows, summary: { revenue, expenses: expense, net_profit: revenue - expense } };
+  return {
+    rows,
+    summary: {
+      revenue,
+      hpp,
+      expenses: expense,
+      net_profit: revenue - hpp - expense,
+    },
+  };
 };

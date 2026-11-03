@@ -8,6 +8,38 @@ import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared
 import FinanceDateFilter from "./FinanceDateFilter";
 import { normalizeProfitLossData } from "./profitAndLossData";
 
+const toDateString = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getDashboardSummaryParams = (filters) => {
+  let start;
+  let end;
+  if (filters.start && filters.end) {
+    ({ start, end } = filters);
+  } else if (filters.month && filters.year) {
+    const month = Number(filters.month);
+    const year = Number(filters.year);
+    start = toDateString(new Date(year, month - 1, 1));
+    end = toDateString(new Date(year, month, 0));
+  } else {
+    start = "1970-01-01";
+    end = toDateString(new Date());
+  }
+
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+  endDate.setDate(endDate.getDate() + 1);
+  return {
+    start: startDate.toISOString(),
+    end: endDate.toISOString(),
+    tz_offset: new Date().getTimezoneOffset(),
+  };
+};
+
 export default function ProfitAndLoss() {
   const { profile, appName } = useProfile();
   const [filters, setFilters] = useState({});
@@ -20,8 +52,11 @@ export default function ProfitAndLoss() {
     setError("");
     setLoading(true);
     try {
-      const { data } = await api.get("/finance/profit-loss", { params: filters });
-      const report = normalizeProfitLossData(data);
+      const [profitLossResponse, dashboardResponse] = await Promise.all([
+        api.get("/finance/profit-loss", { params: filters }),
+        api.get("/reports/summary", { params: getDashboardSummaryParams(filters) }),
+      ]);
+      const report = normalizeProfitLossData(profitLossResponse.data, dashboardResponse.data?.cogs);
       setRows(report.rows);
       setSummary(report.summary);
     } catch (requestError) {
@@ -34,6 +69,7 @@ export default function ProfitAndLoss() {
   useEffect(() => { load(); }, [load]);
 
   const revenues = rows.filter((row) => row.account_type === "revenue");
+  const hppRows = rows.filter((row) => row.account_type === "cogs");
   const expenses = rows.filter((row) => row.account_type === "expense");
   const exportExcel = () => {
     const sheet = XLSX.utils.aoa_to_sheet([
@@ -43,10 +79,12 @@ export default function ProfitAndLoss() {
       [],
       ["Jenis", "Nama akun", "Jumlah (Rp)"],
       ...revenues.map((row) => ["Pendapatan", row.account_name, Number(row.balance) || 0]),
+      ...hppRows.map((row) => ["HPP", row.account_name, Number(row.balance) || 0]),
       ...expenses.map((row) => ["Beban", row.account_name, Number(row.balance) || 0]),
       [],
       ["Ringkasan", "Total"],
       ["Total pendapatan", Number(summary?.revenue) || 0],
+      ["HPP", Number(summary?.hpp) || 0],
       ["Total beban", Number(summary?.expenses) || 0],
       ["Laba / (rugi) bersih", Number(summary?.net_profit) || 0],
     ]);
@@ -87,8 +125,9 @@ export default function ProfitAndLoss() {
             <p className="mt-1 text-xs text-muted-foreground">Dicetak {new Date().toLocaleDateString("id-ID", { dateStyle: "long" })}</p>
           </header>
 
-          <div className="no-print print:hidden mb-6 grid gap-4 sm:grid-cols-3">
+          <div className="no-print print:hidden mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Total pendapatan" value={rp(summary.revenue)} tone="text-emerald-700" />
+            <StatCard label="HPP" value={rp(summary.hpp)} tone="text-amber-700" />
             <StatCard label="Total beban" value={rp(summary.expenses)} tone="text-destructive" />
             <StatCard label="Laba / (rugi) bersih" value={rp(summary.net_profit)} tone={Number(summary.net_profit) >= 0 ? "text-primary" : "text-destructive"} />
           </div>
@@ -103,6 +142,14 @@ export default function ProfitAndLoss() {
               ]}
             />
             <FinanceTable
+              rows={hppRows}
+              emptyText="Belum ada HPP tercatat."
+              columns={[
+                { key: "account_name", label: "Harga Pokok Penjualan (HPP)" },
+                { key: "balance", label: "Jumlah", className: "finance-amount text-right", render: (row) => <Money value={row.balance} /> },
+              ]}
+            />
+            <FinanceTable
               rows={expenses}
               emptyText="Belum ada beban tercatat."
               columns={[
@@ -112,6 +159,7 @@ export default function ProfitAndLoss() {
             />
             <section className="ml-auto max-w-md space-y-2 border-t-2 border-slate-800 pt-4">
               <div className="flex justify-between gap-4 text-sm"><span>Total pendapatan</span><Money value={summary.revenue} /></div>
+              <div className="flex justify-between gap-4 text-sm"><span>HPP</span><Money value={summary.hpp} /></div>
               <div className="flex justify-between gap-4 text-sm"><span>Total beban</span><Money value={summary.expenses} /></div>
               <div className="flex justify-between gap-4 border-t border-slate-400 pt-2 font-bold"><span>Laba / (rugi) bersih</span><Money value={summary.net_profit} /></div>
             </section>
