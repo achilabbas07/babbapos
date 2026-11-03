@@ -203,6 +203,61 @@ def _money(value: Any) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+async def get_profit_and_loss_report(
+    pool: Any,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> dict[str, Any]:
+    rows = await pool.fetch(
+        """
+        with classified_ledger as (
+          select
+            account_code,
+            account_name,
+            case left(btrim(account_code), 1)
+              when '4' then 'revenue'
+              when '5' then 'cogs'
+              when '6' then 'expense'
+            end as account_type,
+            debit,
+            credit
+          from public.general_ledger
+          where left(btrim(account_code), 1) in ('4', '5', '6')
+            and ($1::date is null or transaction_date >= $1)
+            and ($2::date is null or transaction_date < $2)
+        )
+        select
+          account_code,
+          account_name,
+          account_type,
+          sum(case when account_type = 'revenue' then credit - debit else debit - credit end) as balance
+        from classified_ledger
+        group by account_code, account_name, account_type
+        having sum(case when account_type = 'revenue' then credit - debit else debit - credit end) <> 0
+        order by account_code, account_name
+        """,
+        start_date,
+        end_date,
+    )
+    report_rows = [dict(row) for row in rows]
+    totals = {
+        account_type: sum(
+            (Decimal(str(row["balance"])) for row in report_rows if row["account_type"] == account_type),
+            Decimal("0"),
+        )
+        for account_type in ("revenue", "cogs", "expense")
+    }
+    return {
+        "rows": report_rows,
+        "summary": {
+            "revenue": totals["revenue"],
+            "hpp": totals["cogs"],
+            "expenses": totals["expense"],
+            "net_profit": totals["revenue"] - totals["cogs"] - totals["expense"],
+        },
+    }
+
+
 def normalize_payment_method(payment_method: str) -> str:
     if not isinstance(payment_method, str):
         raise ValueError("Metode pembayaran tidak valid.")

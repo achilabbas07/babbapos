@@ -23,6 +23,7 @@ from finance import (
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
     get_laporan_arus_kas,
+    get_profit_and_loss_report,
     get_recent_finance_transactions,
     normalize_payment_method,
     post_cash_expense_journal,
@@ -1599,42 +1600,7 @@ async def finance_profit_loss(
 ):
     period_start, period_end = finance_period_bounds(start, end, month, year)
     await db.connect()
-    rows = await db.pool.fetch(
-        """
-        select account_name, account_type, balance
-        from (
-          select
-            account_name,
-            account_type,
-            sum(case when account_type = 'revenue' then credit - debit else debit - credit end) as balance
-          from public.general_ledger
-          where account_type in ('revenue', 'expense')
-            and ($1::date is null or transaction_date >= $1)
-            and ($2::date is null or transaction_date < $2)
-          group by account_name, account_type
-          having sum(case when account_type = 'revenue' then credit - debit else debit - credit end) <> 0
-        ) as profit_loss
-        order by account_type, account_name
-        """,
-        period_start,
-        period_end,
-    )
-    summary = await db.pool.fetchrow(
-        """
-        select
-          coalesce(sum(case when account_type = 'revenue' then credit - debit end), 0) as revenue,
-          coalesce(sum(case when account_type = 'expense' then debit - credit end), 0) as expenses,
-          coalesce(sum(case when account_type = 'revenue' then credit - debit end), 0)
-            - coalesce(sum(case when account_type = 'expense' then debit - credit end), 0) as net_profit
-        from public.general_ledger
-        where account_type in ('revenue', 'expense')
-          and ($1::date is null or transaction_date >= $1)
-          and ($2::date is null or transaction_date < $2)
-        """,
-        period_start,
-        period_end,
-    )
-    return {"rows": [dict(row) for row in rows], "summary": dict(summary)}
+    return await get_profit_and_loss_report(db.pool, period_start, period_end)
 
 
 # ---------- Reports ----------

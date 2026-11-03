@@ -8,38 +8,6 @@ import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared
 import FinanceDateFilter from "./FinanceDateFilter";
 import { normalizeProfitLossData } from "./profitAndLossData";
 
-const toDateString = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const getDashboardSummaryParams = (filters) => {
-  let start;
-  let end;
-  if (filters.start && filters.end) {
-    ({ start, end } = filters);
-  } else if (filters.month && filters.year) {
-    const month = Number(filters.month);
-    const year = Number(filters.year);
-    start = toDateString(new Date(year, month - 1, 1));
-    end = toDateString(new Date(year, month, 0));
-  } else {
-    start = "1970-01-01";
-    end = toDateString(new Date());
-  }
-
-  const startDate = new Date(`${start}T00:00:00`);
-  const endDate = new Date(`${end}T00:00:00`);
-  endDate.setDate(endDate.getDate() + 1);
-  return {
-    start: startDate.toISOString(),
-    end: endDate.toISOString(),
-    tz_offset: new Date().getTimezoneOffset(),
-  };
-};
-
 export default function ProfitAndLoss() {
   const { profile, appName } = useProfile();
   const [filters, setFilters] = useState({});
@@ -52,11 +20,8 @@ export default function ProfitAndLoss() {
     setError("");
     setLoading(true);
     try {
-      const [profitLossResponse, dashboardResponse] = await Promise.all([
-        api.get("/finance/profit-loss", { params: filters }),
-        api.get("/reports/summary", { params: getDashboardSummaryParams(filters) }),
-      ]);
-      const report = normalizeProfitLossData(profitLossResponse.data, dashboardResponse.data?.cogs);
+      const profitLossResponse = await api.get("/finance/profit-loss", { params: filters });
+      const report = normalizeProfitLossData(profitLossResponse.data);
       setRows(report.rows);
       setSummary(report.summary);
     } catch (requestError) {
@@ -102,7 +67,7 @@ export default function ProfitAndLoss() {
   return (
     <div>
       <div className="no-print print:hidden">
-        <PageHeader title="Laporan Laba Rugi" subtitle="Rincian pendapatan dan beban operasional dari jurnal umum dan transaksi POS.">
+        <PageHeader title="Laporan Laba Rugi" subtitle="Rincian pendapatan, HPP, dan beban operasional berdasarkan kode akun jurnal umum.">
           <button type="button" disabled={!summary} onClick={exportExcel} className="inline-flex h-10 items-center rounded-lg border border-border bg-card px-4 text-sm font-semibold hover:border-primary disabled:opacity-50">
             <Download className="mr-2 h-4 w-4" />Unduh Excel
           </button>

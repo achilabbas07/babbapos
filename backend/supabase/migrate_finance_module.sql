@@ -88,6 +88,20 @@ having sum(
 ) <> 0;
 
 create or replace view public.view_profit_and_loss as
+with classified_ledger as (
+  select
+    account_code,
+    account_name,
+    case left(btrim(account_code), 1)
+      when '4' then 'revenue'
+      when '5' then 'cogs'
+      when '6' then 'expense'
+    end as account_type,
+    debit,
+    credit
+  from public.general_ledger
+  where left(btrim(account_code), 1) in ('4', '5', '6')
+)
 select
   account_name,
   account_type,
@@ -96,10 +110,10 @@ select
       when account_type = 'revenue' then credit - debit
       else debit - credit
     end
-  ) as balance
-from public.general_ledger
-where account_type in ('revenue', 'expense')
-group by account_name, account_type
+  ) as balance,
+  account_code
+from classified_ledger
+group by account_code, account_name, account_type
 having sum(
   case
     when account_type = 'revenue' then credit - debit
@@ -110,8 +124,10 @@ having sum(
 create or replace view public.view_profit_and_loss_summary as
 select
   coalesce(sum(balance) filter (where account_type = 'revenue'), 0) as revenue,
+  coalesce(sum(balance) filter (where account_type = 'cogs'), 0) as hpp,
   coalesce(sum(balance) filter (where account_type = 'expense'), 0) as expenses,
   coalesce(sum(balance) filter (where account_type = 'revenue'), 0)
+    - coalesce(sum(balance) filter (where account_type = 'cogs'), 0)
     - coalesce(sum(balance) filter (where account_type = 'expense'), 0) as net_profit
 from public.view_profit_and_loss;
 
