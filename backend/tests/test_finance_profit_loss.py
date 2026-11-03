@@ -1,19 +1,21 @@
 import asyncio
+from datetime import date
 from decimal import Decimal
 
 from finance import get_profit_and_loss_report
 
 
-def test_profit_loss_preserves_rows_from_view_and_accepts_standard_types():
+def test_profit_loss_aggregates_view_rows_for_requested_date_range():
     class FakePool:
         async def fetch(self, query, *args):
             normalized_query = " ".join(query.lower().split())
             assert "from public.view_profit_and_loss" in normalized_query
-            assert "select account_name, account_type, balance" in normalized_query
+            assert "select account_name, account_type, sum(balance) as balance" in normalized_query
+            assert "where entry_date >= $1::date and entry_date < $2::date" in normalized_query
+            assert "group by account_name, account_type" in normalized_query
             assert "account_id" not in normalized_query
             assert "entry_id" not in normalized_query
-            assert "transaction_date" not in normalized_query
-            assert args == ()
+            assert args == (date(2026, 11, 1), date(2026, 12, 1))
             return [
                 {
                     "account_name": "Penjualan",
@@ -42,7 +44,13 @@ def test_profit_loss_preserves_rows_from_view_and_accepts_standard_types():
                 },
             ]
 
-    report = asyncio.run(get_profit_and_loss_report(FakePool()))
+    report = asyncio.run(
+        get_profit_and_loss_report(
+            FakePool(),
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 12, 1),
+        )
+    )
 
     assert report["summary"] == {
         "revenue": Decimal("1000.00"),

@@ -1,7 +1,7 @@
 import { useState } from "react";
 
-export default function FinanceDateFilter({ onApply }) {
-  const [mode, setMode] = useState("range");
+export default function FinanceDateFilter({ onApply, initialMode = "range" }) {
+  const [mode, setMode] = useState(initialMode);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));

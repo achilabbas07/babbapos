@@ -1591,9 +1591,19 @@ async def finance_balance_sheet(
 
 
 @api.get("/finance/profit-loss")
-async def finance_profit_loss(_: User = Depends(ADMIN)):
+async def finance_profit_loss(
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    _: User = Depends(ADMIN),
+):
+    period_start, period_end = finance_period_bounds(start, end, month, year)
+    if period_start is None or period_end is None:
+        today = date.today()
+        period_start, period_end = finance_period_bounds(None, None, today.month, today.year)
     await db.connect()
-    return await get_profit_and_loss_report(db.pool)
+    return await get_profit_and_loss_report(db.pool, period_start, period_end)
 
 
 # ---------- Reports ----------

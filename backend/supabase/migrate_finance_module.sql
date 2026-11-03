@@ -90,12 +90,12 @@ having sum(
 create or replace view public.view_profit_and_loss as
 with classified_ledger as (
   select
-    account_code,
+    entry_date,
     account_name,
     case left(btrim(account_code), 1)
       when '4' then 'revenue'
-      when '5' then 'cogs'
-      when '6' then 'expense'
+      when '5' then 'cost_of_goods_sold'
+      when '6' then 'operating_expense'
     end as account_type,
     debit,
     credit
@@ -111,9 +111,9 @@ select
       else debit - credit
     end
   ) as balance,
-  account_code
+  entry_date
 from classified_ledger
-group by account_code, account_name, account_type
+group by entry_date, account_name, account_type
 having sum(
   case
     when account_type = 'revenue' then credit - debit
@@ -124,11 +124,11 @@ having sum(
 create or replace view public.view_profit_and_loss_summary as
 select
   coalesce(sum(balance) filter (where account_type = 'revenue'), 0) as revenue,
-  coalesce(sum(balance) filter (where account_type = 'cogs'), 0) as hpp,
-  coalesce(sum(balance) filter (where account_type = 'expense'), 0) as expenses,
+  coalesce(sum(balance) filter (where account_type = 'cost_of_goods_sold'), 0) as hpp,
+  coalesce(sum(balance) filter (where account_type = 'operating_expense'), 0) as expenses,
   coalesce(sum(balance) filter (where account_type = 'revenue'), 0)
-    - coalesce(sum(balance) filter (where account_type = 'cogs'), 0)
-    - coalesce(sum(balance) filter (where account_type = 'expense'), 0) as net_profit
+    - coalesce(sum(balance) filter (where account_type = 'cost_of_goods_sold'), 0)
+    - coalesce(sum(balance) filter (where account_type = 'operating_expense'), 0) as net_profit
 from public.view_profit_and_loss;
 
 revoke all on table

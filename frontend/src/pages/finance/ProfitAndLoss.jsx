@@ -5,10 +5,15 @@ import { PageHeader, StatCard } from "@/components/PageHeader";
 import { useProfile } from "@/context/ProfileContext";
 import { api, errMsg, rp } from "@/lib/api";
 import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared";
+import FinanceDateFilter from "./FinanceDateFilter";
 import { normalizeProfitLossData } from "./profitAndLossData";
 
 export default function ProfitAndLoss() {
   const { profile, appName } = useProfile();
+  const [filters, setFilters] = useState(() => {
+    const now = new Date();
+    return { month: now.getMonth() + 1, year: now.getFullYear() };
+  });
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -18,7 +23,7 @@ export default function ProfitAndLoss() {
     setError("");
     setLoading(true);
     try {
-      const profitLossResponse = await api.get("/finance/profit-loss");
+      const profitLossResponse = await api.get("/finance/profit-loss", { params: filters });
       const report = normalizeProfitLossData(profitLossResponse.data);
       setRows(report.rows);
       setSummary(report.summary);
@@ -27,7 +32,7 @@ export default function ProfitAndLoss() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -65,7 +70,7 @@ export default function ProfitAndLoss() {
   return (
     <div>
       <div className="no-print print:hidden">
-        <PageHeader title="Laporan Laba Rugi" subtitle="Rincian akun agregat dari view Laba Rugi (seluruh periode).">
+        <PageHeader title="Laporan Laba Rugi" subtitle="Rincian pendapatan, HPP, dan beban operasional berdasarkan periode yang dipilih.">
           <button type="button" disabled={!summary} onClick={exportExcel} className="inline-flex h-10 items-center rounded-lg border border-border bg-card px-4 text-sm font-semibold hover:border-primary disabled:opacity-50">
             <Download className="mr-2 h-4 w-4" />Unduh Excel
           </button>
@@ -73,6 +78,9 @@ export default function ProfitAndLoss() {
             <Printer className="mr-2 h-4 w-4" />Cetak / PDF
           </button>
         </PageHeader>
+      </div>
+      <div className="no-print print:hidden">
+        <FinanceDateFilter initialMode="month" onApply={setFilters} />
       </div>
       {error && <div className="no-print print:hidden mb-5"><FinanceError message={error} onRetry={load} /></div>}
       {loading ? <LoadingPanel /> : summary && (

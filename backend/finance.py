@@ -205,13 +205,20 @@ def _money(value: Any) -> Decimal:
 
 async def get_profit_and_loss_report(
     pool: Any,
+    start_date: date,
+    end_date: date,
 ) -> dict[str, Any]:
     rows = await pool.fetch(
         """
-        select account_name, account_type, balance
+        select account_name, account_type, sum(balance) as balance
         from public.view_profit_and_loss
+        where entry_date >= $1::date
+          and entry_date < $2::date
+        group by account_name, account_type
         order by account_type, account_name
-        """
+        """,
+        start_date,
+        end_date,
     )
     account_type_aliases = {
         "revenue": "revenue",
