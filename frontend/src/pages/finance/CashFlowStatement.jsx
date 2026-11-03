@@ -50,6 +50,16 @@ const isCashFlowReport = (value) => (
   && Number.isFinite(Number(value.Total_Bersih))
 );
 
+const getReportAmount = (report, keys) => {
+  for (const key of keys) {
+    const value = report[key];
+    if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) continue;
+    const amount = Number(value);
+    if (Number.isFinite(amount)) return amount;
+  }
+  return null;
+};
+
 function ActivitySection({ group, rows, expanded, onToggle }) {
   const subtotal = rows.reduce((total, [, value]) => total + Number(value), 0);
   const sectionId = `cash-flow-${group.code.toLowerCase()}`;
@@ -122,6 +132,21 @@ export default function CashFlowStatement() {
         params: period,
         signal,
       });
+      if (process.env.NODE_ENV === "development") {
+        console.debug("[CashFlowStatement] Payload:\n", JSON.stringify(data, null, 2));
+        for (const { key, title } of ACTIVITY_GROUPS) {
+          const accounts = data?.[key];
+          console.groupCollapsed(`[CashFlowStatement] ${title} (${key})`);
+          if (!isRecord(accounts)) {
+            console.warn("Kategori tidak ada atau bukan objek:", accounts);
+          } else {
+            for (const [account, value] of Object.entries(accounts)) {
+              console.log(account, { value, type: typeof value, numericValue: Number(value) });
+            }
+          }
+          console.groupEnd();
+        }
+      }
       if (!isCashFlowReport(data)) {
         throw new Error("Format laporan arus kas dari server tidak valid.");
       }
@@ -149,9 +174,13 @@ export default function CashFlowStatement() {
       }))
       : []
   ), [report]);
-  const cashIn = activityRows.reduce((total, group) => (
+  const reportedCashIn = report
+    ? getReportAmount(report, ["Total_Kas_Masuk", "total_kas_masuk", "cash_in", "money_in"])
+    : null;
+  const calculatedCashIn = activityRows.reduce((total, group) => (
     total + group.rows.reduce((subtotal, [, amount]) => subtotal + Math.max(amount, 0), 0)
   ), 0);
+  const cashIn = reportedCashIn ?? calculatedCashIn;
   const cashOut = activityRows.reduce((total, group) => (
     total + group.rows.reduce((subtotal, [, amount]) => subtotal + Math.min(amount, 0), 0)
   ), 0);

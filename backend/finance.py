@@ -818,11 +818,21 @@ async def get_laporan_arus_kas(
         start_date,
         end_date
     )
+    cash_totals = await connection.fetchrow(
+        """
+        SELECT COALESCE(SUM(money_in), 0) AS total_kas_masuk
+        FROM public.view_arus_kas_bulanan
+        WHERE entry_date BETWEEN $1 AND $2;
+        """,
+        start_date,
+        end_date,
+    )
 
     report = {
         "1. Aktivitas Operasional (CFO)": {},
         "2. Aktivitas Investasi (CFI)": {},
         "3. Aktivitas Pendanaan (CFF)": {},
+        "Total_Kas_Masuk": _money(cash_totals["total_kas_masuk"]),
         "Total_Bersih": Decimal("0.00")
     }
 
