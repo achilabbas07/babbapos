@@ -60,6 +60,23 @@ const getReportAmount = (report, keys) => {
   return null;
 };
 
+const addReportedCashInToOperatingActivity = (report) => {
+  const cashIn = getReportAmount(report, ["Total_Kas_Masuk", "total_kas_masuk", "cash_in", "money_in"]);
+  if (cashIn === null || cashIn <= 0) return report;
+
+  const operatingActivity = ACTIVITY_GROUPS.find(({ code }) => code === "CFO");
+  const operatingKey = operatingActivity.key;
+
+  return {
+    ...report,
+    [operatingKey]: {
+      ...report[operatingKey],
+      "Kas Masuk Teridentifikasi": cashIn,
+    },
+    Total_Bersih: Number(report.Total_Bersih) + cashIn,
+  };
+};
+
 function ActivitySection({ group, rows, expanded, onToggle }) {
   const subtotal = rows.reduce((total, [, value]) => total + Number(value), 0);
   const sectionId = `cash-flow-${group.code.toLowerCase()}`;
@@ -150,7 +167,7 @@ export default function CashFlowStatement() {
       if (!isCashFlowReport(data)) {
         throw new Error("Format laporan arus kas dari server tidak valid.");
       }
-      setReport(data);
+      setReport(addReportedCashInToOperatingActivity(data));
     } catch (requestError) {
       if (requestError.code !== "ERR_CANCELED") {
         setError(errMsg(requestError));
