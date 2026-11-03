@@ -44,9 +44,9 @@ create index if not exists general_ledger_date_type_idx
 alter table public.general_ledger enable row level security;
 revoke all on table public.general_ledger from public, anon, authenticated;
 
+drop view if exists public.view_profit_and_loss_summary cascade;
+drop view if exists public.view_profit_and_loss cascade;
 drop view if exists public.view_balance_sheet;
-drop view if exists public.view_profit_and_loss_summary;
-drop view if exists public.view_profit_and_loss;
 drop view if exists public.view_arus_kas_bulanan;
 
 create or replace view public.view_arus_kas_bulanan as
@@ -88,48 +88,57 @@ having sum(
 ) <> 0;
 
 create or replace view public.view_profit_and_loss as
-with classified_ledger as (
-  select
-    entry_date,
-    account_name,
-    case left(btrim(account_code), 1)
-      when '4' then 'revenue'
-      when '5' then 'cost_of_goods_sold'
-      when '6' then 'operating_expense'
-    end as account_type,
-    debit,
-    credit
-  from public.general_ledger
-  where left(btrim(account_code), 1) in ('4', '5', '6')
-)
 select
-  account_name,
-  account_type,
-  sum(
-    case
-      when account_type = 'revenue' then credit - debit
-      else debit - credit
-    end
-  ) as balance,
-  entry_date
-from classified_ledger
-group by entry_date, account_name, account_type
-having sum(
+  coalesce(gl.account_id::text, '0') as account_id,
   case
-    when account_type = 'revenue' then credit - debit
-    else debit - credit
-  end
-) <> 0;
+    when lower(gl.account_name) like '%pendapatan%'
+      or lower(gl.account_name) like '%omset%' then 'Pendapatan'
+    when lower(gl.account_name) like '%beban pokok%'
+      or lower(gl.account_name) like '%hpp%'
+      or lower(gl.account_name) like '%tissu%'
+      or lower(gl.account_name) like '%bumbu%'
+      or lower(gl.account_name) like '%persediaan bahan%'
+      or lower(gl.account_name) like '%persediaan barang%' then 'Beban Pokok Pendapatan'
+    else coalesce(gl.account_name, 'Beban Operasional Lainnya')
+  end as account_name,
+  case
+    when lower(gl.account_name) like '%pendapatan%'
+      or lower(gl.account_name) like '%omset%' then 'revenue'
+    when lower(gl.account_name) like '%beban pokok%'
+      or lower(gl.account_name) like '%hpp%'
+      or lower(gl.account_name) like '%tissu%'
+      or lower(gl.account_name) like '%bumbu%'
+      or lower(gl.account_name) like '%persediaan bahan%'
+      or lower(gl.account_name) like '%persediaan barang%' then 'cost_of_goods_sold'
+    when lower(gl.account_name) like '%kas%'
+      or lower(gl.account_name) like '%bank%'
+      or lower(gl.account_name) like '%qris%'
+      or lower(gl.account_name) like '%utang%' then 'balance_sheet'
+    else 'operating_expense'
+  end as account_type,
+  coalesce(gl.debit, 0) as total_debit,
+  coalesce(gl.credit, 0) as total_credit,
+  case
+    when lower(gl.account_name) like '%pendapatan%'
+      or lower(gl.account_name) like '%omset%'
+      then coalesce(gl.credit, 0) - coalesce(gl.debit, 0)
+    else coalesce(gl.debit, 0) - coalesce(gl.credit, 0)
+  end as balance,
+  gl.entry_date as transaction_date,
+  to_char(gl.entry_date, 'YYYY-MM') as period_month,
+  gl.created_at
+from public.general_ledger as gl;
 
 create or replace view public.view_profit_and_loss_summary as
 select
-  coalesce(sum(balance) filter (where account_type = 'revenue'), 0) as revenue,
-  coalesce(sum(balance) filter (where account_type = 'cost_of_goods_sold'), 0) as hpp,
-  coalesce(sum(balance) filter (where account_type = 'operating_expense'), 0) as expenses,
-  coalesce(sum(balance) filter (where account_type = 'revenue'), 0)
-    - coalesce(sum(balance) filter (where account_type = 'cost_of_goods_sold'), 0)
-    - coalesce(sum(balance) filter (where account_type = 'operating_expense'), 0) as net_profit
-from public.view_profit_and_loss;
+  account_type,
+  account_name,
+  transaction_date,
+  period_month,
+  sum(balance) as subtotal_balance
+from public.view_profit_and_loss
+where account_type <> 'balance_sheet'
+group by account_type, account_name, transaction_date, period_month;
 
 revoke all on table
   public.view_arus_kas_bulanan,

@@ -223,6 +223,19 @@ with account_balances as (
 select account_name, account_type, balance
 from account_balances
 union all
-select 'Laba tahun berjalan', 'equity', net_profit
+select
+  'Laba tahun berjalan',
+  'equity',
+  sum(
+    case
+      when account_type = 'revenue' then subtotal_balance
+      else -subtotal_balance
+    end
+  ) as balance
 from public.view_profit_and_loss_summary
-where net_profit <> 0;
+having sum(
+  case
+    when account_type = 'revenue' then subtotal_balance
+    else -subtotal_balance
+  end
+) <> 0;

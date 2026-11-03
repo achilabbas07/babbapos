@@ -9,9 +9,9 @@ def test_profit_loss_aggregates_view_rows_for_requested_date_range():
     class FakePool:
         async def fetch(self, query, *args):
             normalized_query = " ".join(query.lower().split())
-            assert "from public.view_profit_and_loss" in normalized_query
-            assert "select account_name, account_type, sum(balance) as balance" in normalized_query
-            assert "where entry_date >= $1::date and entry_date < $2::date" in normalized_query
+            assert "from public.view_profit_and_loss_summary" in normalized_query
+            assert "select account_name, account_type, sum(subtotal_balance) as balance" in normalized_query
+            assert "where transaction_date >= $1::date and transaction_date < $2::date" in normalized_query
             assert "group by account_name, account_type" in normalized_query
             assert "account_id" not in normalized_query
             assert "entry_id" not in normalized_query

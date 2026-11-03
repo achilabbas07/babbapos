@@ -210,10 +210,10 @@ async def get_profit_and_loss_report(
 ) -> dict[str, Any]:
     rows = await pool.fetch(
         """
-        select account_name, account_type, sum(balance) as balance
-        from public.view_profit_and_loss
-        where entry_date >= $1::date
-          and entry_date < $2::date
+        select account_name, account_type, sum(subtotal_balance) as balance
+        from public.view_profit_and_loss_summary
+        where transaction_date >= $1::date
+          and transaction_date < $2::date
         group by account_name, account_type
         order by account_type, account_name
         """,
