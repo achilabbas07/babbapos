@@ -8,6 +8,8 @@ import { PageHeader, Empty } from "@/components/PageHeader";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { TargetDialog } from "@/components/TargetDialog";
 import { ProgressCard, TargetBar } from "@/components/TargetProgress";
+import { useWaiterShiftReport } from "@/hooks/useWaiterShiftReport";
+import { connectBluetoothPrinter } from "@/lib/bluetoothThermalPrinter";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -17,18 +19,52 @@ const WaiterView = () => {
   const [progress, setProgress] = useState(null);
   const [result, setResult] = useState(null);
   const [confirm, setConfirm] = useState(false);
+  const [closedShiftId, setClosedShiftId] = useState(null);
+  const [closing, setClosing] = useState(false);
+  const [connectingPrinter, setConnectingPrinter] = useState(false);
+  const {
+    loading: reportLoading,
+    fetchError: reportFetchError,
+    printing: reportPrinting,
+    printError: reportPrintError,
+    printed: reportPrinted,
+    retryLoad: retryReportLoad,
+    retryPrint,
+  } = useWaiterShiftReport(closedShiftId);
 
   useEffect(() => {
     api.get("/targets/progress").then((r) => setProgress(r.data)).catch((e) => toast.error(errMsg(e)));
   }, []);
 
   const close = async () => {
+    setClosing(true);
     try {
       const { data } = await api.post("/waiter-shifts/close");
       setConfirm(false);
       setResult(data);
+      setClosedShiftId(data.id);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  const finishResult = () => {
+    setResult(null);
+    setClosedShiftId(null);
+    refresh();
+  };
+
+  const connectAndRetryPrint = async () => {
+    setConnectingPrinter(true);
+    try {
+      await connectBluetoothPrinter();
+      await retryPrint();
+    } catch (error) {
+      toast.error(error?.message || "Printer Bluetooth gagal dihubungkan.");
+    } finally {
+      setConnectingPrinter(false);
     }
   };
 
@@ -42,14 +78,31 @@ const WaiterView = () => {
         <DialogContent data-testid="close-waiter-shift-dialog" className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Tutup shift sekarang?</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">Pencapaian target disimpan. Shift berikutnya mulai dari nol.</p>
-          <DialogFooter><Button data-testid="close-waiter-shift-confirm" onClick={close}>Ya, tutup shift</Button></DialogFooter>
+          <DialogFooter><Button data-testid="close-waiter-shift-confirm" disabled={closing} onClick={close}>{closing ? "Menutup..." : "Ya, tutup shift"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog open={!!result} onOpenChange={(o) => { if (!o) { setResult(null); refresh(); } }}>
+      <Dialog open={!!result} onOpenChange={(o) => { if (!o) finishResult(); }}>
         <DialogContent data-testid="waiter-shift-result-dialog" className="sm:max-w-md">
           <DialogHeader><DialogTitle>Hasil Shift</DialogTitle></DialogHeader>
-          <div className="space-y-4">{result?.results.map((i) => <TargetBar key={i.targetId} item={i} testid={`result-bar-${i.targetId}`} />)}</div>
-          <DialogFooter><Button data-testid="waiter-shift-result-done" onClick={() => { setResult(null); refresh(); }}>Selesai</Button></DialogFooter>
+          <div className="space-y-4">{(Array.isArray(result?.results) ? result.results : []).map((i) => <TargetBar key={i.targetId} item={i} testid={`result-bar-${i.targetId}`} />)}</div>
+          {reportLoading && <p data-testid="waiter-shift-report-loading" className="text-sm text-muted-foreground">Memuat laporan untuk dicetak...</p>}
+          {reportFetchError && (
+            <div className="space-y-2" data-testid="waiter-shift-report-error">
+              <p className="text-sm text-destructive">Laporan gagal dimuat: {reportFetchError}</p>
+              <Button variant="outline" onClick={retryReportLoad}>Coba muat lagi</Button>
+            </div>
+          )}
+          {reportPrinting && <p data-testid="waiter-shift-printing" className="text-sm text-muted-foreground">Mencetak laporan shift...</p>}
+          {reportPrinted && <p data-testid="waiter-shift-printed" className="text-sm text-emerald-700">Laporan shift berhasil dicetak otomatis.</p>}
+          {reportPrintError && (
+            <div className="space-y-2" data-testid="waiter-shift-print-error">
+              <p className="text-sm text-destructive">Shift sudah ditutup, tetapi laporan gagal dicetak: {reportPrintError}</p>
+              <Button variant="outline" disabled={connectingPrinter || reportPrinting} onClick={connectAndRetryPrint}>
+                {connectingPrinter ? "Menghubungkan printer..." : "Hubungkan printer & coba lagi"}
+              </Button>
+            </div>
+          )}
+          <DialogFooter><Button data-testid="waiter-shift-result-done" onClick={finishResult}>Selesai</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

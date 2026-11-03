@@ -29,6 +29,7 @@ class WaiterShift(BaseDocument):
     status: str = "open"
     closedAt: Optional[str] = None
     results: List[dict] = []
+    report: Optional[dict] = None
 
 
 class TargetIn(BaseModel):
@@ -49,10 +50,13 @@ async def resolve_waiter(waiter_id: Optional[str], fallback_name: str, user: Use
 
 
 def _qty_map(items: List[dict]) -> dict:
-    m = defaultdict(lambda: [0, ""])
+    m = defaultdict(lambda: [0, "", ""])
     for i in items:
-        m[i["productId"]][0] += i["qty"]
-        m[i["productId"]][1] = i["productName"]
+        key = (i["productId"], i.get("variantName") or "")
+        if key not in m:
+            m[key] = [0, i["productName"], i.get("variantName") or ""]
+        m[key][0] += i["qty"]
+        m[key][1] = i["productName"]
     return m
 
 
@@ -62,9 +66,19 @@ async def _write_logs(waiter: Tuple[Optional[str], str], deltas: dict, source: s
         return
     shift = await db.waiter_shifts.find_one({"userId": wid, "status": "open"})
     ts = now_iso()
-    docs = [{"_id": str(uuid.uuid4()), "timestamp": ts, "waiterId": wid, "waiterName": wname, "productId": pid,
-             "productName": name, "qty": q, "source": source, "refId": ref, "shiftId": shift["_id"] if shift else None}
-            for pid, (q, name) in deltas.items() if q]
+    docs = [{
+        "_id": str(uuid.uuid4()),
+        "timestamp": ts,
+        "waiterId": wid,
+        "waiterName": wname,
+        "productId": product_id,
+        "productName": name,
+        "variantName": variant_name,
+        "qty": qty,
+        "source": source,
+        "refId": ref,
+        "shiftId": shift["_id"] if shift else None,
+    } for (product_id, _), (qty, name, variant_name) in deltas.items() if qty]
     if docs:
         await db.order_logs.insert_many(docs, connection=connection)
 
@@ -80,10 +94,17 @@ async def log_order_diff(
 ):
     old, new = _qty_map(old_items), _qty_map(new_items)
     if old_waiter[0] == new_waiter[0]:
-        deltas = {pid: [new[pid][0] - old[pid][0], new[pid][1] or old[pid][1]] for pid in set(old) | set(new)}
+        deltas = {
+            key: [
+                new[key][0] - old[key][0],
+                new[key][1] or old[key][1],
+                new[key][2] or old[key][2],
+            ]
+            for key in set(old) | set(new)
+        }
         await _write_logs(new_waiter, deltas, source, ref, connection=connection)
     else:
-        await _write_logs(old_waiter, {pid: [-q, n] for pid, (q, n) in old.items()}, source, ref, connection=connection)
+        await _write_logs(old_waiter, {key: [-row[0], row[1], row[2]] for key, row in old.items()}, source, ref, connection=connection)
         await _write_logs(new_waiter, dict(new), source, ref, connection=connection)
 
 
@@ -100,6 +121,62 @@ async def progress_for(shift: dict) -> dict:
         items.append({"targetId": t["_id"], "name": t["name"], "productIds": t["productIds"], "breakdown": breakdown,
                       "targetQty": t["targetQty"], "achieved": achieved, "pct": min(100.0, achieved / t["targetQty"] * 100)})
     return {"shiftId": shift["_id"], "waiterId": shift["userId"], "waiterName": shift["userName"], "openedAt": shift["openedAt"], "items": items}
+
+
+async def waiter_shift_report(shift: dict, target_results: List[dict]) -> dict:
+    logs = await db.order_logs.find({"shiftId": shift["_id"]}).to_list(None)
+    # Payment logs settle bills; these sources track ordered-quantity changes.
+    sales_sources = {"bill_create", "bill_update", "void", "direct"}
+    product_totals = defaultdict(int)
+    product_names = {}
+    order_ids = set()
+    void_ids = set()
+
+    for log in logs:
+        source = log.get("source")
+        ref_id = log.get("refId")
+        if source in {"bill_create", "direct"} and ref_id:
+            order_ids.add(ref_id)
+        if source == "void" and ref_id:
+            void_ids.add(ref_id)
+        if source not in sales_sources:
+            continue
+        key = (log.get("productId"), log.get("variantName") or "")
+        product_totals[key] += log.get("qty", 0)
+        product_names[key] = log.get("variantName") or log.get("productName") or "Menu"
+
+    void_logs = await db.void_logs.find({"billId": {"$in": list(void_ids)}}).to_list(None) if void_ids else []
+    void_details = [
+        {
+            "qty": item.get("qty", 0),
+            "name": item.get("variantName") or item.get("productName") or "Menu",
+            "reason": void.get("reason") or "-",
+        }
+        for void in void_logs
+        for item in void.get("items_json", [])
+    ]
+    target_status = (
+        "TIDAK ADA TARGET"
+        if not target_results
+        else "TERCAPAI"
+        if all(item["achieved"] >= item["targetQty"] for item in target_results)
+        else "BELUM TERCAPAI"
+    )
+
+    return {
+        "total_orders": len(order_ids),
+        "active_tables": await db.open_bills.count_documents({
+            "waiterId": shift.get("userId"),
+            "tableId": {"$ne": None},
+        }),
+        "orders_data": [
+            {"variant_name": product_names[key], "qty": qty}
+            for key, qty in sorted(product_totals.items(), key=lambda entry: product_names[entry[0]].casefold())
+            if qty > 0
+        ],
+        "voids": {"total": len(void_logs), "details": void_details},
+        "target_sales_status": target_status,
+    }
 
 
 @router.get("/targets")
@@ -179,7 +256,13 @@ async def close_waiter_shift(user: User = Depends(WAITER)):
     if not doc:
         raise HTTPException(400, "Tidak ada shift terbuka")
     results = (await progress_for(doc))["items"]
-    await db.waiter_shifts.update_one({"_id": doc["_id"]}, {"$set": {"status": "closed", "closedAt": now_iso(), "results": results}})
+    report = await waiter_shift_report(doc, results)
+    await db.waiter_shifts.update_one({"_id": doc["_id"]}, {"$set": {
+        "status": "closed",
+        "closedAt": now_iso(),
+        "results": results,
+        "report": report,
+    }})
     return WaiterShift.from_mongo(await db.waiter_shifts.find_one({"_id": doc["_id"]}))
 
 
@@ -187,3 +270,25 @@ async def close_waiter_shift(user: User = Depends(WAITER)):
 async def list_waiter_shifts(_: User = Depends(ADMIN)):
     docs = await db.waiter_shifts.find({"status": "closed"}).sort("closedAt", -1).to_list(100)
     return [WaiterShift.from_mongo(d) for d in docs]
+
+
+@router.get("/waiter-shifts/{shift_id}")
+async def get_waiter_shift_report(shift_id: str, user: User = Depends(get_current_user)):
+    shift = await db.waiter_shifts.find_one({"_id": shift_id})
+    if not shift:
+        raise HTTPException(404, "Shift pelayan tidak ditemukan")
+    if user.role != "admin" and (user.role != "waiter" or shift.get("userId") != user.id):
+        raise HTTPException(403, "Akses ditolak untuk shift ini")
+    if shift.get("status") != "closed":
+        raise HTTPException(409, "Laporan tersedia setelah shift ditutup")
+
+    report = shift.get("report")
+    if report is None:
+        report = await waiter_shift_report(shift, shift.get("results") or [])
+    return {
+        "id": shift["_id"],
+        "waiter_name": shift.get("userName", ""),
+        "shift_id": shift["_id"],
+        "closed_at": shift.get("closedAt"),
+        "results": report,
+    }

@@ -1,4 +1,5 @@
 import { groupOrderItemsForDisplay } from "./openBillDisplay";
+import { buildWaiterShiftReportBytes } from "./waiterShiftReport";
 
 export const RPP02_SERVICE_UUID = "000018f0-0000-1000-8000-00805f9b34fb";
 export const RPP02_CHARACTERISTIC_UUID = "00002af1-0000-1000-8000-00805f9b34fb";
@@ -351,6 +352,7 @@ export async function convertImageToESCPOS(imageUrl) {
 }
 
 export async function buildEscPosReceipt(type, data) {
+  if (type === "waiterShift") return buildWaiterShiftReportBytes(data);
   const lines = buildBluetoothReceiptLines(type, data);
   const bytes = [];
   const command = (...values) => appendBytes(bytes, values);
@@ -460,7 +462,7 @@ export async function printBluetoothReceipt(
   }
 
   if (requireConnectedDevice && !selectedDevice && !cachedDevice) {
-    throw new Error("Printer kasir belum terhubung. Hubungkan printer sebelum menutup shift.");
+    throw new Error("Printer Bluetooth belum terhubung. Hubungkan printer lalu coba cetak ulang.");
   }
   const devicePromise = selectedDevice
     ? Promise.resolve(selectedDevice)
@@ -469,7 +471,7 @@ export async function printBluetoothReceipt(
       : selectBluetoothPrinter(serviceUuid);
   const connectionPromise = devicePromise.then((device) => {
     if (requireConnectedDevice && !device?.gatt?.connected) {
-      throw new Error("Printer kasir terputus. Hubungkan kembali printer sebelum menutup shift.");
+      throw new Error("Printer Bluetooth terputus. Hubungkan kembali printer lalu coba cetak ulang.");
     }
     cachedDevice = device;
     return connectDevice(device, serviceUuid, characteristicUuid);

@@ -311,9 +311,9 @@ create table if not exists waiter_shifts (
   "openedAt"  timestamptz not null default now(),
   status      text not null default 'open' check (status in ('open','closed')),
   "closedAt"  timestamptz,
-  results     jsonb not null default '[]'::jsonb
+  results     jsonb not null default '[]'::jsonb,
+  report      jsonb
 );
-
 create table if not exists order_logs (
   id             text primary key,
   "timestamp"    timestamptz not null default now(),
@@ -321,6 +321,7 @@ create table if not exists order_logs (
   "waiterName"   text not null default '',
   "productId"    text,
   "productName"  text not null default '',
+  "variantName"  text not null default '',
   qty            integer not null,
   source         text not null default '',
   "refId"        text,
