@@ -27,6 +27,7 @@ import FinanceAccounts from "@/pages/finance/FinanceAccounts";
 import FinanceDashboard from "@/pages/finance/FinanceDashboard";
 import ProfitAndLoss from "@/pages/finance/ProfitAndLoss";
 import CashFlowStatement from "@/pages/finance/CashFlowStatement";
+import PromoManagement from "@/pages/PromoManagement";
 import { toast } from "sonner";
 
 const PAGES = {
@@ -35,6 +36,7 @@ const PAGES = {
   "/users": Users, "/cash": Cash, "/shifts": Shifts, "/targets": Targets, "/profile": Profile,
   "/admin/jurnal": Journal, "/admin/daftar-akun": FinanceAccounts, "/admin/dashboard-keuangan": FinanceDashboard, "/admin/laba-rugi": ProfitAndLoss,
   "/admin/arus-kas": CashFlowStatement,
+  "/promos": PromoManagement,
 };
 
 const Protected = ({ roles, deniedMessage, children }) => {

@@ -1,5 +1,5 @@
 import {
-  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen,
+  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags,
 } from "lucide-react";
 
 const ALL = ["admin", "kasir", "waiter"];
@@ -22,6 +22,7 @@ export const NAV = [
   { to: "/shifts", label: "Riwayat Shift", icon: ClipboardList, roles: ADMIN },
   { to: "/users", label: "Pengguna", icon: UserCog, roles: ADMIN },
   { to: "/profile", label: "Profil Usaha", icon: Store, roles: ADMIN },
+  { to: "/promos", label: "Promo", icon: Tags, roles: ADMIN },
 ];
 
 export const FINANCE_NAV = [
