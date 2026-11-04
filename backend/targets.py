@@ -50,13 +50,17 @@ async def resolve_waiter(waiter_id: Optional[str], fallback_name: str, user: Use
 
 
 def _qty_map(items: List[dict]) -> dict:
-    m = defaultdict(lambda: [0, "", ""])
+    m = defaultdict(lambda: [0, "", "", None])
     for i in items:
-        key = (i["productId"], i.get("variantName") or "")
+        variant_id = i.get("variantId")
+        variant_name = i.get("variantName") or ""
+        variant_key = ("id", str(variant_id)) if variant_id is not None else ("name", variant_name)
+        key = (i["productId"], variant_key)
         if key not in m:
-            m[key] = [0, i["productName"], i.get("variantName") or ""]
+            m[key] = [0, i["productName"], variant_name, variant_id]
         m[key][0] += i["qty"]
         m[key][1] = i["productName"]
+        m[key][2] = variant_name
     return m
 
 
@@ -73,12 +77,13 @@ async def _write_logs(waiter: Tuple[Optional[str], str], deltas: dict, source: s
         "waiterName": wname,
         "productId": product_id,
         "productName": name,
+        "variantId": variant_id,
         "variantName": variant_name,
         "qty": qty,
         "source": source,
         "refId": ref,
         "shiftId": shift["_id"] if shift else None,
-    } for (product_id, _), (qty, name, variant_name) in deltas.items() if qty]
+    } for (product_id, _), (qty, name, variant_name, variant_id) in deltas.items() if qty]
     if docs:
         await db.order_logs.insert_many(docs, connection=connection)
 
@@ -99,12 +104,13 @@ async def log_order_diff(
                 new[key][0] - old[key][0],
                 new[key][1] or old[key][1],
                 new[key][2] or old[key][2],
+                new[key][3] if new[key][3] is not None else old[key][3],
             ]
             for key in set(old) | set(new)
         }
         await _write_logs(new_waiter, deltas, source, ref, connection=connection)
     else:
-        await _write_logs(old_waiter, {key: [-row[0], row[1], row[2]] for key, row in old.items()}, source, ref, connection=connection)
+        await _write_logs(old_waiter, {key: [-row[0], row[1], row[2], row[3]] for key, row in old.items()}, source, ref, connection=connection)
         await _write_logs(new_waiter, dict(new), source, ref, connection=connection)
 
 
@@ -141,9 +147,12 @@ async def waiter_shift_report(shift: dict, target_results: List[dict]) -> dict:
             void_ids.add(ref_id)
         if source not in sales_sources:
             continue
-        key = (log.get("productId"), log.get("variantName") or "")
+        variant_id = log.get("variantId")
+        variant_name = log.get("variantName") or ""
+        variant_key = ("id", str(variant_id)) if variant_id is not None else ("name", variant_name)
+        key = (log.get("productId"), variant_key)
         product_totals[key] += log.get("qty", 0)
-        product_names[key] = log.get("variantName") or log.get("productName") or "Menu"
+        product_names[key] = variant_name or log.get("productName") or "Menu"
 
     void_logs = await db.void_logs.find({"billId": {"$in": list(void_ids)}}).to_list(None) if void_ids else []
     void_details = [

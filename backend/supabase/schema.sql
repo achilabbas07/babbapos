@@ -321,6 +321,7 @@ create table if not exists order_logs (
   "waiterName"   text not null default '',
   "productId"    text,
   "productName"  text not null default '',
+  "variantId"    bigint,
   "variantName"  text not null default '',
   qty            integer not null,
   source         text not null default '',
