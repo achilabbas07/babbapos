@@ -10,11 +10,10 @@ const ACTIVITY_GROUPS = [
   { key: "3. Aktivitas Pendanaan (CFF)", title: "Aktivitas Pendanaan", code: "CFF", tone: "bg-amber-50 text-amber-700" },
 ];
 
-const OPERATING_EXPENSE_GROUPS = [
-  { key: "ingredients", title: "Beban Bahan Baku", pattern: /\b(bumbu|daging|sayur|bahan baku|bahan makanan|ingredient)\b/i },
-  { key: "payroll", title: "Beban Gaji & Upah", pattern: /\b(gaji|upah|bonus|insentif|honor|tunjangan|payroll)\b/i },
-  { key: "other", title: "Beban Utilitas & Operasional Lainnya", pattern: null },
-];
+const UNCATEGORIZED_OPERATING_EXPENSE = {
+  key: "uncategorized",
+  title: "Beban Operasional - Lain-lain",
+};
 
 const currencyFormatter = new Intl.NumberFormat("id-ID", {
   style: "currency",
@@ -65,10 +64,6 @@ const getReportAmount = (report, keys) => {
   }
   return null;
 };
-
-const operatingExpenseGroup = (name) => (
-  OPERATING_EXPENSE_GROUPS.find(({ pattern }) => pattern?.test(name))?.key || "other"
-);
 
 const addReportedCashInToOperatingActivity = (report) => {
   const cashIn = getReportAmount(report, ["Total_Kas_Masuk", "total_kas_masuk", "cash_in", "money_in"]);
@@ -122,10 +117,10 @@ function ActivitySection({ group, rows, expanded, onToggle }) {
   const outflows = rows.filter(({ value }) => value < 0);
   const neutral = rows.filter(({ value }) => value === 0);
   const operatingOutflows = group.code === "CFO"
-    ? OPERATING_EXPENSE_GROUPS.map((category) => ({
-      ...category,
-      rows: outflows.filter(({ expenseGroup }) => expenseGroup === category.key),
-    }))
+    ? [{
+      ...UNCATEGORIZED_OPERATING_EXPENSE,
+      rows: outflows,
+    }]
     : [];
   const sectionId = `cash-flow-${group.code.toLowerCase()}`;
 
@@ -200,6 +195,7 @@ export default function CashFlowStatement() {
         params: period,
         signal,
       });
+      console.log("[CashFlowStatement] API payload:", data);
       if (process.env.NODE_ENV === "development") {
         console.debug("[CashFlowStatement] Payload:\n", JSON.stringify(data, null, 2));
         for (const { key, title } of ACTIVITY_GROUPS) {
@@ -243,7 +239,6 @@ export default function CashFlowStatement() {
           return {
             name,
             value: amount,
-            expenseGroup: amount < 0 ? operatingExpenseGroup(name) : null,
           };
         }),
       }))
