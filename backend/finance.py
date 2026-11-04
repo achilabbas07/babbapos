@@ -236,6 +236,52 @@ async def get_profit_and_loss_report(
         start_date,
         end_date,
     )
+    hpp_row = await pool.fetchrow(
+        """
+        with sold_items as (
+          select
+            nullif(item.value ->> 'productId', '') as product_id,
+            nullif(item.value ->> 'variantId', '')::bigint as variant_id,
+            coalesce(nullif(item.value ->> 'qty', '')::numeric, 0) as qty
+          from public.transactions as trx
+          cross join lateral jsonb_array_elements(
+            coalesce(trx.items_json, '[]'::jsonb)
+          ) as item(value)
+          where trx.date >= $1::date
+            and trx.date < $2::date
+        ),
+        variant_costs as (
+          select
+            ingredient.variant_id,
+            sum(ingredient.qty_needed * inventory.cost_per_unit) as variant_hpp
+          from public.variant_ingredients as ingredient
+          join public.inventory as inventory
+            on inventory.id = ingredient.inventory_id
+          group by ingredient.variant_id
+        )
+        select
+          coalesce(
+            sum(
+              (
+                coalesce(product.hpp, 0)
+                + case
+                    when sold.variant_id is null then 0
+                    else coalesce(variant.variant_hpp, 0)
+                  end
+              ) * sold.qty
+            ),
+            0
+          ) as hpp,
+          count(*) filter (where product.id is null) as missing_products
+        from sold_items as sold
+        left join public.products as product
+          on product.id = sold.product_id
+        left join variant_costs as variant
+          on variant.variant_id = sold.variant_id
+        """,
+        start_date,
+        end_date,
+    )
     account_type_aliases = {
         "revenue": "revenue",
         "cost_of_goods_sold": "cogs",
@@ -250,6 +296,8 @@ async def get_profit_and_loss_report(
         account_type = account_type_aliases.get(str(report_row.get("account_type") or "").strip().lower())
         if account_type is None:
             raise ValueError(f"Tipe akun laporan laba-rugi tidak didukung: {report_row.get('account_type')!r}.")
+        if account_type == "cogs":
+            continue
         try:
             balance = Decimal(str(report_row["balance"]))
         except (KeyError, TypeError, ValueError, InvalidOperation) as error:
@@ -260,6 +308,24 @@ async def get_profit_and_loss_report(
         report_row["balance"] = balance
         report_rows.append(report_row)
         totals[account_type] += balance
+
+    try:
+        missing_products = int(hpp_row["missing_products"] if hpp_row else 0)
+        calculated_hpp = Decimal(str(hpp_row["hpp"] if hpp_row else 0))
+    except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+        raise ValueError("Nilai HPP berdasarkan transaksi tidak valid.") from error
+    if missing_products:
+        raise ValueError(
+            f"HPP tidak dapat dihitung karena {missing_products} baris penjualan merujuk ke produk yang tidak ditemukan."
+        )
+    if not calculated_hpp.is_finite() or calculated_hpp < 0:
+        raise ValueError("Nilai HPP berdasarkan transaksi tidak valid.")
+    totals["cogs"] = calculated_hpp
+    report_rows.append({
+        "account_name": "Beban Pokok Pendapatan",
+        "account_type": "cogs",
+        "balance": calculated_hpp,
+    })
 
     try:
         sales_discount = Decimal(str(discount_row["sales_discount"] if discount_row else 0))
