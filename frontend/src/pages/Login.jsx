@@ -13,9 +13,23 @@ const ROLE_TONE = {
   waiter: "bg-amber-100 text-amber-700",
 };
 
+const quotes = [
+  "Secangkir kopi yang baik berawal dari NIAT yang BAIK. Selamat bertugas!",
+  "Senyum ANDA adalah awal dari rasa kopi yang nikmat.",
+  "Jaga kebersihan warkop, jaga kualitas rasa. Mari berikan yang terbaik hari ini.",
+  "Setiap pesanan adalah KEPERCAYAAN pelanggan. Ayo layani dengan SEPENUH HATI.",
+  "Kerja tim yang SOLID pelayan dan dapur menghasilkan harmoni di meja pelanggan.",
+  "Tetap FOKUS, tetap tenang. Shift yang sibuk adalah tanda bisnis kita bertumbuh.",
+  "KONSISTENSI rasa adalah KUNCI. Mari seduh setiap gelas dengan standar terbaik Warkop Babba.",
+  "Pelayanan CEPAT, meja BERSIH, dan sapaan RAMAH membuat pelanggan selalu ingin kembali.",
+  "Keberhasilan shift hari ini ditentukan oleh komunikasi yang tanggap antar tim. Semangat!",
+  "Setiap masalah di lapangan adalah pelajaran. Tetap solid, saling bantu, dan berikan solusi."
+];
+
 export default function Login() {
   const { user, login } = useAuth();
   const { profile, appName } = useProfile();
+  const [dailyQuote, setDailyQuote] = useState("");
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState("");
@@ -43,6 +57,23 @@ export default function Login() {
   useEffect(() => {
     if (user === false) loadUsers();
   }, [user, loadUsers]);
+
+  useEffect(() => {
+    const updateDailyQuote = () => {
+      const now = new Date();
+      const startOfYear = Date.UTC(now.getFullYear(), 0, 0);
+      const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+      const dayOfYear = Math.floor((today - startOfYear) / (1000 * 60 * 60 * 24));
+      setDailyQuote(quotes[dayOfYear % quotes.length]);
+
+      const nextMidnight = new Date();
+      nextMidnight.setHours(24, 0, 0, 0);
+      timeoutId = window.setTimeout(updateDailyQuote, nextMidnight.getTime() - now.getTime());
+    };
+    let timeoutId;
+    updateDailyQuote();
+    return () => window.clearTimeout(timeoutId);
+  }, []);
 
   const chooseUser = (candidate) => {
     setSelected(candidate);
@@ -73,12 +104,13 @@ export default function Login() {
   return (
     <div className="grid min-h-screen lg:grid-cols-[1fr_1.1fr]">
       <div className="relative hidden overflow-hidden lg:block">
-        <img src="/images/kopi-susu.jpg" alt="" className="absolute inset-0 h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/85 via-slate-900/30 to-transparent" />
-        <div className="absolute bottom-12 left-12 max-w-md text-white fade-up">
-          <p className="text-xs uppercase tracking-[0.3em] text-blue-200">Point of Sale</p>
-          <h1 className="mt-3 text-5xl font-bold leading-tight tracking-tight">Dari bar ke dapur, semua tercatat rapi.</h1>
-          <p className="mt-4 text-slate-200">Kasir, meja, resep, stok bahan, hingga laba rugi dalam satu sistem.</p>
+        <img src="/images/warkop-tradisional-bg.jpg" alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-black bg-opacity-50" />
+        <div className="absolute inset-0 flex flex-col justify-between p-12 text-white fade-up">
+          <h1 className="text-2xl font-bold tracking-[0.2em]">WARKOP BABBA POS</h1>
+          <p className="mb-12 max-w-2xl self-center text-5xl font-bold leading-tight tracking-tight">
+            {dailyQuote}
+          </p>
         </div>
       </div>
       <div className="flex items-center justify-center px-6 py-12">
