@@ -3,7 +3,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { fmtDate, rp } from "@/lib/api";
-import { printDocument } from "@/lib/print";
 import { printBluetoothReceipt } from "@/lib/bluetoothThermalPrinter";
 import { PrintHeader } from "@/components/ReceiptDialog";
 
@@ -64,13 +63,9 @@ const ShiftPrintContent = ({ shift, onClose }) => {
               <Row label="Selisih" value={shift.difference == null ? "—" : rp(shift.difference)} bold />
               {shift.note && <p className="pt-1 text-xs text-muted-foreground">Catatan: {shift.note}</p>}
             </div>
-            <div className="no-print flex gap-2">
-              <button data-testid="shift-print-button" onClick={() => printDocument("laporan shift")}
-                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border font-medium hover:border-primary">
-                <Printer className="h-4 w-4" /> Cetak
-              </button>
+            <div className="no-print flex">
               <button data-testid="shift-bluetooth-reprint-button" onClick={reprint} disabled={printing}
-                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-border font-medium hover:border-primary disabled:opacity-50">
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border font-medium hover:border-primary disabled:opacity-50">
                 <Printer className="h-4 w-4" /> {printing ? "Mencetak..." : "Cetak Ulang Bluetooth"}
               </button>
             </div>
