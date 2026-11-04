@@ -1,14 +1,30 @@
 import ReceiptPrinterEncoder from "@point-of-sale/receipt-printer-encoder";
 
 const LINE_WIDTH = 32;
+const MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
 const fit = (value, width) => Array.from(String(value ?? "")).slice(0, width).join("");
+const rule = (character = "-") => character.repeat(LINE_WIDTH);
 
 const paddedRow = (label, value) => {
   const right = fit(value ?? "-", LINE_WIDTH - 1);
   const leftWidth = Math.max(0, LINE_WIDTH - right.length - 1);
   return `${fit(label, leftWidth).padEnd(leftWidth)}${right.padStart(LINE_WIDTH - leftWidth)}`;
 };
+
+function formatClosedAt(value) {
+  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+  if (!match) return { date: fit(value || "-", LINE_WIDTH), time: "-" };
+  const [, year, month, day, hour, minute] = match;
+  const monthIndex = Number(month) - 1;
+  if (monthIndex < 0 || monthIndex >= MONTHS_ID.length) {
+    return { date: fit(value || "-", LINE_WIDTH), time: "-" };
+  }
+  return {
+    date: `${day} ${MONTHS_ID[monthIndex]} ${year}`,
+    time: hour ? `${hour}:${minute}` : "-",
+  };
+}
 
 const wrap = (value, width) => {
   const words = String(value ?? "").trim().split(/\s+/).filter(Boolean);
@@ -63,26 +79,33 @@ function validateReport(shift) {
 export function buildWaiterShiftReportLines(shift) {
   validateReport(shift);
   const results = shift.results;
+  const closedAt = formatClosedAt(shift.closed_at);
   const lines = [
-    { text: "LAPORAN TUTUP SHIFT", align: "center", bold: true },
-    { text: "PELAYAN", align: "center", bold: true },
+    { text: "LAPORAN TUTUP", align: "center", bold: true },
+    { text: "SHIFT PELAYAN", align: "center", bold: true },
+    { text: rule("="), align: "center" },
     { text: paddedRow("Nama", shift.waiter_name), align: "left" },
-    { text: paddedRow("Tutup", shift.closed_at), align: "left" },
+    { text: paddedRow("Tanggal", closedAt.date), align: "left" },
+    { text: paddedRow("Waktu", closedAt.time), align: "left" },
     { text: paddedRow("Shift", shift.shift_id), align: "left" },
+    { text: rule(), align: "center" },
     { text: "AKTIVITAS PELAYANAN", align: "left", bold: true },
     { text: paddedRow("Total pesanan", results.total_orders), align: "left" },
     { text: paddedRow("Meja aktif", results.active_tables), align: "left" },
+    { text: rule(), align: "center" },
     { text: "RINGKASAN PRODUK TERJUAL", align: "left", bold: true },
   ];
 
   if (results.orders_data.length) {
     results.orders_data.forEach((item) => {
-      const quantity = fit(`${item.qty}x`, LINE_WIDTH - 1);
-      const nameWidth = Math.max(0, LINE_WIDTH - quantity.length - 1);
-      const name = fit(item.variant_name || "-", Math.min(20, nameWidth));
-      lines.push({
-        text: `${name.padEnd(nameWidth)} ${fit(quantity, quantity.length)}`,
-        align: "left",
+      const quantity = fit(`${item.qty}x`, 8);
+      const nameWidth = LINE_WIDTH - quantity.length - 1;
+      const nameLines = wrap(item.variant_name || "-", nameWidth);
+      nameLines.forEach((name, index) => {
+        lines.push({
+          text: `${index === 0 ? quantity : " ".repeat(quantity.length)} ${name}`,
+          align: "left",
+        });
       });
     });
   } else {
@@ -90,6 +113,8 @@ export function buildWaiterShiftReportLines(shift) {
   }
 
   lines.push(
+    { text: rule(), align: "center" },
+    { text: rule(), align: "center" },
     { text: "LOG AUDIT & KOREKSI", align: "left", bold: true },
     { text: paddedRow("Total void", results.voids.total), align: "left" },
   );
@@ -106,10 +131,19 @@ export function buildWaiterShiftReportLines(shift) {
   }
 
   lines.push(
+    { text: rule(), align: "center" },
+    { text: rule(), align: "center" },
     { text: "RINGKASAN TARGET", align: "left", bold: true },
-    { text: fit(results.target_sales_status || "-", LINE_WIDTH), align: "left" },
+    { text: `+${"-".repeat(LINE_WIDTH - 2)}+`, align: "center" },
+  );
+  wrap(results.target_sales_status || "-", LINE_WIDTH - 4).forEach((text) => {
+    lines.push({ text: `| ${text.padEnd(LINE_WIDTH - 4)} |`, align: "center", bold: true });
+  });
+  lines.push(
+    { text: `+${"-".repeat(LINE_WIDTH - 2)}+`, align: "center" },
     { text: "", align: "left" },
-    { text: `${"( Pelayan )".padEnd(18)}( .......... )`, align: "left" },
+    { text: `${"( Pelayan )".padEnd(18)}( Supervisor )`, align: "left" },
+    { text: `${"_".repeat(13)}  ${"_".repeat(13)}`, align: "left" },
   );
 
   if (lines.some((line) => Array.from(line.text).length > LINE_WIDTH)) {

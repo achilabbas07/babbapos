@@ -42,13 +42,13 @@ const Tile = ({ t, editing }) => {
   const busy = !editing && t.status === "occupied" && od;
   if (busy) {
     return (
-      <div className={`flex h-full w-full flex-col px-2 py-2 ${s.text}`}>
-        <p data-testid={`table-tile-customer-${t.id}`} className="truncate text-lg font-bold text-slate-700">
+      <div className={`flex h-full w-full min-w-0 flex-col px-2 py-2 ${s.text}`}>
+        <p data-testid={`table-tile-customer-${t.id}`} className="w-full min-w-0 max-w-full truncate text-lg font-bold text-slate-700">
           {od.customerName?.trim() || "UMUM"}
         </p>
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center">
           <Icon className="h-7 w-7" strokeWidth={2.2} />
-          <p className="mt-1 truncate text-base font-bold">{t.name}</p>
+          <p className="mt-1 w-full min-w-0 max-w-full truncate text-base font-bold">{t.name}</p>
         </div>
         <div className="mt-auto flex w-full items-end justify-between gap-1">
           <p data-testid={`table-tile-time-${t.id}`} className="truncate text-left font-mono text-xs">

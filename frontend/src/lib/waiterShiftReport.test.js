@@ -23,7 +23,7 @@ const shift = {
       total: 1,
       details: [{ qty: 1, name: "Kopi Susu", reason: "Salah Input Meja" }],
     },
-    target_sales_status: "TERCAPAI",
+    target_sales_status: "BELUM TERCAPAI",
   },
 };
 
@@ -31,12 +31,19 @@ describe("waiter shift report printer", () => {
   it("formats every report line within 32 characters", () => {
     const lines = buildWaiterShiftReportLines(shift);
 
-    expect(lines[0]).toMatchObject({ text: "LAPORAN TUTUP SHIFT", align: "center" });
-    expect(lines[1]).toMatchObject({ text: "PELAYAN", align: "center" });
-    expect(lines.some(({ text }) => text.slice(0, 20) === "Kopi Susu Gula Aren ")).toBe(true);
-    expect(lines.find(({ text }) => text.includes("35x"))?.text.endsWith("35x")).toBe(true);
+    expect(lines[0]).toMatchObject({ text: "LAPORAN TUTUP", align: "center" });
+    expect(lines[1]).toMatchObject({ text: "SHIFT PELAYAN", align: "center" });
+    expect(lines.find(({ text }) => text.startsWith("Tanggal"))?.text.endsWith("03 Nov 2026")).toBe(true);
+    expect(lines.find(({ text }) => text.startsWith("Waktu"))?.text.endsWith("21:00")).toBe(true);
+    expect(lines.find(({ text }) => text.startsWith("35x "))?.text).toContain("Kopi Susu Gula Aren");
     expect(lines.some(({ text }) => text.includes("Salah Input Meja"))).toBe(true);
-    expect(lines[lines.length - 1].text).toBe("( Pelayan )       ( .......... )");
+    const auditStart = lines.findIndex(({ text }) => text === "LOG AUDIT & KOREKSI");
+    expect(lines[auditStart - 1].text).toBe("-".repeat(32));
+    expect(lines.slice(auditStart + 1).find(({ text }) => text === "-".repeat(32))).toBeDefined();
+    expect(lines.some(({ text }) => text === `+${"-".repeat(30)}+`)).toBe(true);
+    expect(lines.some(({ text }) => text.includes("BELUM TERCAPAI") && text.startsWith("|") && text.endsWith("|"))).toBe(true);
+    expect(lines[lines.length - 2].text).toBe("( Pelayan )       ( Supervisor )");
+    expect(lines[lines.length - 1].text).toBe("_____________  _____________");
     expect(lines.every(({ text }) => Array.from(text).length <= 32)).toBe(true);
   });
 
@@ -44,7 +51,7 @@ describe("waiter shift report printer", () => {
     const bytes = Array.from(buildWaiterShiftReportBytes(shift));
     const cutIndex = bytes.findIndex((byte, index) => byte === 0x1d && bytes[index + 1] === 0x56);
 
-    expect(String.fromCharCode(...bytes.slice(0, cutIndex))).toContain("LAPORAN TUTUP SHIFT");
+    expect(String.fromCharCode(...bytes.slice(0, cutIndex))).toContain("SHIFT PELAYAN");
     expect(bytes.slice(cutIndex - 6, cutIndex)).toEqual([0x0a, 0x0d, 0x0a, 0x0d, 0x0a, 0x0d]);
     expect(bytes.slice(cutIndex, cutIndex + 3)).toEqual([0x1d, 0x56, 0x00]);
   });
