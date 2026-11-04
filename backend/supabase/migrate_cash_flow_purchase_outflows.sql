@@ -9,9 +9,11 @@ BEGIN
 
   FOREACH required_column IN ARRAY ARRAY[
     'tanggal_transaksi',
-    'aktivitas_arus_kas',
+    'keterangan',
+    'kode_akun_lawan',
     'nama_akun_lawan',
-    'nilai_neto'
+    'nilai_neto',
+    'aktivitas_arus_kas'
   ]
   LOOP
     IF NOT EXISTS (
@@ -34,6 +36,11 @@ BEGIN
   IF existing_view_definition IS NULL THEN
     RAISE EXCEPTION 'Definisi public.view_laporan_arus_kas_final tidak dapat dibaca.';
   END IF;
+  existing_view_definition := regexp_replace(
+    rtrim(existing_view_definition),
+    ';[[:space:]]*$',
+    ''
+  );
 
   EXECUTE format(
     $view$
@@ -43,18 +50,22 @@ BEGIN
       )
       SELECT
         tanggal_transaksi,
-        aktivitas_arus_kas,
+        keterangan,
+        kode_akun_lawan,
         nama_akun_lawan,
-        nilai_neto
+        nilai_neto,
+        aktivitas_arus_kas
       FROM existing_rows
 
       UNION ALL
 
       SELECT
         g.transaction_date AS tanggal_transaksi,
-        '1. Aktivitas Operasional (CFO)' AS aktivitas_arus_kas,
-        g.description AS nama_akun_lawan,
-        -g.credit AS nilai_neto
+        g.description AS keterangan,
+        g.account_code::text AS kode_akun_lawan,
+        g.account_name AS nama_akun_lawan,
+        (-g.credit)::bigint AS nilai_neto,
+        '1. Aktivitas Operasional (CFO)' AS aktivitas_arus_kas
       FROM public.general_ledger AS g
       WHERE g.source_type = 'purchase'
         AND g.account_type = 'asset'
@@ -64,8 +75,8 @@ BEGIN
           SELECT 1
           FROM existing_rows AS old
           WHERE old.tanggal_transaksi = g.transaction_date
+            AND old.keterangan ILIKE '%%' || g.source_id || '%%'
             AND old.aktivitas_arus_kas = '1. Aktivitas Operasional (CFO)'
-            AND old.nama_akun_lawan = g.description
             AND old.nilai_neto = -g.credit
         )
     $view$,

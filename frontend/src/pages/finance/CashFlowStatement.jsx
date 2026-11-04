@@ -10,9 +10,21 @@ const ACTIVITY_GROUPS = [
   { key: "3. Aktivitas Pendanaan (CFF)", title: "Aktivitas Pendanaan", code: "CFF", tone: "bg-amber-50 text-amber-700" },
 ];
 
-const UNCATEGORIZED_OPERATING_EXPENSE = {
-  key: "uncategorized",
-  title: "Beban Operasional - Lain-lain",
+const OPERATING_OUTFLOW_CATEGORIES = [
+  { key: "cost-of-goods", title: "Beban Pokok Pendapatan" },
+  { key: "payroll", title: "Beban Gaji & Tunjangan" },
+  { key: "other-operating", title: "Beban Operasional - Lain-lain" },
+];
+
+const getOperatingOutflowCategory = (name) => {
+  const normalizedName = name.toLocaleLowerCase("id-ID");
+  if (["beban pokok", "pembelian", "bahan baku"].some((term) => normalizedName.includes(term))) {
+    return OPERATING_OUTFLOW_CATEGORIES[0];
+  }
+  if (["gaji", "bonus", "uang makan"].some((term) => normalizedName.includes(term))) {
+    return OPERATING_OUTFLOW_CATEGORIES[1];
+  }
+  return OPERATING_OUTFLOW_CATEGORIES[2];
 };
 
 const currencyFormatter = new Intl.NumberFormat("id-ID", {
@@ -117,10 +129,10 @@ function ActivitySection({ group, rows, expanded, onToggle }) {
   const outflows = rows.filter(({ value }) => value < 0);
   const neutral = rows.filter(({ value }) => value === 0);
   const operatingOutflows = group.code === "CFO"
-    ? [{
-      ...UNCATEGORIZED_OPERATING_EXPENSE,
-      rows: outflows,
-    }]
+    ? OPERATING_OUTFLOW_CATEGORIES.map((category) => ({
+      ...category,
+      rows: outflows.filter(({ name }) => getOperatingOutflowCategory(name).key === category.key),
+    }))
     : [];
   const sectionId = `cash-flow-${group.code.toLowerCase()}`;
 
