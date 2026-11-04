@@ -103,12 +103,15 @@ export default function Login() {
 
   return (
     <div className="grid min-h-screen lg:grid-cols-[1fr_1.1fr]">
-      <div className="relative hidden overflow-hidden lg:block">
-        <img src="/images/warkop-tradisional-bg.jpg" alt="" className="absolute inset-0 h-full w-full object-cover" />
+      <div
+        className="relative hidden overflow-hidden bg-slate-900 lg:block"
+        style={{ backgroundImage: "url('/bg-warkop.jpg')", backgroundSize: "cover", backgroundPosition: "center" }}
+      >
+        {/* Simpan file bg-warkop.jpg di folder public. */}
         <div className="absolute inset-0 bg-black bg-opacity-50" />
         <div className="absolute inset-0 flex flex-col justify-between p-12 text-white fade-up">
           <h1 className="text-2xl font-bold tracking-[0.2em]">WARKOP BABBA POS</h1>
-          <p className="mb-12 max-w-2xl self-center text-5xl font-bold leading-tight tracking-tight">
+          <p className="mb-12 max-w-2xl self-center px-8 py-6 text-center text-3xl font-semibold leading-snug md:text-4xl">
             {dailyQuote}
           </p>
         </div>
