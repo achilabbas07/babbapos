@@ -54,11 +54,16 @@ export function wordWrapCenter(text) {
 }
 
 export function formatLine(leftText, rightText, width = LINE_WIDTH) {
-  const left = String(leftText ?? "");
-  const right = String(rightText ?? "");
-  if (right.length >= width) return right.slice(-width);
-  const leftWidth = Math.max(0, width - right.length - 1);
-  return `${left.slice(0, leftWidth).padEnd(leftWidth)}${right.padStart(width - leftWidth)}`;
+  return printJustify(leftText, rightText, width);
+}
+
+export function printJustify(leftText, rightText, width = LINE_WIDTH) {
+  const left = Array.from(String(leftText ?? ""));
+  const right = Array.from(String(rightText ?? ""));
+  if (right.length >= width) return right.slice(-width).join("");
+  const fittedLeft = left.slice(0, Math.max(0, width - right.length - 1)).join("");
+  const spaces = width - Array.from(fittedLeft).length - right.length;
+  return `${fittedLeft}${" ".repeat(spaces)}${right.join("")}`;
 }
 
 function formatItemLines(label, amount) {
@@ -227,8 +232,8 @@ function shiftAmount(value) {
 }
 
 function shiftRow(label, value) {
-  if (Array.from(`${label} ${value}`).length <= LINE_WIDTH) {
-    return [{ type: "justify", text: formatLine(label, value) }];
+  if (Array.from(label).length + Array.from(value).length + 1 <= LINE_WIDTH) {
+    return [{ type: "justify", text: printJustify(label, value) }];
   }
   return [
     ...wrapText(label).map((text) => ({ type: "justify", text })),
@@ -246,6 +251,7 @@ export function buildBluetoothShiftReportLines(shift, { reprint = false } = {}) 
     { type: "center", text: "WARKOP BABBA", bold: true },
     { type: "center", text: "Jl. Ujung No. 65, Makassar" },
     { type: "center", text: "Telp. 0853 9886 3700" },
+    { type: "text", text: "=".repeat(LINE_WIDTH) },
     { type: "center", text: "LAPORAN TUTUP SHIFT", bold: true },
     ...(reprint
       ? [{ type: "justify", text: formatLine(shift.id || "-", "CETAK ULANG"), bold: true }]
@@ -263,6 +269,7 @@ export function buildBluetoothShiftReportLines(shift, { reprint = false } = {}) 
     ...shiftRow("Kas masuk", shiftAmount(shift.cashIn)),
     ...shiftRow("Kas keluar", `- ${shiftAmount(shift.cashOut)}`),
     { type: "text", text: "-".repeat(LINE_WIDTH) },
+    { type: "blank", text: "" },
     { type: "justify", text: "Saldo akhir (seharusnya)", bold: true },
     {
       type: "justify",

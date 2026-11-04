@@ -5,6 +5,7 @@ import {
   convertImageToESCPOS,
   formatLine,
   printBluetoothReceipt,
+  printJustify,
   RPP02_CHARACTERISTIC_UUID,
   RPP02_SERVICE_UUID,
   wordWrapCenter,
@@ -30,29 +31,38 @@ describe("Bluetooth ESC/POS receipts", () => {
     const lines = buildBluetoothShiftReportLines(shift);
     const reprintLines = buildBluetoothShiftReportLines(shift, { reprint: true });
 
-    expect(lines.slice(0, 4).map(({ text, type }) => [text, type])).toEqual([
+    expect(lines.slice(0, 5).map(({ text, type }) => [text, type])).toEqual([
       ["WARKOP BABBA", "center"],
       ["Jl. Ujung No. 65, Makassar", "center"],
       ["Telp. 0853 9886 3700", "center"],
+      ["================================", "text"],
       ["LAPORAN TUTUP SHIFT", "center"],
     ]);
+    expect(lines[5].text).toBe(shift.id);
     expect(lines.map(({ text }) => text)).toContain("Penjualan tunai       Rp 250.000");
     expect(lines.find(({ text }) => text.includes("Total penjualan"))).toMatchObject({ bold: true });
     const expectedBalanceLabelIndex = lines.findIndex(({ text }) => text === "Saldo akhir (seharusnya)");
     expect(lines[expectedBalanceLabelIndex]).toMatchObject({ bold: true, type: "justify" });
+    expect(lines[expectedBalanceLabelIndex - 1]).toMatchObject({ type: "blank" });
     expect(lines[expectedBalanceLabelIndex + 1]).toMatchObject({
       text: "                      Rp 355.000",
       bold: true,
       type: "justify",
     });
-    expect(lines[4].text).toBe(shift.id);
-    expect(reprintLines[4].text).toContain(shift.id);
-    expect(reprintLines[4].text).toContain("CETAK ULANG");
-    expect(reprintLines[4].bold).toBe(true);
+    expect(reprintLines[5].text).toContain(shift.id);
+    expect(reprintLines[5].text).toContain("CETAK ULANG");
+    expect(reprintLines[5].bold).toBe(true);
 
     const openShiftLines = buildBluetoothShiftReportLines({ ...shift, countedCash: null, difference: null });
     expect(openShiftLines.find(({ text }) => text.startsWith("Uang fisik"))?.text.trimEnd()).toMatch(/-$/);
     expect(openShiftLines.find(({ text }) => text.startsWith("Selisih"))?.text.trimEnd()).toMatch(/-$/);
+  });
+
+  it("justifies shift rows to the exact character width", () => {
+    const line = printJustify("Penjualan non-tunai", "Rp   64.000");
+    expect(Array.from(line)).toHaveLength(32);
+    expect(line.startsWith("Penjualan non-tunai")).toBe(true);
+    expect(line.endsWith("Rp   64.000")).toBe(true);
   });
 
   it("builds a centered kitchen ticket with fixed-position metadata and indented notes", () => {
