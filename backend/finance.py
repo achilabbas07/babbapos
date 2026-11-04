@@ -220,6 +220,22 @@ async def get_profit_and_loss_report(
         start_date,
         end_date,
     )
+    discount_row = await pool.fetchrow(
+        """
+        select coalesce(
+          sum(
+            coalesce("promoDiscount", 0)::numeric
+            + coalesce("pointsDiscount", 0)::numeric
+          ),
+          0
+        ) as sales_discount
+        from public.transactions
+        where date >= $1::date
+          and date < $2::date
+        """,
+        start_date,
+        end_date,
+    )
     account_type_aliases = {
         "revenue": "revenue",
         "cost_of_goods_sold": "cogs",
@@ -245,13 +261,33 @@ async def get_profit_and_loss_report(
         report_rows.append(report_row)
         totals[account_type] += balance
 
+    try:
+        sales_discount = Decimal(str(discount_row["sales_discount"] if discount_row else 0))
+    except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+        raise ValueError("Nilai potongan penjualan tidak valid.") from error
+    if not sales_discount.is_finite() or sales_discount < 0:
+        raise ValueError("Nilai potongan penjualan tidak valid.")
+
+    if sales_discount:
+        totals["revenue"] += sales_discount
+        revenue_end = next(
+            (index for index, row in enumerate(report_rows) if row["account_type"] != "revenue"),
+            len(report_rows),
+        )
+        report_rows.insert(revenue_end, {
+            "account_name": "Potongan Penjualan",
+            "account_type": "revenue",
+            "balance": -sales_discount,
+        })
+
     return {
         "rows": report_rows,
         "summary": {
             "revenue": totals["revenue"],
+            "sales_discount": sales_discount,
             "hpp": totals["cogs"],
             "expenses": totals["expense"],
-            "net_profit": totals["revenue"] - totals["cogs"] - totals["expense"],
+            "net_profit": totals["revenue"] - sales_discount - totals["cogs"] - totals["expense"],
         },
     }
 

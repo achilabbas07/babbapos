@@ -52,6 +52,7 @@ export default function ProfitAndLoss() {
       [],
       ["Ringkasan", "Total"],
       ["Total pendapatan", Number(summary?.revenue) || 0],
+      ["Potongan Penjualan", -(Number(summary?.sales_discount) || 0)],
       ["HPP", Number(summary?.hpp) || 0],
       ["Total beban", Number(summary?.expenses) || 0],
       ["Laba / (rugi) bersih", Number(summary?.net_profit) || 0],
@@ -93,8 +94,9 @@ export default function ProfitAndLoss() {
             <p className="mt-1 text-xs text-muted-foreground">Dicetak {new Date().toLocaleDateString("id-ID", { dateStyle: "long" })}</p>
           </header>
 
-          <div className="no-print print:hidden mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="no-print print:hidden mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <StatCard label="Total pendapatan" value={rp(summary.revenue)} tone="text-emerald-700" />
+            <StatCard label="Potongan Penjualan" value={rp(summary.sales_discount)} tone="text-amber-700" />
             <StatCard label="HPP" value={rp(summary.hpp)} tone="text-amber-700" />
             <StatCard label="Total beban" value={rp(summary.expenses)} tone="text-destructive" />
             <StatCard label="Laba / (rugi) bersih" value={rp(summary.net_profit)} tone={Number(summary.net_profit) >= 0 ? "text-primary" : "text-destructive"} />
@@ -127,6 +129,7 @@ export default function ProfitAndLoss() {
             />
             <section className="ml-auto max-w-md space-y-2 border-t-2 border-slate-800 pt-4">
               <div className="flex justify-between gap-4 text-sm"><span>Total pendapatan</span><Money value={summary.revenue} /></div>
+              <div className="flex justify-between gap-4 text-sm"><span>Potongan Penjualan</span><Money value={-summary.sales_discount} /></div>
               <div className="flex justify-between gap-4 text-sm"><span>HPP</span><Money value={summary.hpp} /></div>
               <div className="flex justify-between gap-4 text-sm"><span>Total beban</span><Money value={summary.expenses} /></div>
               <div className="flex justify-between gap-4 border-t border-slate-400 pt-2 font-bold"><span>Laba / (rugi) bersih</span><Money value={summary.net_profit} /></div>

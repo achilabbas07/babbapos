@@ -29,9 +29,14 @@ export const normalizeProfitLossData = (data) => {
   });
 
   const revenues = rows.filter((row) => row.account_type === "revenue");
+  const salesDiscount = revenues
+    .filter((row) => row.account_name === "Potongan Penjualan")
+    .reduce((total, row) => total - row.balance, 0);
   const hppRows = rows.filter((row) => row.account_type === "cogs");
   const expenses = rows.filter((row) => row.account_type === "expense");
-  const revenue = revenues.reduce((total, row) => total + row.balance, 0);
+  const revenue = revenues
+    .filter((row) => row.account_name !== "Potongan Penjualan")
+    .reduce((total, row) => total + row.balance, 0);
   const hpp = hppRows.reduce((total, row) => total + row.balance, 0);
   const expense = expenses.reduce((total, row) => total + row.balance, 0);
 
@@ -39,9 +44,10 @@ export const normalizeProfitLossData = (data) => {
     rows,
     summary: {
       revenue,
+      sales_discount: salesDiscount,
       hpp,
       expenses: expense,
-      net_profit: revenue - hpp - expense,
+      net_profit: revenue - salesDiscount - hpp - expense,
     },
   };
 };

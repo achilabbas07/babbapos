@@ -5,6 +5,7 @@ describe("normalizeProfitLossData", () => {
     const report = normalizeProfitLossData({
       rows: [
         { account_name: "Penjualan", account_type: "revenue", balance: "500000" },
+        { account_name: "Potongan Penjualan", account_type: "revenue", balance: -25000 },
         { account_name: "HPP Barang", account_type: "cost_of_goods_sold", balance: 25000 },
         { account_name: "Beban HPP - Tissu", account_type: "cost_of_goods_sold", balance: 46465 },
         { account_name: "Beban Operasional", account_type: "operating_expense", balance: "19500" },
@@ -14,6 +15,7 @@ describe("normalizeProfitLossData", () => {
 
     expect(report.rows).toEqual([
       { account_name: "Penjualan", account_type: "revenue", balance: 500000 },
+      { account_name: "Potongan Penjualan", account_type: "revenue", balance: -25000 },
       { account_name: "HPP Barang", account_type: "cogs", balance: 25000 },
       { account_name: "Beban HPP - Tissu", account_type: "cogs", balance: 46465 },
       { account_name: "Beban Operasional", account_type: "expense", balance: 19500 },
@@ -21,9 +23,10 @@ describe("normalizeProfitLossData", () => {
     ]);
     expect(report.summary).toEqual({
       revenue: 500000,
+      sales_discount: 25000,
       hpp: 71465,
       expenses: 24500,
-      net_profit: 404035,
+      net_profit: 379035,
     });
   });
 
