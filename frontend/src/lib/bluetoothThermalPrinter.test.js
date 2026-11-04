@@ -73,6 +73,7 @@ describe("Bluetooth ESC/POS receipts", () => {
       time: "29/10/2026 10:00",
       queueNumber: "7",
       waiter: "Siti",
+      customerName: "Budi",
       items: [{ qty: 2, name: "Mie Goreng", note: "Tidak pedas" }],
     });
 
@@ -82,8 +83,30 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(lines.map(({ text }) => text)).toContain("No Urut    : 7");
     expect(lines.map(({ text }) => text)).toContain("Order      : Siti");
     expect(lines.map(({ text }) => text)).toContain("Nomor Meja : A-02");
+    const tableLineIndex = lines.findIndex(({ text }) => text === "Nomor Meja : A-02");
+    expect(lines[tableLineIndex + 1]).toEqual({ type: "text", text: "Customer   : Budi" });
     expect(lines.map(({ text }) => text)).toContain("  Tidak pedas");
     expect(lines[lines.length - 2]).toEqual({ type: "center", text: "29/10/2026 09:55" });
+  });
+
+  it("wraps kitchen and bill customer names within the thermal line width", () => {
+    for (const type of ["kitchen", "bill"]) {
+      const lines = buildBluetoothReceiptLines(type, {
+        tableName: "A-02",
+        customerName: "Pelanggan Dengan Nama Yang Sangat Panjang",
+        items: [],
+      });
+      const tableLineIndex = lines.findIndex(({ text }) => text === "Nomor Meja : A-02");
+      const customerLines = [];
+      for (let index = tableLineIndex + 1; index < lines.length; index += 1) {
+        if (lines[index].text === "--------------------------------") break;
+        customerLines.push(lines[index]);
+      }
+
+      expect(customerLines.length).toBeGreaterThan(1);
+      expect(customerLines.every(({ text }) => Array.from(text).length <= 32)).toBe(true);
+      expect(customerLines[0].text).toMatch(/^Customer\s+: /);
+    }
   });
 
   it("uses the addon header and places duplicate markers below receipt headers", () => {
@@ -211,6 +234,7 @@ describe("Bluetooth ESC/POS receipts", () => {
       tableName: "A-02",
       time: "29/10/2026",
       waiter: "Siti",
+      customerName: "Budi",
       items: [
         { id: "line-1", productId: "kopi", qty: 1, name: "Kopi Susu", price: 12000, subtotal: 12000, is_printed: true },
         { id: "line-2", productId: "kopi", qty: 1, name: "Kopi Susu", price: 12000, subtotal: 12000, is_printed: false },
@@ -221,6 +245,8 @@ describe("Bluetooth ESC/POS receipts", () => {
 
     expect(text).toContain("OPEN BILL");
     expect(text).toContain("No Bill    : BILL-001");
+    const tableLineIndex = text.findIndex((line) => line === "Nomor Meja : A-02");
+    expect(text[tableLineIndex + 1]).toBe("Customer   : Budi");
     expect(text.filter((line) => line.includes("2 Kopi Susu") && line.includes("Rp 24.000"))).toHaveLength(1);
     expect(text).toContain("Belum lunas");
     expect(text.some((line) => line.includes("LUNAS"))).toBe(false);

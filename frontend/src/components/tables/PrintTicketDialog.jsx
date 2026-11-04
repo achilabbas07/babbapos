@@ -76,6 +76,7 @@ export const PrintTicketDialog = ({ bill, tableName, mode, onClose }) => {
           time: dateText,
           queueNumber: bill.queueNumber == null ? null : String(bill.queueNumber),
           waiter: bill.waiterName || bill.userName || "-",
+          customerName: bill.customerName,
           items: itemsToPrint.map((item) => ({
             ...item,
             name: itemName(item),
@@ -103,6 +104,7 @@ export const PrintTicketDialog = ({ bill, tableName, mode, onClose }) => {
           tableName: tableName || bill.type || "-",
           time: dateText,
           waiter: bill.waiterName || bill.userName || "-",
+          customerName: bill.customerName,
           items: (bill.items_json || []).map((item) => ({
             ...item,
             name: itemName(item),

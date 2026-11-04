@@ -93,6 +93,15 @@ function fieldLine(label, value) {
   return `${label.padEnd(11)}: ${value || "-"}`;
 }
 
+function customerFieldLines(value) {
+  const prefix = `${"Customer".padEnd(11)}: `;
+  return wrapText(value || "-", LINE_WIDTH - prefix.length)
+    .map((text, index) => ({
+      type: "text",
+      text: index === 0 ? `${prefix}${text}` : `${" ".repeat(prefix.length)}${text}`,
+    }));
+}
+
 function itemTotal(item) {
   return Number(item.subtotal ?? Number(item.price || 0) * Number(item.qty ?? 1));
 }
@@ -170,6 +179,7 @@ function kitchenLines(data) {
     { type: "text", text: fieldLine("No Urut", data.queueNumber == null ? "-" : String(data.queueNumber)) },
     { type: "text", text: fieldLine("Order", data.waiter) },
     { type: "text", text: fieldLine("Nomor Meja", data.tableName || data.table) },
+    ...customerFieldLines(data.customerName),
     { type: "text", text: "--------------------------------" },
   ];
 
@@ -201,6 +211,7 @@ function billLines(data) {
     { type: "text", text: fieldLine("No Bill", data.id) },
     { type: "text", text: fieldLine("Waktu", data.time || data.dateTime || data.date) },
     { type: "text", text: fieldLine("Nomor Meja", data.tableName || data.table) },
+    ...customerFieldLines(data.customerName),
     { type: "text", text: "--------------------------------" },
   ];
   for (const item of items) {
