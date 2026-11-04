@@ -6,6 +6,16 @@ const accountTypeAliases = {
   expense: "expense",
 };
 
+export const orderProfitLossRevenueRows = (rows) => [...rows].sort((left, right) => {
+  const priority = (row) => {
+    const name = row.account_name.trim().toLocaleLowerCase("id-ID");
+    if (name === "pendapatan" || name === "penjualan") return 0;
+    if (name === "potongan penjualan") return 1;
+    return 2;
+  };
+  return priority(left) - priority(right);
+});
+
 export const normalizeProfitLossData = (data) => {
   if (!Array.isArray(data?.rows)) {
     throw new Error("Format rincian laporan laba-rugi dari server tidak valid.");

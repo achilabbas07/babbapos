@@ -6,7 +6,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { api, errMsg, rp } from "@/lib/api";
 import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared";
 import FinanceDateFilter from "./FinanceDateFilter";
-import { normalizeProfitLossData } from "./profitAndLossData";
+import { normalizeProfitLossData, orderProfitLossRevenueRows } from "./profitAndLossData";
 
 export default function ProfitAndLoss() {
   const { profile, appName } = useProfile();
@@ -36,7 +36,7 @@ export default function ProfitAndLoss() {
 
   useEffect(() => { load(); }, [load]);
 
-  const revenues = rows.filter((row) => row.account_type === "revenue");
+  const revenues = orderProfitLossRevenueRows(rows.filter((row) => row.account_type === "revenue"));
   const hppRows = rows.filter((row) => row.account_type === "cogs");
   const expenses = rows.filter((row) => row.account_type === "expense");
   const exportExcel = () => {

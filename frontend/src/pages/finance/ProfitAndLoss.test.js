@@ -1,4 +1,4 @@
-import { normalizeProfitLossData } from "./profitAndLossData";
+import { normalizeProfitLossData, orderProfitLossRevenueRows } from "./profitAndLossData";
 
 describe("normalizeProfitLossData", () => {
   it("preserves every view row and accepts standardized account types", () => {
@@ -27,6 +27,22 @@ describe("normalizeProfitLossData", () => {
       hpp: 71465,
       expenses: 24500,
       net_profit: 379035,
+    });
+  });
+
+  describe("orderProfitLossRevenueRows", () => {
+    it("places gross revenue first and sales discounts immediately after it", () => {
+      const rows = [
+        { account_name: "Potongan Penjualan", balance: -25000 },
+        { account_name: "Pendapatan", balance: 500000 },
+        { account_name: "Pendapatan Lain", balance: 10000 },
+      ];
+
+      expect(orderProfitLossRevenueRows(rows).map(({ account_name }) => account_name)).toEqual([
+        "Pendapatan",
+        "Potongan Penjualan",
+        "Pendapatan Lain",
+      ]);
     });
   });
 
