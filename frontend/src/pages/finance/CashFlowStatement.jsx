@@ -10,6 +10,12 @@ const ACTIVITY_GROUPS = [
   { key: "3. Aktivitas Pendanaan (CFF)", title: "Aktivitas Pendanaan", code: "CFF", tone: "bg-amber-50 text-amber-700" },
 ];
 
+const OPERATING_EXPENSE_GROUPS = [
+  { key: "ingredients", title: "Beban Bahan Baku", pattern: /\b(bumbu|daging|sayur|bahan baku|bahan makanan|ingredient)\b/i },
+  { key: "payroll", title: "Beban Gaji & Upah", pattern: /\b(gaji|upah|bonus|insentif|honor|tunjangan|payroll)\b/i },
+  { key: "other", title: "Beban Utilitas & Operasional Lainnya", pattern: null },
+];
+
 const currencyFormatter = new Intl.NumberFormat("id-ID", {
   style: "currency",
   currency: "IDR",
@@ -60,6 +66,10 @@ const getReportAmount = (report, keys) => {
   return null;
 };
 
+const operatingExpenseGroup = (name) => (
+  OPERATING_EXPENSE_GROUPS.find(({ pattern }) => pattern?.test(name))?.key || "other"
+);
+
 const addReportedCashInToOperatingActivity = (report) => {
   const cashIn = getReportAmount(report, ["Total_Kas_Masuk", "total_kas_masuk", "cash_in", "money_in"]);
   if (cashIn === null || cashIn <= 0) return report;
@@ -77,8 +87,46 @@ const addReportedCashInToOperatingActivity = (report) => {
   };
 };
 
+function CashFlowRows({ rows }) {
+  if (!rows.length) {
+    return <p className="px-4 py-3 text-sm text-muted-foreground sm:px-6">Tidak ada transaksi.</p>;
+  }
+  return (
+    <div className="divide-y divide-border">
+      {rows.map(({ name, value }) => (
+        <div key={name} className="flex items-center justify-between gap-4 px-4 py-3 text-sm sm:px-6">
+          <span className="min-w-0 text-muted-foreground">{name}</span>
+          <span className={`shrink-0 font-mono font-medium tabular-nums ${value < 0 ? "text-red-600" : "text-green-600"}`}>
+            {formatRupiah(value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MovementBlock({ title, rows }) {
+  return (
+    <div>
+      <h3 className="border-b border-border bg-secondary/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:px-6">
+        {title}
+      </h3>
+      <CashFlowRows rows={rows} />
+    </div>
+  );
+}
+
 function ActivitySection({ group, rows, expanded, onToggle }) {
-  const subtotal = rows.reduce((total, [, value]) => total + Number(value), 0);
+  const subtotal = rows.reduce((total, row) => total + row.value, 0);
+  const inflows = rows.filter(({ value }) => value > 0);
+  const outflows = rows.filter(({ value }) => value < 0);
+  const neutral = rows.filter(({ value }) => value === 0);
+  const operatingOutflows = group.code === "CFO"
+    ? OPERATING_EXPENSE_GROUPS.map((category) => ({
+      ...category,
+      rows: outflows.filter(({ expenseGroup }) => expenseGroup === category.key),
+    }))
+    : [];
   const sectionId = `cash-flow-${group.code.toLowerCase()}`;
 
   return (
@@ -106,25 +154,28 @@ function ActivitySection({ group, rows, expanded, onToggle }) {
       </button>
       {expanded && (
         <div id={`${sectionId}-content`} className="border-t border-border">
-          {rows.length ? (
-            <div className="divide-y divide-border">
-              {rows.map(([name, value]) => {
-                const amount = Number(value);
-                return (
-                  <div key={name} className="flex items-center justify-between gap-4 px-4 py-3.5 text-sm sm:px-6">
-                    <span className="text-muted-foreground">{name}</span>
-                    <span className={`shrink-0 font-mono font-medium tabular-nums ${amount < 0 ? "text-red-600" : "text-green-600"}`}>
-                      {formatRupiah(amount)}
-                    </span>
+          <div className="divide-y divide-border">
+            <MovementBlock title="Kas Masuk" rows={inflows} />
+            {group.code === "CFO" ? (
+              <div>
+                <h3 className="border-b border-border bg-secondary/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:px-6">
+                  Kas Keluar
+                </h3>
+                {operatingOutflows.filter(({ rows: categoryRows }) => categoryRows.length > 0).map((category) => (
+                  <div key={category.key}>
+                    <p className="px-4 pt-3 text-xs font-semibold text-muted-foreground sm:px-6">{category.title}</p>
+                    <CashFlowRows rows={category.rows} />
                   </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground sm:px-6">Tidak ada arus kas pada periode ini.</p>
-          )}
+                ))}
+                {!outflows.length && <p className="px-4 py-3 text-sm text-muted-foreground sm:px-6">Tidak ada transaksi.</p>}
+              </div>
+            ) : (
+              <MovementBlock title="Kas Keluar" rows={outflows} />
+            )}
+            {neutral.length > 0 && <MovementBlock title="Nilai netral" rows={neutral} />}
+          </div>
           <div className="flex items-center justify-between gap-4 border-t border-border bg-secondary/30 px-4 py-3 text-sm font-semibold sm:px-6">
-            <span>Total {group.title.toLowerCase()}</span>
+            <span>Total Kas Bersih dari {group.title}</span>
             <span className={`font-mono tabular-nums ${subtotal < 0 ? "text-red-600" : "text-green-600"}`}>{formatRupiah(subtotal)}</span>
           </div>
         </div>
@@ -187,7 +238,14 @@ export default function CashFlowStatement() {
     report
       ? ACTIVITY_GROUPS.map((group) => ({
         ...group,
-        rows: Object.entries(report[group.key]).map(([name, value]) => [name, Number(value)]),
+        rows: Object.entries(report[group.key]).map(([name, value]) => {
+          const amount = Number(value);
+          return {
+            name,
+            value: amount,
+            expenseGroup: amount < 0 ? operatingExpenseGroup(name) : null,
+          };
+        }),
       }))
       : []
   ), [report]);
@@ -195,11 +253,11 @@ export default function CashFlowStatement() {
     ? getReportAmount(report, ["Total_Kas_Masuk", "total_kas_masuk", "cash_in", "money_in"])
     : null;
   const calculatedCashIn = activityRows.reduce((total, group) => (
-    total + group.rows.reduce((subtotal, [, amount]) => subtotal + Math.max(amount, 0), 0)
+    total + group.rows.reduce((subtotal, row) => subtotal + Math.max(row.value, 0), 0)
   ), 0);
   const cashIn = reportedCashIn ?? calculatedCashIn;
   const cashOut = activityRows.reduce((total, group) => (
-    total + group.rows.reduce((subtotal, [, amount]) => subtotal + Math.min(amount, 0), 0)
+    total + group.rows.reduce((subtotal, row) => subtotal + Math.min(row.value, 0), 0)
   ), 0);
 
   const applyPeriod = (event) => {
