@@ -66,6 +66,8 @@ describe("Bluetooth ESC/POS receipts", () => {
   });
 
   it("builds a centered kitchen ticket with fixed-position metadata and indented notes", () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 10, 5, 14, 22));
     const lines = buildBluetoothReceiptLines("kitchen", {
       id: "ORD-001",
       tableName: "A-02",
@@ -86,7 +88,9 @@ describe("Bluetooth ESC/POS receipts", () => {
     const tableLineIndex = lines.findIndex(({ text }) => text === "Nomor Meja : A-02");
     expect(lines[tableLineIndex + 1]).toEqual({ type: "text", text: "Customer   : Budi" });
     expect(lines.map(({ text }) => text)).toContain("  Tidak pedas");
-    expect(lines[lines.length - 2]).toEqual({ type: "center", text: "29/10/2026 09:55" });
+    expect(lines[lines.length - 2]).toEqual({ type: "center", text: "05/11/2026 14:22" });
+    expect(lines[lines.length - 1]).toEqual({ type: "center", text: "Dicetak : Siti" });
+    jest.useRealTimers();
   });
 
   it("wraps kitchen and bill customer names within the thermal line width", () => {

@@ -168,6 +168,8 @@ function paymentLines(data) {
 function kitchenLines(data) {
   const items = data.items || data.items_json || [];
   const orderTime = data.orderTime || data.createdAt || data.time || data.date;
+  const now = new Date();
+  const printedAt = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const lines = [
     { type: "center", text: data.isAddOn === true ? "TAMBAHAN ORDER" : "DAPUR" },
     ...(data.isDuplicate === true
@@ -195,8 +197,8 @@ function kitchenLines(data) {
 
   lines.push(
     { type: "text", text: "================================" },
-    { type: "center", text: orderTime || "-" },
-    { type: "center", text: `order: ${data.waiter || "-"}` },
+    { type: "center", text: printedAt },
+    { type: "center", text: `Dicetak : ${data.waiter || "-"}` },
   );
   return lines;
 }
