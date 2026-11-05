@@ -744,8 +744,16 @@ async def create_inventory_opname(
     except HTTPException:
         raise
     except Exception as error:
-        logger.exception("Failed to save stock opname session %s", session_id)
-        raise HTTPException(500, "Stok opname gagal disimpan. Perubahan telah dibatalkan.") from error
+        error_id = uuid4()
+        logger.exception(
+            "Failed to save stock opname session %s (error_id=%s)",
+            session_id,
+            error_id,
+        )
+        raise HTTPException(
+            500,
+            f"Stok opname gagal disimpan. Perubahan telah dibatalkan. ID insiden: {error_id}.",
+        ) from error
 
     return {
         "session_id": str(session_id),
