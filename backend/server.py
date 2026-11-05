@@ -18,6 +18,8 @@ from variants import (
 )
 from finance import (
     account_type_from_category,
+    ACCOUNT_BEBAN_SELISIH_STOK_ID,
+    ACCOUNT_PERSEDIAAN_BAHAN_ID,
     debt_payment_lines,
     expense_lines,
     get_account_balances,
@@ -42,11 +44,11 @@ import logging
 import asyncpg
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Literal, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.middleware.cors import CORSMiddleware
@@ -176,6 +178,25 @@ class InventoryIn(BaseModel):
     unit: str = Field(min_length=1)
     cost_per_unit: float = Field(ge=0)
     min_stock: float = Field(0, ge=0)
+
+
+class StockOpnameItemIn(BaseModel):
+    item_id: str = Field(min_length=1, max_length=100)
+    physical_qty: Decimal = Field(ge=0, max_digits=14, decimal_places=3)
+    notes: str = Field(default="", max_length=500)
+
+    @field_validator("item_id")
+    @classmethod
+    def strip_item_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("ID bahan wajib diisi.")
+        return value
+
+    @field_validator("notes")
+    @classmethod
+    def strip_notes(cls, value: str) -> str:
+        return value.strip()
 
 
 class OrderItemIn(BaseModel):
@@ -561,6 +582,222 @@ async def delete_inventory(iid: str, _: User = Depends(ADMIN)):
         raise HTTPException(409, f"Bahan masih dipakai oleh produk: {', '.join(names)}")
     await db.inventory.delete_one({"_id": iid})
     return {"ok": True}
+
+
+@api.post("/inventory/opname", status_code=201)
+async def create_inventory_opname(
+    body: List[StockOpnameItemIn] = Body(..., min_length=1, max_length=500),
+    user: User = Depends(ADMIN),
+):
+    item_ids = [line.item_id for line in body]
+    if len(item_ids) != len(set(item_ids)):
+        raise HTTPException(422, "Bahan yang sama tidak boleh muncul dua kali dalam satu opname.")
+
+    await db.connect()
+    session_id = uuid4()
+    created_at = datetime.now(timezone.utc)
+    opname_rows = []
+    try:
+        async with db.pool.acquire() as connection:
+            async with connection.transaction():
+                accounts = await connection.fetch(
+                    """
+                    select
+                      coalesce(
+                        nullif(to_jsonb(account)->>'account_code', ''),
+                        nullif(to_jsonb(account)->>'kode_akun', ''),
+                        nullif(to_jsonb(account)->>'code', ''),
+                        nullif(to_jsonb(account)->>'kode', '')
+                      ) as account_code,
+                      coalesce(
+                        nullif(btrim(to_jsonb(account)->>'account_name'), ''),
+                        nullif(btrim(to_jsonb(account)->>'nama_akun'), ''),
+                        nullif(btrim(to_jsonb(account)->>'name'), '')
+                      ) as account_name,
+                      coalesce(
+                        nullif(btrim(to_jsonb(account)->>'account_category'), ''),
+                        nullif(btrim(to_jsonb(account)->>'kategori_akun'), ''),
+                        nullif(btrim(to_jsonb(account)->>'category'), '')
+                      ) as account_category
+                    from public.chart_of_accounts as account
+                    where coalesce(
+                      nullif(to_jsonb(account)->>'account_code', ''),
+                      nullif(to_jsonb(account)->>'kode_akun', ''),
+                      nullif(to_jsonb(account)->>'code', ''),
+                      nullif(to_jsonb(account)->>'kode', '')
+                    ) = any($1::text[])
+                    """,
+                    [ACCOUNT_BEBAN_SELISIH_STOK_ID, ACCOUNT_PERSEDIAAN_BAHAN_ID],
+                )
+                accounts_by_code = {row["account_code"]: row for row in accounts}
+                expense_account = accounts_by_code.get(ACCOUNT_BEBAN_SELISIH_STOK_ID)
+                inventory_account = accounts_by_code.get(ACCOUNT_PERSEDIAAN_BAHAN_ID)
+                if (
+                    len(accounts) != 2
+                    or not expense_account
+                    or not expense_account["account_name"]
+                    or account_type_from_category(expense_account["account_category"]) != "expense"
+                    or not inventory_account
+                    or not inventory_account["account_name"]
+                    or account_type_from_category(inventory_account["account_category"]) != "asset"
+                ):
+                    raise HTTPException(
+                        422,
+                        "Akun Beban Selisih Stok (5-51099) atau Persediaan Bahan Baku (1-10003) "
+                        "belum tersedia dengan tipe akun yang sesuai di Chart of Accounts.",
+                    )
+
+                inventory_rows = await connection.fetch(
+                    """
+                    select id, name, type, unit, stock, cost_per_unit
+                    from public.inventory
+                    where id = any($1::text[])
+                    order by id
+                    for update
+                    """,
+                    item_ids,
+                )
+                inventory_by_id = {row["id"]: row for row in inventory_rows}
+                missing_ids = [item_id for item_id in item_ids if item_id not in inventory_by_id]
+                if missing_ids:
+                    raise HTTPException(404, f"Bahan tidak ditemukan: {', '.join(missing_ids)}.")
+
+                for line in body:
+                    item = inventory_by_id[line.item_id]
+                    if (item["type"] or "").strip().casefold() != "bahan baku":
+                        raise HTTPException(422, f"{item['name']} bukan bahan baku dan tidak dapat diopname.")
+
+                    system_qty = Decimal(str(item["stock"]))
+                    difference = line.physical_qty - system_qty
+                    cost_per_unit = Decimal(str(item["cost_per_unit"]))
+                    loss_value = (
+                        abs(difference * cost_per_unit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        if difference < 0
+                        else Decimal("0.00")
+                    )
+                    opname_rows.append({
+                        "item_id": line.item_id,
+                        "item_name": item["name"],
+                        "unit": item["unit"],
+                        "system_qty": system_qty,
+                        "physical_qty": line.physical_qty,
+                        "difference": difference,
+                        "cost_per_unit": cost_per_unit,
+                        "loss_value": loss_value,
+                        "notes": line.notes,
+                    })
+
+                await connection.executemany(
+                    """
+                    update public.inventory
+                    set stock = $1
+                    where id = $2
+                    """,
+                    [(row["physical_qty"], row["item_id"]) for row in opname_rows],
+                )
+                await connection.executemany(
+                    """
+                    insert into public.stock_adjustments
+                      (session_id, item_id, item_name, item_unit, system_qty, physical_qty,
+                       difference, cost_per_unit, loss_value, notes, created_by, created_at)
+                    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    """,
+                    [
+                        (
+                            session_id,
+                            row["item_id"],
+                            row["item_name"],
+                            row["unit"],
+                            row["system_qty"],
+                            row["physical_qty"],
+                            row["difference"],
+                            row["cost_per_unit"],
+                            row["loss_value"],
+                            row["notes"],
+                            user.id,
+                            created_at,
+                        )
+                        for row in opname_rows
+                    ],
+                )
+
+                loss_rows = [row for row in opname_rows if row["loss_value"] > 0]
+                total_loss = sum((row["loss_value"] for row in loss_rows), Decimal("0.00"))
+                if total_loss > 0:
+                    description = "; ".join(
+                        f"{row['item_name']}: {row['notes'] or 'Selisih stok opname'}"
+                        for row in loss_rows
+                    )
+                    await post_finance_source(
+                        connection,
+                        "stock_opname",
+                        str(session_id),
+                        created_at.date(),
+                        description,
+                        user.id,
+                        [
+                            (expense_account["account_name"], "expense", total_loss, Decimal("0.00")),
+                            (inventory_account["account_name"], "asset", Decimal("0.00"), total_loss),
+                        ],
+                        account_codes=[ACCOUNT_BEBAN_SELISIH_STOK_ID, ACCOUNT_PERSEDIAAN_BAHAN_ID],
+                    )
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Failed to save stock opname session %s", session_id)
+        raise HTTPException(500, "Stok opname gagal disimpan. Perubahan telah dibatalkan.") from error
+
+    return {
+        "session_id": str(session_id),
+        "created_at": created_at.isoformat(),
+        "created_by": user.id,
+        "item_count": len(opname_rows),
+        "loss_total": sum((row["loss_value"] for row in opname_rows), Decimal("0.00")),
+        "items": opname_rows,
+    }
+
+
+@api.get("/inventory/opname")
+async def list_inventory_opname(_: User = Depends(ADMIN)):
+    await db.connect()
+    rows = await db.pool.fetch(
+        """
+        select
+          session_id,
+          min(created_at) as created_at,
+          (array_agg(created_by order by created_at desc))[1] as created_by,
+          count(*) as item_count,
+          coalesce(sum(loss_value), 0) as loss_total,
+          jsonb_agg(
+            jsonb_build_object(
+              'item_id', item_id,
+              'item_name', item_name,
+              'unit', item_unit,
+              'system_qty', system_qty,
+              'physical_qty', physical_qty,
+              'difference', difference,
+              'cost_per_unit', cost_per_unit,
+              'loss_value', loss_value,
+              'notes', notes
+            ) order by item_name
+          ) as items
+        from public.stock_adjustments
+        group by session_id
+        order by min(created_at) desc
+        limit 20
+        """
+    )
+    return [
+        {
+            "session_id": str(row["session_id"]),
+            "created_at": row["created_at"].isoformat(),
+            "created_by": row["created_by"],
+            "item_count": row["item_count"],
+            "loss_total": row["loss_total"],
+            "items": row["items"],
+        }
+        for row in rows
+    ]
 
 
 # ---------- Tables ----------

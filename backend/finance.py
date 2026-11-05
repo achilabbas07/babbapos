@@ -13,6 +13,7 @@ JournalLine = tuple[str, str, Decimal, Decimal]
 logger = logging.getLogger(__name__)
 
 ACCOUNT_PERSEDIAAN_BAHAN_ID = "1-10003"
+ACCOUNT_BEBAN_SELISIH_STOK_ID = "5-51099"
 ACCOUNT_BEBAN_OPERASIONAL_ID = "6-60000"
 ACCOUNT_HPP_ID = "5-50000"
 ACCOUNT_KAS_TUNAI_ID = "1-10001"

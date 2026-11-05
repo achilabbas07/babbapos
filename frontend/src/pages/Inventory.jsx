@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil } from "lucide-react";
+import { Download, Pencil, Plus, ScanLine } from "lucide-react";
 import { api, errMsg, num, rp } from "@/lib/api";
 import { PageHeader, StatCard } from "@/components/PageHeader";
 import { FormDialog } from "@/components/FormDialog";
+import InventoryOpnameDialog from "@/components/InventoryOpnameDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -23,11 +24,34 @@ const status = (i) => (i.stock <= 0 ? ["Habis", "text-destructive bg-destructive
 export default function Inventory() {
   const [items, setItems] = useState([]);
   const [dialog, setDialog] = useState(null);
+  const [opnameOpen, setOpnameOpen] = useState(false);
+  const [opnameHistory, setOpnameHistory] = useState([]);
 
   const load = useCallback(() => api.get("/inventory").then((r) => setItems(r.data)).catch((e) => toast.error(errMsg(e))), []);
+  const loadOpnameHistory = useCallback(() => api.get("/inventory/opname")
+    .then((r) => setOpnameHistory(r.data))
+    .catch((e) => toast.error(errMsg(e))), []);
+  const startOpname = async () => {
+    try {
+      const { data } = await api.get("/inventory");
+      setItems(data);
+      setOpnameOpen(true);
+    } catch (error) {
+      toast.error(errMsg(error));
+    }
+  };
+  const handleDownloadPDF = async (report) => {
+    try {
+      const { downloadStockOpnamePDF } = await import("@/lib/stockOpnamePdf");
+      downloadStockOpnamePDF(report);
+    } catch (error) {
+      toast.error(errMsg(error));
+    }
+  };
   useEffect(() => {
     load();
-  }, [load]);
+    loadOpnameHistory();
+  }, [load, loadOpnameHistory]);
 
   const save = async (f) => {
     const body = { name: f.name, type: f.type || "Bahan Baku", unit: f.unit, stock: Number(f.stock) || 0, min_stock: Number(f.min_stock) || 0, cost_per_unit: Number(f.cost_per_unit) || 0 };
@@ -39,10 +63,14 @@ export default function Inventory() {
 
   const value = items.reduce((s, i) => s + i.stock * i.cost_per_unit, 0);
   const low = items.filter((i) => i.stock <= i.min_stock).length;
+  const bahanBaku = items.filter((item) => item.type?.trim().toLowerCase() === "bahan baku");
 
   return (
     <div>
       <PageHeader title="Stok Bahan" subtitle="Berkurang otomatis via resep saat transaksi, bertambah via pembelian.">
+        <Button data-testid="start-stock-opname-button" variant="outline" onClick={startOpname}>
+          <ScanLine className="h-4 w-4" />Mulai Stok Opname
+        </Button>
         <Button data-testid="add-inventory-button" onClick={() => setDialog({ type: "Bahan Baku", stock: 0, min_stock: 0 })}><Plus className="mr-1 h-4 w-4" />Tambah Bahan</Button>
       </PageHeader>
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
@@ -79,7 +107,48 @@ export default function Inventory() {
           </TableBody>
         </Table>
       </div>
+      <section className="mt-8">
+        <h2 className="mb-3 text-lg font-semibold">Riwayat Stok Opname</h2>
+        <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Tanggal</TableHead>
+                <TableHead className="text-right">Jumlah Barang</TableHead>
+                <TableHead className="text-right">Nilai Kerugian</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {opnameHistory.map((report) => (
+                <TableRow key={report.session_id}>
+                  <TableCell>{new Date(report.created_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}</TableCell>
+                  <TableCell className="text-right">{report.item_count}</TableCell>
+                  <TableCell className="text-right">{rp(report.loss_total)}</TableCell>
+                  <TableCell className="text-right">
+                    <Button type="button" variant="outline" size="sm" onClick={() => handleDownloadPDF(report)}>
+                      <Download className="h-4 w-4" />Unduh Laporan PDF
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!opnameHistory.length && (
+                <TableRow><TableCell colSpan={4} className="py-8 text-center text-muted-foreground">Belum ada riwayat stok opname.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
       <FormDialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} title={dialog?.id ? "Edit Bahan" : "Tambah Bahan"} fields={FIELDS} initial={dialog} onSubmit={save} testid="inventory-form" />
+      <InventoryOpnameDialog
+        open={opnameOpen}
+        onOpenChange={setOpnameOpen}
+        items={bahanBaku}
+        onSaved={(report) => {
+          setOpnameHistory((history) => [report, ...history.filter((item) => item.session_id !== report.session_id)].slice(0, 20));
+          load();
+        }}
+      />
     </div>
   );
 }
