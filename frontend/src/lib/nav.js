@@ -27,7 +27,6 @@ export const NAV = [
 
 export const FINANCE_NAV = [
   { to: "/admin/jurnal", label: "Input Jurnal Umum", icon: BookOpen, roles: ADMIN },
-  { to: "/admin/daftar-akun", label: "Daftar Akun", icon: BookOpen, roles: ADMIN },
   { to: "/coa", label: "Chart of Accounts", icon: BookOpen, roles: ADMIN },
   { to: "/admin/dashboard-keuangan", label: "Dashboard & Neraca Keuangan", icon: Wallet, roles: ADMIN },
   { to: "/admin/arus-kas", label: "Laporan Arus Kas", icon: BarChart3, roles: ADMIN },
