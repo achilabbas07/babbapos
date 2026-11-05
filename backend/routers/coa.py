@@ -142,37 +142,72 @@ async def list_accounts(_: User = Depends(ADMIN)):
     await db.connect()
     rows = await db.pool.fetch(
         """
-        select
-          coalesce(to_jsonb(account)->>'id', to_jsonb(account)->>'account_id',
-                   to_jsonb(account)->>'account_code', to_jsonb(account)->>'kode_akun') as id,
-          coalesce(
-            to_jsonb(account)->>'account_code',
-            to_jsonb(account)->>'kode_akun',
-            to_jsonb(account)->>'code',
-            to_jsonb(account)->>'kode'
-          ) as account_code,
-          coalesce(
-            to_jsonb(account)->>'account_name',
-            to_jsonb(account)->>'nama_akun',
-            to_jsonb(account)->>'name'
-          ) as account_name,
-          coalesce(
-            to_jsonb(account)->>'account_category',
-            to_jsonb(account)->>'kategori_akun',
-            to_jsonb(account)->>'category'
-          ) as account_category,
-          coalesce(
-            to_jsonb(account)->>'normal_balance',
-            to_jsonb(account)->>'saldo_normal'
-          ) as normal_balance,
-          to_jsonb(account)->>'current_balance' as current_balance
-        from public.chart_of_accounts as account
-        order by coalesce(
-          to_jsonb(account)->>'account_code',
-          to_jsonb(account)->>'kode_akun',
-          to_jsonb(account)->>'code',
-          to_jsonb(account)->>'kode'
+        with account_master as (
+          select
+            coalesce(
+              to_jsonb(account)->>'id',
+              to_jsonb(account)->>'account_id',
+              to_jsonb(account)->>'account_code',
+              to_jsonb(account)->>'kode_akun'
+            ) as id,
+            coalesce(
+              to_jsonb(account)->>'account_code',
+              to_jsonb(account)->>'kode_akun',
+              to_jsonb(account)->>'code',
+              to_jsonb(account)->>'kode'
+            ) as account_code,
+            coalesce(
+              to_jsonb(account)->>'account_name',
+              to_jsonb(account)->>'nama_akun',
+              to_jsonb(account)->>'name'
+            ) as account_name,
+            coalesce(
+              to_jsonb(account)->>'account_category',
+              to_jsonb(account)->>'kategori_akun',
+              to_jsonb(account)->>'category'
+            ) as account_category,
+            coalesce(
+              to_jsonb(account)->>'normal_balance',
+              to_jsonb(account)->>'saldo_normal'
+            ) as normal_balance
+          from public.chart_of_accounts as account
         )
+        select
+          account_master.id,
+          account_master.account_code,
+          account_master.account_name,
+          account_master.account_category,
+          account_master.normal_balance,
+          coalesce((
+            select sum(
+              case
+                when lower(btrim(coalesce(account_master.normal_balance, '')))
+                  in ('debit', 'debet', 'dr')
+                  or (
+                    lower(btrim(coalesce(account_master.normal_balance, '')))
+                      not in ('credit', 'kredit', 'cr')
+                    and (
+                      lower(btrim(coalesce(account_master.account_category, ''))) like 'asset%'
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'aset%'
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'aktiva%'
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'expense%'
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'beban%'
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'biaya%'
+                    )
+                  )
+                  then ledger.debit - ledger.credit
+                else ledger.credit - ledger.debit
+              end
+            )
+            from public.general_ledger as ledger
+            where ledger.account_code = account_master.account_code
+              or (
+                ledger.account_code is null
+                and ledger.account_name = account_master.account_name
+              )
+          ), 0) as current_balance
+        from account_master
+        order by account_master.account_code
         """
     )
     return [serialize_account(row) for row in rows]
