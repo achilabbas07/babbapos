@@ -664,7 +664,12 @@ async def list_open_bills(_: User = Depends(ANY)):
 
 @api.get("/open-bills/{bid}")
 async def get_open_bill(bid: str, _: User = Depends(ANY)):
-    return OpenBill.from_mongo(await get_or_404("open_bills", bid, "Open bill"))
+    bill = OpenBill.from_mongo(await get_or_404("open_bills", bid, "Open bill"))
+    if not bill.customerName and bill.customerId:
+        customer = await db.customers.find_one({"_id": bill.customerId})
+        if customer and customer.get("name"):
+            bill = bill.model_copy(update={"customerName": customer["name"]})
+    return bill
 
 
 @api.post("/open-bills")
