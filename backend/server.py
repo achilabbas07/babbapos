@@ -42,6 +42,8 @@ from finance import (
 
 import logging
 import asyncpg
+import sys
+import traceback
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -597,6 +599,7 @@ async def create_inventory_opname(
     session_id = uuid4()
     created_at = datetime.now(timezone.utc)
     opname_rows = []
+    stage = "membaca akun Chart of Accounts"
     try:
         async with db.pool.acquire() as connection:
             async with connection.transaction():
@@ -647,6 +650,7 @@ async def create_inventory_opname(
                         "belum tersedia dengan tipe akun yang sesuai di Chart of Accounts.",
                     )
 
+                stage = "membaca dan mengunci stok bahan"
                 inventory_rows = await connection.fetch(
                     """
                     select id, name, type, unit, stock, cost_per_unit
@@ -687,6 +691,7 @@ async def create_inventory_opname(
                         "notes": line.notes,
                     })
 
+                stage = "memperbarui stok bahan"
                 await connection.executemany(
                     """
                     update public.inventory
@@ -695,6 +700,7 @@ async def create_inventory_opname(
                     """,
                     [(row["physical_qty"], row["item_id"]) for row in opname_rows],
                 )
+                stage = "menyimpan riwayat stok opname"
                 await connection.executemany(
                     """
                     insert into public.stock_adjustments
@@ -724,6 +730,7 @@ async def create_inventory_opname(
                 loss_rows = [row for row in opname_rows if row["loss_value"] > 0]
                 total_loss = sum((row["loss_value"] for row in loss_rows), Decimal("0.00"))
                 if total_loss > 0:
+                    stage = "membuat jurnal kerugian stok"
                     description = "; ".join(
                         f"{row['item_name']}: {row['notes'] or 'Selisih stok opname'}"
                         for row in loss_rows
@@ -745,11 +752,12 @@ async def create_inventory_opname(
         raise
     except Exception as error:
         error_id = uuid4()
-        logger.exception(
-            "Failed to save stock opname session %s (error_id=%s)",
-            session_id,
-            error_id,
+        print(
+            f"STOCK_OPNAME_FAILURE error_id={error_id} session_id={session_id} stage={stage} error={error!r}",
+            file=sys.stderr,
+            flush=True,
         )
+        traceback.print_exc(file=sys.stderr)
         raise HTTPException(
             500,
             f"Stok opname gagal disimpan. Perubahan telah dibatalkan. ID insiden: {error_id}.",
