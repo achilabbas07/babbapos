@@ -754,7 +754,16 @@ async def update_open_bill(bid: str, body: OpenBillIn, request: Request, user: U
     if old.tableId and old.tableId != bill.tableId:
         await free_table(old.tableId)
     await db.open_bills.replace_one({"_id": bid}, bill.to_mongo())
-    await log_order_diff(old.items_json, (old.waiterId, old.waiterName), bill.items_json, (bill.waiterId, bill.waiterName), "bill_update", bid)
+    actor_waiter = (user.id, user.name) if user.role == "waiter" else None
+    await log_order_diff(
+        old.items_json,
+        (old.waiterId, old.waiterName),
+        bill.items_json,
+        (bill.waiterId, bill.waiterName),
+        "bill_update",
+        bid,
+        actor_waiter=actor_waiter,
+    )
     return bill
 
 

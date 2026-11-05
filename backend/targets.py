@@ -68,7 +68,10 @@ async def _write_logs(waiter: Tuple[Optional[str], str], deltas: dict, source: s
     wid, wname = waiter
     if not wid:
         return
-    shift = await db.waiter_shifts.find_one({"userId": wid, "status": "open"})
+    active_shifts = await db.waiter_shifts.find(
+        {"userId": wid, "status": "open"},
+    ).sort("openedAt", -1).to_list(1)
+    shift = active_shifts[0] if active_shifts else None
     ts = now_iso()
     docs = [{
         "_id": str(uuid.uuid4()),
@@ -96,8 +99,10 @@ async def log_order_diff(
     source: str,
     ref: str,
     connection=None,
+    actor_waiter: Optional[Tuple[Optional[str], str]] = None,
 ):
     old, new = _qty_map(old_items), _qty_map(new_items)
+    log_waiter = actor_waiter or new_waiter
     if old_waiter[0] == new_waiter[0]:
         deltas = {
             key: [
@@ -108,10 +113,10 @@ async def log_order_diff(
             ]
             for key in set(old) | set(new)
         }
-        await _write_logs(new_waiter, deltas, source, ref, connection=connection)
+        await _write_logs(log_waiter, deltas, source, ref, connection=connection)
     else:
         await _write_logs(old_waiter, {key: [-row[0], row[1], row[2], row[3]] for key, row in old.items()}, source, ref, connection=connection)
-        await _write_logs(new_waiter, dict(new), source, ref, connection=connection)
+        await _write_logs(log_waiter, dict(new), source, ref, connection=connection)
 
 
 async def progress_for(shift: dict) -> dict:
