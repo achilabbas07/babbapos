@@ -210,10 +210,155 @@ async def get_profit_and_loss_report(
 ) -> dict[str, Any]:
     rows = await pool.fetch(
         """
-        select account_name, account_type, sum(subtotal_balance) as balance
-        from public.view_profit_and_loss_summary
-        where transaction_date >= $1::date
-          and transaction_date < $2::date
+        with report_rows as (
+          select account_name, account_type, subtotal_balance as balance
+          from public.view_profit_and_loss_summary
+          where transaction_date >= $1::date
+            and transaction_date < $2::date
+            and account_type <> 'operating_expense'
+
+          union all
+
+          select account_name, 'operating_expense' as account_type,
+                 sum(debit - credit) as balance
+          from public.general_ledger
+          where transaction_date >= $1::date
+            and transaction_date < $2::date
+            and account_type = 'expense'
+            and source_type is distinct from 'expense'
+            and lower(account_name) not like '%beban pokok%'
+            and lower(account_name) not like '%hpp%'
+            and lower(account_name) not like '%tissu%'
+            and lower(account_name) not like '%bumbu%'
+            and lower(account_name) not like '%persediaan bahan%'
+            and lower(account_name) not like '%persediaan barang%'
+          group by account_name
+
+          union all
+
+          select
+            coalesce(
+              nullif(btrim(account.account_name), ''),
+              nullif(btrim(category.category_name), ''),
+              nullif(btrim(expense.category), '')
+            ) as account_name,
+            case
+              when coalesce(category.account_code, '') like '5-%'
+                or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
+                   like '%beban pokok%'
+                or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
+                   like '%hpp%'
+                or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
+                   like '%tissu%'
+                or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
+                   like '%bumbu%'
+                or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
+                   like '%persediaan bahan%'
+                or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
+                   like '%persediaan barang%'
+                then 'cost_of_goods_sold'
+              else 'operating_expense'
+            end as account_type,
+            sum(expense.amount)::numeric as balance
+          from public.expenses as expense
+          left join lateral (
+            select
+              nullif(btrim(expense_category.name), '') as category_name,
+              nullif(btrim(expense_category.account_code), '') as account_code
+            from public.expense_categories as expense_category
+            where coalesce(
+                    to_jsonb(expense_category)->>'id',
+                    to_jsonb(expense_category)->>'_id'
+                  ) = to_jsonb(expense)->>'category_id'
+               or lower(btrim(expense_category.name)) = lower(btrim(expense.category))
+            order by (
+              coalesce(
+                to_jsonb(expense_category)->>'id',
+                to_jsonb(expense_category)->>'_id'
+              ) = to_jsonb(expense)->>'category_id'
+            ) desc
+            limit 1
+          ) as category on true
+          left join lateral (
+            select coalesce(
+                     nullif(btrim(to_jsonb(chart_account)->>'account_name'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'nama_akun'), '')
+                   ) as account_name
+            from public.chart_of_accounts as chart_account
+            where coalesce(
+                    nullif(to_jsonb(chart_account)->>'account_code', ''),
+                    nullif(to_jsonb(chart_account)->>'kode_akun', ''),
+                    nullif(to_jsonb(chart_account)->>'code', ''),
+                    nullif(to_jsonb(chart_account)->>'kode', '')
+                  ) = category.account_code
+            limit 1
+          ) as account on true
+          where expense.date >= $1::date
+            and expense.date < $2::date
+            and expense.amount > 0
+          group by 1, 2
+
+          union all
+
+          select
+            coalesce(
+              nullif(btrim(account.account_name), ''),
+              nullif(btrim(category.category_name), ''),
+              nullif(btrim(movement.note), ''),
+              'Kas Keluar'
+            ) as account_name,
+            case
+              when coalesce(category.account_code, '') like '5-%'
+                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
+                   like '%beban pokok%'
+                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
+                   like '%hpp%'
+                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
+                   like '%tissu%'
+                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
+                   like '%bumbu%'
+                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
+                   like '%persediaan bahan%'
+                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
+                   like '%persediaan barang%'
+                then 'cost_of_goods_sold'
+              else 'operating_expense'
+            end as account_type,
+            sum(movement.amount)::numeric as balance
+          from public.cash_movements as movement
+          left join lateral (
+            select
+              nullif(btrim(expense_category.name), '') as category_name,
+              nullif(btrim(expense_category.account_code), '') as account_code
+            from public.expense_categories as expense_category
+            where coalesce(
+                    to_jsonb(expense_category)->>'id',
+                    to_jsonb(expense_category)->>'_id'
+                  ) = to_jsonb(movement)->>'expense_category_id'
+            limit 1
+          ) as category on true
+          left join lateral (
+            select coalesce(
+                     nullif(btrim(to_jsonb(chart_account)->>'account_name'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'nama_akun'), '')
+                   ) as account_name
+            from public.chart_of_accounts as chart_account
+            where coalesce(
+                    nullif(to_jsonb(chart_account)->>'account_code', ''),
+                    nullif(to_jsonb(chart_account)->>'kode_akun', ''),
+                    nullif(to_jsonb(chart_account)->>'code', ''),
+                    nullif(to_jsonb(chart_account)->>'kode', '')
+                  ) = category.account_code
+            limit 1
+          ) as account on true
+          where movement.type = 'out'
+            and movement."timestamp" >= $1::date
+            and movement."timestamp" < $2::date
+            and movement.amount > 0
+          group by 1, 2
+        )
+        select account_name, account_type, sum(balance) as balance
+        from report_rows
         group by account_name, account_type
         order by account_type, account_name
         """,

@@ -5,16 +5,28 @@ from decimal import Decimal
 from finance import get_profit_and_loss_report
 
 
-def test_profit_loss_aggregates_view_rows_for_requested_date_range():
+def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_range():
     class FakePool:
         async def fetch(self, query, *args):
             normalized_query = " ".join(query.lower().split())
             assert "from public.view_profit_and_loss_summary" in normalized_query
-            assert "select account_name, account_type, sum(subtotal_balance) as balance" in normalized_query
+            assert "account_type <> 'operating_expense'" in normalized_query
+            assert "from public.expenses as expense" in normalized_query
+            assert "from public.cash_movements as movement" in normalized_query
+            assert "from public.expense_categories as expense_category" in normalized_query
+            assert "from public.chart_of_accounts as chart_account" in normalized_query
+            assert "sum(expense.amount)::numeric as balance" in normalized_query
+            assert "sum(movement.amount)::numeric as balance" in normalized_query
+            assert "movement.type = 'out'" in normalized_query
+            assert "movement.\"timestamp\" >= $1::date" in normalized_query
+            assert "movement.\"timestamp\" < $2::date" in normalized_query
+            assert "expense.date >= $1::date" in normalized_query
+            assert "expense.date < $2::date" in normalized_query
+            assert "to_jsonb(movement)->>'expense_category_id'" in normalized_query
+            assert "category.account_code" in normalized_query
+            assert "source_type is distinct from 'expense'" in normalized_query
             assert "where transaction_date >= $1::date and transaction_date < $2::date" in normalized_query
             assert "group by account_name, account_type" in normalized_query
-            assert "account_id" not in normalized_query
-            assert "entry_id" not in normalized_query
             assert args == (date(2026, 11, 1), date(2026, 12, 1))
             return [
                 {
