@@ -187,6 +187,7 @@ export default function POS() {
           orderTime: fmtDate(data.timestamp),
           time: fmtDate(data.timestamp),
           queueNumber: data.queueNumber == null ? null : String(data.queueNumber),
+          customerName: data.customerName,
           waiter: data.waiterName || data.userName || "-",
           items: unprintedItems.map((item) => ({
             ...item,
