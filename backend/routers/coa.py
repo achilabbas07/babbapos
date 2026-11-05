@@ -23,6 +23,13 @@ NORMAL_BALANCES: dict[AccountType, str] = {
     "Revenue": "credit",
     "Expense": "debit",
 }
+COA_COLUMN_CANDIDATES = {
+    "id": ("id", "account_id"),
+    "account_code": ("account_code", "kode_akun", "code", "kode"),
+    "account_name": ("account_name", "nama_akun", "name"),
+    "account_category": ("account_category", "kategori_akun", "category"),
+    "normal_balance": ("normal_balance", "saldo_normal"),
+}
 
 router = APIRouter(prefix="/api/chart-of-accounts", tags=["Chart of Accounts"])
 ADMIN = require_roles("admin")
@@ -57,32 +64,75 @@ def account_type_from_category(category: str | None) -> AccountType | None:
     return None
 
 
+def _row_value(row: asyncpg.Record, *names: str):
+    keys = row.keys()
+    for name in names:
+        if name in keys and row[name] is not None:
+            return row[name]
+    return None
+
+
 def serialize_account(row: asyncpg.Record) -> dict:
-    category = row["account_category"]
+    category = _row_value(row, "account_category", "kategori_akun", "category")
+    account_code = _row_value(row, "account_code", "kode_akun", "code", "kode")
     return {
-        "id": str(row["id"]),
-        "account_code": row["account_code"],
-        "account_name": row["account_name"],
+        "id": str(_row_value(row, "id", "account_id") or account_code),
+        "account_code": account_code,
+        "account_name": _row_value(row, "account_name", "nama_akun", "name"),
         "account_category": category,
         "account_type": account_type_from_category(category),
-        "normal_balance": row["normal_balance"],
-        "current_balance": row["current_balance"],
+        "normal_balance": _row_value(row, "normal_balance", "saldo_normal"),
+        "current_balance": _row_value(row, "current_balance"),
     }
 
 
-async def ensure_unique_code(account_code: str, account_id: UUID | None = None) -> None:
+def _quoted(column: str) -> str:
+    return f'"{column}"'
+
+
+def _account_schema() -> tuple[dict[str, str], dict[str, str]]:
+    columns = db.columns.get("chart_of_accounts", {})
+    resolved = {}
+    for logical_name, candidates in COA_COLUMN_CANDIDATES.items():
+        resolved[logical_name] = next((name for name in candidates if name in columns), "")
+    required = ("account_code", "account_name", "account_category")
+    missing = [name for name in required if not resolved[name]]
+    if missing:
+        raise HTTPException(500, "Skema chart_of_accounts tidak memiliki kolom akun yang diperlukan.")
+    if not resolved["id"]:
+        resolved["id"] = resolved["account_code"]
+    return resolved, columns
+
+
+def _account_key_value(value: str, column: str, columns: dict[str, str]):
+    column_type = columns.get(column)
+    try:
+        if column_type == "uuid":
+            return UUID(value)
+        if column_type in ("smallint", "integer", "bigint"):
+            return int(value)
+    except ValueError as error:
+        raise HTTPException(422, "ID akun tidak valid.") from error
+    return value
+
+
+async def ensure_unique_code(
+    account_code: str,
+    account_id: str | None = None,
+    resolved: dict[str, str] | None = None,
+    columns: dict[str, str] | None = None,
+) -> None:
     await db.connect()
-    if account_id is None:
-        exists = await db.pool.fetchval(
-            "select 1 from public.chart_of_accounts where account_code = $1 limit 1",
-            account_code,
-        )
-    else:
-        exists = await db.pool.fetchval(
-            "select 1 from public.chart_of_accounts where account_code = $1 and id <> $2 limit 1",
-            account_code,
-            account_id,
-        )
+    if resolved is None or columns is None:
+        resolved, columns = _account_schema()
+    code_column = _quoted(resolved["account_code"])
+    key_column = _quoted(resolved["id"])
+    query = f"select 1 from public.chart_of_accounts where {code_column} = $1"
+    args = [account_code]
+    if account_id is not None:
+        query += f" and {key_column} <> $2"
+        args.append(_account_key_value(account_id, resolved["id"], columns))
+    exists = await db.pool.fetchval(f"{query} limit 1", *args)
     if exists:
         raise HTTPException(409, "Kode akun sudah digunakan.")
 
@@ -93,7 +143,8 @@ async def list_accounts(_: User = Depends(ADMIN)):
     rows = await db.pool.fetch(
         """
         select
-          coalesce(to_jsonb(account)->>'id', to_jsonb(account)->>'account_id') as id,
+          coalesce(to_jsonb(account)->>'id', to_jsonb(account)->>'account_id',
+                   to_jsonb(account)->>'account_code', to_jsonb(account)->>'kode_akun') as id,
           coalesce(
             to_jsonb(account)->>'account_code',
             to_jsonb(account)->>'kode_akun',
@@ -129,21 +180,24 @@ async def list_accounts(_: User = Depends(ADMIN)):
 
 @router.post("", status_code=201)
 async def create_account(body: AccountIn, _: User = Depends(ADMIN)):
-    await ensure_unique_code(body.account_code)
+    await db.connect()
+    resolved, _ = _account_schema()
+    await ensure_unique_code(body.account_code, resolved=resolved, columns=db.columns["chart_of_accounts"])
     category = ACCOUNT_CATEGORIES[body.account_type]
     normal_balance = NORMAL_BALANCES[body.account_type]
+    values = [
+        (resolved["account_code"], body.account_code),
+        (resolved["account_name"], body.account_name),
+        (resolved["account_category"], category),
+    ]
+    if resolved["normal_balance"]:
+        values.append((resolved["normal_balance"], normal_balance))
+    column_sql = ", ".join(_quoted(column) for column, _ in values)
+    value_sql = ", ".join(f"${index}" for index in range(1, len(values) + 1))
     try:
         row = await db.pool.fetchrow(
-            """
-            insert into public.chart_of_accounts
-              (account_code, account_name, account_category, normal_balance)
-            values ($1, $2, $3, $4)
-            returning id, account_code, account_name, account_category, normal_balance, current_balance
-            """,
-            body.account_code,
-            body.account_name,
-            category,
-            normal_balance,
+            f"insert into public.chart_of_accounts ({column_sql}) values ({value_sql}) returning *",
+            *(value for _, value in values),
         )
     except asyncpg.UniqueViolationError as error:
         raise HTTPException(409, "Kode akun sudah digunakan.") from error
@@ -151,33 +205,31 @@ async def create_account(body: AccountIn, _: User = Depends(ADMIN)):
 
 
 @router.put("/{account_id}")
-async def update_account(account_id: UUID, body: AccountIn, _: User = Depends(ADMIN)):
+async def update_account(account_id: str, body: AccountIn, _: User = Depends(ADMIN)):
     await db.connect()
-    exists = await db.pool.fetchval(
-        "select 1 from public.chart_of_accounts where id = $1",
-        account_id,
-    )
-    if not exists:
-        raise HTTPException(404, "Akun tidak ditemukan.")
-    await ensure_unique_code(body.account_code, account_id)
+    resolved, columns = _account_schema()
+    key_column = _quoted(resolved["id"])
+    account_key = _account_key_value(account_id, resolved["id"], columns)
+    await ensure_unique_code(body.account_code, account_id, resolved, columns)
     category = ACCOUNT_CATEGORIES[body.account_type]
     normal_balance = NORMAL_BALANCES[body.account_type]
+    values = [
+        (resolved["account_code"], body.account_code),
+        (resolved["account_name"], body.account_name),
+        (resolved["account_category"], category),
+    ]
+    if resolved["normal_balance"]:
+        values.append((resolved["normal_balance"], normal_balance))
+    assignments = ", ".join(
+        f"{_quoted(column)} = ${index}"
+        for index, (column, _) in enumerate(values, start=1)
+    )
+    args = [value for _, value in values]
+    args.append(account_key)
     try:
         row = await db.pool.fetchrow(
-            """
-            update public.chart_of_accounts
-            set account_code = $1,
-                account_name = $2,
-                account_category = $3,
-                normal_balance = $4
-            where id = $5
-            returning id, account_code, account_name, account_category, normal_balance, current_balance
-            """,
-            body.account_code,
-            body.account_name,
-            category,
-            normal_balance,
-            account_id,
+            f"update public.chart_of_accounts set {assignments} where {key_column} = ${len(args)} returning *",
+            *args,
         )
     except asyncpg.UniqueViolationError as error:
         raise HTTPException(409, "Kode akun sudah digunakan.") from error
@@ -187,12 +239,15 @@ async def update_account(account_id: UUID, body: AccountIn, _: User = Depends(AD
 
 
 @router.delete("/{account_id}")
-async def delete_account(account_id: UUID, _: object = Depends(ADMIN)):
+async def delete_account(account_id: str, _: User = Depends(ADMIN)):
     await db.connect()
+    resolved, columns = _account_schema()
+    key_column = _quoted(resolved["id"])
+    account_key = _account_key_value(account_id, resolved["id"], columns)
     try:
         result = await db.pool.execute(
-            "delete from public.chart_of_accounts where id = $1",
-            account_id,
+            f"delete from public.chart_of_accounts where {key_column} = $1",
+            account_key,
         )
     except asyncpg.IntegrityConstraintViolationError as error:
         raise HTTPException(
