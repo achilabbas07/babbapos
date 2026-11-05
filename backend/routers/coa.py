@@ -42,8 +42,8 @@ class AccountIn(BaseModel):
         return value
 
 
-def account_type_from_category(category: str) -> AccountType | None:
-    normalized = category.strip().casefold()
+def account_type_from_category(category: str | None) -> AccountType | None:
+    normalized = (category or "").strip().casefold()
     if normalized.startswith(("aset", "aktiva", "asset")):
         return "Asset"
     if normalized.startswith(("kewajiban", "liabilitas", "utang", "hutang", "liability")):
@@ -92,9 +92,36 @@ async def list_accounts(_: User = Depends(ADMIN)):
     await db.connect()
     rows = await db.pool.fetch(
         """
-        select id, account_code, account_name, account_category, normal_balance, current_balance
-        from public.chart_of_accounts
-        order by account_code
+        select
+          coalesce(to_jsonb(account)->>'id', to_jsonb(account)->>'account_id') as id,
+          coalesce(
+            to_jsonb(account)->>'account_code',
+            to_jsonb(account)->>'kode_akun',
+            to_jsonb(account)->>'code',
+            to_jsonb(account)->>'kode'
+          ) as account_code,
+          coalesce(
+            to_jsonb(account)->>'account_name',
+            to_jsonb(account)->>'nama_akun',
+            to_jsonb(account)->>'name'
+          ) as account_name,
+          coalesce(
+            to_jsonb(account)->>'account_category',
+            to_jsonb(account)->>'kategori_akun',
+            to_jsonb(account)->>'category'
+          ) as account_category,
+          coalesce(
+            to_jsonb(account)->>'normal_balance',
+            to_jsonb(account)->>'saldo_normal'
+          ) as normal_balance,
+          to_jsonb(account)->>'current_balance' as current_balance
+        from public.chart_of_accounts as account
+        order by coalesce(
+          to_jsonb(account)->>'account_code',
+          to_jsonb(account)->>'kode_akun',
+          to_jsonb(account)->>'code',
+          to_jsonb(account)->>'kode'
+        )
         """
     )
     return [serialize_account(row) for row in rows]
