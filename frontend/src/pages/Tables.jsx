@@ -102,10 +102,10 @@ export default function Tables() {
             </span>
           ))}
         </div>
-        <div className="flex gap-1 rounded-xl bg-secondary p-1">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-card p-2 shadow-sm">
           {areas.map((a) => (
             <button key={a} data-testid={`area-tab-${a.toLowerCase().replace(/\s+/g, "-")}`} onClick={() => setArea(a)}
-              className={`h-8 rounded-lg px-3 text-xs font-semibold ${current === a ? "bg-white text-primary shadow-sm" : "text-muted-foreground"}`}>{a}</button>
+              className={`rounded-lg px-4 py-2 text-xs font-semibold ${current === a ? "bg-primary/10 text-primary shadow-sm" : "text-muted-foreground hover:bg-secondary"}`}>{a}</button>
           ))}
         </div>
       </div>
