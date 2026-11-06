@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, Plus, RefreshCw } from "lucide-react";
+import { ListFilter, Pencil, Plus, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import AccountTransactionsModal from "@/components/AccountTransactionsModal";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import COAFormModal from "@/components/COAFormModal";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,18 +11,25 @@ import { errMsg, rp } from "@/lib/api";
 import { createAccount, deleteAccount, getAccounts, updateAccount } from "@/services/coaService";
 import { getAccountCategoryLabel, getAccountTypeLabel } from "@/lib/accountClassification";
 
+const EMPTY_RANGE = { startDate: "", endDate: "" };
+
 export default function COAManagement() {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editingAccount, setEditingAccount] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [appliedRange, setAppliedRange] = useState(EMPTY_RANGE);
+  const [detailAccount, setDetailAccount] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
-  const loadAccounts = useCallback(async () => {
+  const loadAccounts = useCallback(async (range = EMPTY_RANGE) => {
     setLoading(true);
     setError("");
     try {
-      setAccounts(await getAccounts());
+      setAccounts(await getAccounts(range));
     } catch (requestError) {
       setError(errMsg(requestError));
     } finally {
@@ -30,8 +38,33 @@ export default function COAManagement() {
   }, []);
 
   useEffect(() => {
-    loadAccounts();
+    loadAccounts(EMPTY_RANGE);
   }, [loadAccounts]);
+
+  const applyFilter = (event) => {
+    event.preventDefault();
+    if (startDate && endDate && endDate < startDate) {
+      toast.error("Tanggal selesai tidak boleh sebelum tanggal mulai.");
+      return;
+    }
+    const range = { startDate, endDate };
+    setAppliedRange(range);
+    loadAccounts(range);
+  };
+
+  const resetFilter = () => {
+    setStartDate("");
+    setEndDate("");
+    setAppliedRange(EMPTY_RANGE);
+    loadAccounts(EMPTY_RANGE);
+  };
+
+  const openDetailModal = (account) => {
+    setDetailAccount(account);
+    setDetailOpen(true);
+  };
+
+  const hasFilter = Boolean(appliedRange.startDate || appliedRange.endDate);
 
   const openCreateModal = () => {
     setEditingAccount(null);
@@ -51,19 +84,19 @@ export default function COAManagement() {
       await createAccount(account);
       toast.success("Akun berhasil ditambahkan.");
     }
-    await loadAccounts();
+    await loadAccounts(appliedRange);
   };
 
   const removeAccount = async (account) => {
     await deleteAccount(account.id);
     toast.success("Akun berhasil dihapus.");
-    await loadAccounts();
+    await loadAccounts(appliedRange);
   };
 
   return (
     <div>
       <PageHeader title="Chart of Accounts" subtitle="Kelola kode, nama, dan kelompok akun keuangan.">
-        <Button data-testid="coa-refresh" variant="outline" onClick={loadAccounts} disabled={loading}>
+        <Button data-testid="coa-refresh" variant="outline" onClick={() => loadAccounts(appliedRange)} disabled={loading}>
           <RefreshCw className="h-4 w-4" />Perbarui
         </Button>
         <Button data-testid="coa-add" onClick={openCreateModal}>
@@ -71,11 +104,53 @@ export default function COAManagement() {
         </Button>
       </PageHeader>
 
+      <form
+        onSubmit={applyFilter}
+        data-testid="coa-date-filter"
+        className="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4"
+      >
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Dari Tanggal
+          <input
+            type="date"
+            data-testid="coa-start-date"
+            value={startDate}
+            max={endDate || undefined}
+            onChange={(event) => setStartDate(event.target.value)}
+            className="h-10 cursor-pointer rounded-lg border border-border bg-background px-3"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Sampai Tanggal
+          <input
+            type="date"
+            data-testid="coa-end-date"
+            value={endDate}
+            min={startDate || undefined}
+            onChange={(event) => setEndDate(event.target.value)}
+            className="h-10 cursor-pointer rounded-lg border border-border bg-background px-3"
+          />
+        </label>
+        <Button type="submit" data-testid="coa-filter-apply" disabled={loading}>
+          <ListFilter className="h-4 w-4" />Filter
+        </Button>
+        {hasFilter && (
+          <Button type="button" variant="outline" data-testid="coa-filter-reset" onClick={resetFilter} disabled={loading}>
+            <RotateCcw className="h-4 w-4" />Reset
+          </Button>
+        )}
+        <p className="ml-auto text-xs text-muted-foreground">
+          {hasFilter
+            ? "Saldo akun dihitung dari mutasi pada rentang tanggal terpilih."
+            : "Tanpa filter: saldo akun dihitung dari seluruh mutasi."}
+        </p>
+      </form>
+
       <section className="overflow-x-auto rounded-2xl border border-border bg-card">
         {error && (
           <div role="alert" className="m-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
             <span>{error}</span>
-            <Button type="button" variant="outline" onClick={loadAccounts} disabled={loading}>Coba lagi</Button>
+            <Button type="button" variant="outline" onClick={() => loadAccounts(appliedRange)} disabled={loading}>Coba lagi</Button>
           </div>
         )}
         {loading ? (
@@ -88,20 +163,36 @@ export default function COAManagement() {
                 <TableHead>Nama Akun</TableHead>
                 <TableHead>Jenis Akun</TableHead>
                 <TableHead>Kategori</TableHead>
-                <TableHead className="text-right">Saldo Saat Ini</TableHead>
+                <TableHead className="text-right">{hasFilter ? "Saldo Periode" : "Saldo Saat Ini"}</TableHead>
                 <TableHead><span className="sr-only">Aksi</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {accounts.map((account) => (
-                <TableRow key={account.id} data-testid={`coa-row-${account.id}`}>
+                <TableRow
+                  key={account.id}
+                  data-testid={`coa-row-${account.id}`}
+                  onClick={() => openDetailModal(account)}
+                  className="cursor-pointer"
+                  title={`Lihat rincian transaksi ${account.account_name}`}
+                >
                   <TableCell className="font-mono">{account.account_code}</TableCell>
                   <TableCell className="font-medium">{account.account_name}</TableCell>
                   <TableCell>{getAccountTypeLabel(account)}</TableCell>
                   <TableCell>{getAccountCategoryLabel(account)}</TableCell>
                   <TableCell className="text-right font-mono">{rp(account.current_balance)}</TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-1">
+                    <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        data-testid={`coa-detail-${account.id}`}
+                        aria-label={`Lihat rincian transaksi ${account.account_name}`}
+                        onClick={() => openDetailModal(account)}
+                      >
+                        <ListFilter className="h-4 w-4" />
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -139,6 +230,13 @@ export default function COAManagement() {
         onOpenChange={setModalOpen}
         account={editingAccount}
         onSubmit={saveAccount}
+      />
+
+      <AccountTransactionsModal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        account={detailAccount}
+        range={appliedRange}
       />
     </div>
   );

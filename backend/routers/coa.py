@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 from uuid import UUID
 
@@ -192,7 +194,13 @@ async def ensure_unique_code(
 
 
 @router.get("")
-async def list_accounts(_: User = Depends(ADMIN)):
+async def list_accounts(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    _: User = Depends(ADMIN),
+):
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
     await db.connect()
     rows = await db.pool.fetch(
         """
@@ -263,17 +271,181 @@ async def list_accounts(_: User = Depends(ADMIN)):
               end
             )
             from public.general_ledger as ledger
-            where ledger.account_code = account_master.account_code
-              or (
-                ledger.account_code is null
-                and ledger.account_name = account_master.account_name
-              )
+                        where (
+                                ledger.account_code = account_master.account_code
+                                or (
+                                    ledger.account_code is null
+                                    and ledger.account_name = account_master.account_name
+                                )
+                            )
+                            and ($1::date is null or ledger.transaction_date >= $1)
+                            and ($2::date is null or ledger.transaction_date <= $2)
           ), 0) as current_balance
         from account_master
         order by account_master.account_code
-        """
-    )
+                """,
+                start_date,
+                end_date,
+        )
     return [serialize_account(row) for row in rows]
+
+
+DEBIT_NORMAL_CATEGORY_PREFIXES = (
+    "asset", "aset", "aktiva", "kas", "cash", "expense", "beban", "biaya",
+)
+DEBIT_NORMAL_CATEGORIES = ("asset", "cost_of_goods_sold", "operating_expense")
+
+
+def normal_balance_side(account: dict) -> str:
+    """Tentukan sisi saldo normal akun (debit/credit) mengikuti aturan list_accounts."""
+    normal_balance = str(account.get("normal_balance") or "").strip().lower()
+    if normal_balance in ("debit", "debet", "dr"):
+        return "debit"
+    if normal_balance in ("credit", "kredit", "cr"):
+        return "credit"
+    category = str(account.get("account_category") or "").strip().lower()
+    if category.startswith(DEBIT_NORMAL_CATEGORY_PREFIXES):
+        return "debit"
+    if category in DEBIT_NORMAL_CATEGORIES:
+        return "debit"
+    code_prefix = str(account.get("account_code") or "").strip()[:1]
+    if code_prefix in ("1", "5", "6"):
+        return "debit"
+    return "credit"
+
+
+@router.get("/{account_code}/transactions")
+async def list_account_transactions(
+    account_code: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    _: User = Depends(ADMIN),
+):
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
+    code = (account_code or "").strip()
+    if not code:
+        raise HTTPException(422, "Kode akun wajib diisi.")
+    await db.connect()
+    account_row = await db.pool.fetchrow(
+        """
+        select
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'account_code'), ''),
+            nullif(btrim(to_jsonb(account)->>'kode_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'code'), ''),
+            nullif(btrim(to_jsonb(account)->>'kode'), '')
+          ) as account_code,
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'account_name'), ''),
+            nullif(btrim(to_jsonb(account)->>'nama_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'name'), '')
+          ) as account_name,
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'account_category'), ''),
+            nullif(btrim(to_jsonb(account)->>'kategori_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'category'), '')
+          ) as account_category,
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'normal_balance'), ''),
+            nullif(btrim(to_jsonb(account)->>'saldo_normal'), '')
+          ) as normal_balance
+        from public.chart_of_accounts as account
+        where coalesce(
+                nullif(btrim(to_jsonb(account)->>'account_code'), ''),
+                nullif(btrim(to_jsonb(account)->>'kode_akun'), ''),
+                nullif(btrim(to_jsonb(account)->>'code'), ''),
+                nullif(btrim(to_jsonb(account)->>'kode'), '')
+              ) = $1
+        limit 1
+        """,
+        code,
+    )
+    if account_row is None:
+        raise HTTPException(404, f"Akun dengan kode {code} tidak ditemukan.")
+
+    account = dict(account_row)
+    rows = await db.pool.fetch(
+        """
+        select
+          ledger.id,
+          ledger.entry_id,
+          ledger.transaction_date,
+          ledger.entry_date,
+          ledger.description,
+          ledger.account_code,
+          ledger.account_name,
+          ledger.account_type,
+          ledger.debit,
+          ledger.credit,
+          ledger.source_type,
+          ledger.source_id
+        from public.general_ledger as ledger
+        where (
+            ledger.account_code = $1
+            or (ledger.account_code is null and ledger.account_name = $2)
+          )
+          and ($3::date is null or ledger.transaction_date >= $3)
+          and ($4::date is null or ledger.transaction_date <= $4)
+        order by ledger.transaction_date desc, ledger.id desc
+        """,
+        account["account_code"],
+        account["account_name"],
+        start_date,
+        end_date,
+    )
+
+    side = normal_balance_side(account)
+    transactions = []
+    total_debit = Decimal("0")
+    total_credit = Decimal("0")
+    running_balance = Decimal("0")
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: (
+            (row["transaction_date"] or row["entry_date"]) or date.min,
+            row["id"],
+        ),
+    )
+    for row in ordered_rows:
+        item = dict(row)
+        debit = Decimal(str(item.get("debit") or 0))
+        credit = Decimal(str(item.get("credit") or 0))
+        total_debit += debit
+        total_credit += credit
+        running_balance += (debit - credit) if side == "debit" else (credit - debit)
+        item["debit"] = debit
+        item["credit"] = credit
+        item["balance"] = running_balance
+        item["transaction_date"] = item["transaction_date"] or item["entry_date"]
+        transactions.append(item)
+    transactions.reverse()
+
+    try:
+        closing_balance = (total_debit - total_credit) if side == "debit" else (total_credit - total_debit)
+        if not closing_balance.is_finite():
+            raise InvalidOperation
+    except InvalidOperation as error:  # pragma: no cover - pengaman nilai non-numerik
+        raise ValueError("Saldo akun tidak valid.") from error
+
+    return {
+        "account": {
+            **account,
+            "account_type": account_type_from_category(account["account_category"], account["account_code"]),
+            "normal_balance_side": side,
+        },
+        "filters": {
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        "summary": {
+            "total_debit": total_debit,
+            "total_credit": total_credit,
+            "closing_balance": closing_balance,
+            "transaction_count": len(transactions),
+        },
+        "transactions": transactions,
+    }
 
 
 @router.post("", status_code=201)

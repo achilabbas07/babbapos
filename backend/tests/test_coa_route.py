@@ -7,7 +7,7 @@ from routers import coa
 
 def test_list_accounts_calculates_balances_from_general_ledger(monkeypatch):
     class FakePool:
-        async def fetch(self, query):
+        async def fetch(self, query, *args):
             assert "from public.general_ledger as ledger" in query
             assert "ledger.account_code = account_master.account_code" in query
             assert "ledger.account_name = account_master.account_name" in query
@@ -16,6 +16,9 @@ def test_list_accounts_calculates_balances_from_general_ledger(monkeypatch):
             assert "then ledger.debit - ledger.credit" in query
             assert "else ledger.credit - ledger.debit" in query
             assert "to_jsonb(account)->>'current_balance'" not in query
+            assert "ledger.transaction_date >= $1" in query
+            assert "ledger.transaction_date <= $2" in query
+            assert args == (None, None)
             return [
                 {
                     "id": "expense-account",
@@ -41,7 +44,7 @@ def test_list_accounts_calculates_balances_from_general_ledger(monkeypatch):
     monkeypatch.setattr(coa.db, "connect", connect)
     monkeypatch.setattr(coa.db, "pool", FakePool())
 
-    accounts = asyncio.run(coa.list_accounts(User(id="admin", name="Admin", role="admin")))
+    accounts = asyncio.run(coa.list_accounts(_=User(id="admin", name="Admin", role="admin")))
 
     assert accounts[0]["current_balance"] == Decimal("125.00")
     assert accounts[0]["account_type"] == "Expense"
@@ -171,3 +174,155 @@ def test_update_account_persists_account_category_from_request(monkeypatch):
 
     assert account["account_category"] == "cost_of_goods_sold"
     assert account["account_type"] == "Expense"
+
+
+def test_list_accounts_applies_date_range_filter(monkeypatch):
+    from datetime import date
+
+    class FakePool:
+        async def fetch(self, query, *args):
+            assert "ledger.transaction_date >= $1" in query
+            assert "ledger.transaction_date <= $2" in query
+            assert args == (date(2026, 1, 1), date(2026, 1, 31))
+            return []
+
+    async def connect():
+        return None
+
+    monkeypatch.setattr(coa.db, "connect", connect)
+    monkeypatch.setattr(coa.db, "pool", FakePool())
+
+    accounts = asyncio.run(
+        coa.list_accounts(
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+            _=User(id="admin", name="Admin", role="admin"),
+        )
+    )
+
+    assert accounts == []
+
+
+def test_list_accounts_rejects_reversed_date_range(monkeypatch):
+    from datetime import date
+
+    from fastapi import HTTPException
+
+    async def connect():
+        return None
+
+    monkeypatch.setattr(coa.db, "connect", connect)
+
+    try:
+        asyncio.run(
+            coa.list_accounts(
+                start_date=date(2026, 2, 1),
+                end_date=date(2026, 1, 1),
+                _=User(id="admin", name="Admin", role="admin"),
+            )
+        )
+    except HTTPException as error:
+        assert error.status_code == 422
+    else:  # pragma: no cover
+        raise AssertionError("HTTPException 422 seharusnya dilempar")
+
+
+def test_list_account_transactions_builds_running_balance(monkeypatch):
+    from datetime import date
+
+    class FakePool:
+        async def fetchrow(self, query, *args):
+            assert "from public.chart_of_accounts as account" in query
+            assert args == ("5-51001",)
+            return {
+                "account_code": "5-51001",
+                "account_name": "Beban Pokok Bahan Baku",
+                "account_category": "cost_of_goods_sold",
+                "normal_balance": "debit",
+            }
+
+        async def fetch(self, query, *args):
+            assert "from public.general_ledger as ledger" in query
+            assert "ledger.account_code = $1" in query
+            assert args == ("5-51001", "Beban Pokok Bahan Baku", date(2026, 1, 1), date(2026, 1, 31))
+            return [
+                {
+                    "id": 2,
+                    "entry_id": "00000000-0000-0000-0000-000000000002",
+                    "transaction_date": date(2026, 1, 20),
+                    "entry_date": date(2026, 1, 20),
+                    "description": "Pemakaian bahan",
+                    "account_code": "5-51001",
+                    "account_name": "Beban Pokok Bahan Baku",
+                    "account_type": "expense",
+                    "debit": Decimal("250.00"),
+                    "credit": Decimal("0"),
+                    "source_type": "transaction",
+                    "source_id": "TRX-1",
+                },
+                {
+                    "id": 1,
+                    "entry_id": "00000000-0000-0000-0000-000000000001",
+                    "transaction_date": date(2026, 1, 10),
+                    "entry_date": date(2026, 1, 10),
+                    "description": "Pemakaian bahan",
+                    "account_code": "5-51001",
+                    "account_name": "Beban Pokok Bahan Baku",
+                    "account_type": "expense",
+                    "debit": Decimal("100.00"),
+                    "credit": Decimal("0"),
+                    "source_type": "transaction",
+                    "source_id": "TRX-2",
+                },
+            ]
+
+    async def connect():
+        return None
+
+    monkeypatch.setattr(coa.db, "connect", connect)
+    monkeypatch.setattr(coa.db, "pool", FakePool())
+
+    result = asyncio.run(
+        coa.list_account_transactions(
+            "5-51001",
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+            _=User(id="admin", name="Admin", role="admin"),
+        )
+    )
+
+    assert result["account"]["account_type"] == "Expense"
+    assert result["account"]["normal_balance_side"] == "debit"
+    assert result["summary"]["total_debit"] == Decimal("350.00")
+    assert result["summary"]["total_credit"] == Decimal("0")
+    assert result["summary"]["closing_balance"] == Decimal("350.00")
+    assert result["summary"]["transaction_count"] == 2
+    # Urut terbaru lebih dahulu, saldo berjalan akumulatif dari transaksi terlama.
+    assert result["transactions"][0]["balance"] == Decimal("350.00")
+    assert result["transactions"][1]["balance"] == Decimal("100.00")
+
+
+def test_list_account_transactions_returns_404_for_unknown_code(monkeypatch):
+    from fastapi import HTTPException
+
+    class FakePool:
+        async def fetchrow(self, query, *args):
+            return None
+
+    async def connect():
+        return None
+
+    monkeypatch.setattr(coa.db, "connect", connect)
+    monkeypatch.setattr(coa.db, "pool", FakePool())
+
+    try:
+        asyncio.run(
+            coa.list_account_transactions(
+                "9-99999",
+                _=User(id="admin", name="Admin", role="admin"),
+            )
+        )
+    except HTTPException as error:
+        assert error.status_code == 404
+    else:  # pragma: no cover
+        raise AssertionError("HTTPException 404 seharusnya dilempar")
