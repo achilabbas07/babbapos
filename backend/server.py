@@ -6,7 +6,7 @@ from core import (  # noqa: I001
 from seed import seed_all
 from shifts import router as shifts_router, get_open_shift
 from targets import router as targets_router, log_order_diff, resolve_waiter
-from discounts import router as discounts_router, promo_discount, points_discount
+from discounts import router as discounts_router, promo_discount, points_discount, resolve_checkout_amounts
 from routers.coa import router as coa_router
 from variants import (
     router as variants_router,
@@ -1182,10 +1182,13 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
             promo = await promo_discount(body.promoCode, subtotal)
         if body.redeemPoints:
             pts = await points_discount(customer_id)
-    final_total = subtotal - promo["discount"] - pts["discount"]
-    if final_total is None or final_total <= 0:
-        raise HTTPException(400, "Nilai transaksi tidak valid")
-    total = final_total
+    try:
+        amounts = resolve_checkout_amounts(subtotal, promo.get("discount"), pts.get("discount"))
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    promo_amount = amounts["promoDiscount"]
+    points_amount = amounts["pointsDiscount"]
+    total = amounts["total"]
     if body.method == "Cash" and body.cashGiven < total:
         raise HTTPException(400, "Uang tunai kurang dari total")
     cash = body.cashGiven if body.method == "Cash" else total
@@ -1207,7 +1210,7 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         method=body.method, tableId=table_id, customerId=customer_id, total=total, items_json=items,
         userId=user.id, userName=user.name, cashGiven=cash, change=cash - total, shiftId=shift["_id"] if shift else None,
         waiterName=wname, waiterId=wid, subtotal=subtotal, discount=subtotal - total, promoCode=promo["code"],
-        promoDiscount=promo["discount"], pointsRedeemed=pts["pointsRequired"], pointsDiscount=pts["discount"],
+        promoDiscount=promo_amount, pointsRedeemed=pts["pointsRequired"], pointsDiscount=points_amount,
         tableName=table["name"] if table else "",
         customerName=customer["name"] if customer else (body.customerName or (bill.customerName if bill else "")),
         queueNumber=str(queue_number) if queue_number is not None else None,
@@ -1217,14 +1220,15 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         async with db.pool.acquire() as conn:
             async with conn.transaction():
                 await db.transactions.insert_one(trx.to_mongo(), connection=conn)
-                await post_checkout_journal_entries(
-                    conn,
-                    {
-                        "transaction_id": trx.id,
-                        "payment_method": trx.method,
-                        "total": trx.total,
-                    },
-                )
+                if trx.total > 0:
+                    await post_checkout_journal_entries(
+                        conn,
+                        {
+                            "transaction_id": trx.id,
+                            "payment_method": trx.method,
+                            "total": trx.total,
+                        },
+                    )
                 await post_finance_source(
                     conn,
                     "transaction",
