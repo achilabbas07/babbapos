@@ -9,11 +9,11 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
     class FakePool:
         async def fetch(self, query, *args):
             normalized_query = " ".join(query.lower().split())
-            assert "from public.view_profit_and_loss_summary" in normalized_query
+            assert "from public.view_profit_and_loss" in normalized_query
+            assert "from public.view_profit_and_loss_summary" not in normalized_query
             assert "account_code" in normalized_query
             assert "account_category" in normalized_query
-            assert "balance" in normalized_query
-            assert "subtotal_balance" not in normalized_query
+            assert "sum(balance) as balance" in normalized_query
             assert "group by account_code, account_name, account_category" in normalized_query
             assert "account_id" not in normalized_query
             assert "from public.expenses as expense" in normalized_query

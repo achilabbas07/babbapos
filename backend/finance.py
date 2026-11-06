@@ -239,10 +239,11 @@ async def get_profit_and_loss_report(
                   then 'operating_expense'
                 else 'balance_sheet'
               end as account_type,
-              balance
-            from public.view_profit_and_loss_summary
+              sum(balance) as balance
+            from public.view_profit_and_loss
             where transaction_date >= $1::date
               and transaction_date < $2::date
+            group by account_code, account_name, account_category
           ) as summary_rows
           where account_type not in ('operating_expense', 'balance_sheet')
 
