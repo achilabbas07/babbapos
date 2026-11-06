@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Banknote, QrCode, CreditCard, Landmark, TicketPercent, Gift, X } from "lucide-react";
+import { Banknote, QrCode, CreditCard, Landmark, TicketPercent, Gift, X, Delete } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
 import { api, rp } from "@/lib/api";
@@ -20,6 +20,8 @@ const Line = ({ label, value, tone = "", testid, onRemove }) => (
     <span data-testid={testid} className={`font-mono font-semibold ${tone}`}>{value}</span>
   </div>
 );
+
+const NUMPAD_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "000", "0", "back"];
 
 const DiscountArea = ({ promoCode, setPromoCode, onPromo, onPoints, customerId, hasPromo, hasPoints }) => (
   <div data-testid="discount-area" className="space-y-2 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-3">
@@ -64,6 +66,25 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
   const valid = method !== "Cash" || cashNum >= total;
   const quick = [...new Set([total, Math.ceil(total / 10000) * 10000, Math.ceil(total / 50000) * 50000, Math.ceil(total / 100000) * 100000])].filter((v) => v > 0);
 
+  const appendDigits = (digits) => {
+    setCash((prev) => `${prev}${digits}`.replace(/^0+(?=\d)/, "").slice(0, 12));
+  };
+
+  const backspace = () => setCash((prev) => prev.slice(0, -1));
+
+  const handleCashKeyDown = (e) => {
+    if (/^\d$/.test(e.key)) {
+      e.preventDefault();
+      appendDigits(e.key);
+    } else if (e.key === "Backspace") {
+      e.preventDefault();
+      backspace();
+    } else if (e.key === "Enter" && valid && !busy) {
+      e.preventDefault();
+      pay();
+    }
+  };
+
   const authorize = async ({ pin: adminPin }) => {
     if (pinFor === "promo") {
       const { data } = await api.post("/discounts/promo", { code: promoCode, subtotal, adminPin });
@@ -85,8 +106,6 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
       <Dialog open={open && !pinFor} onOpenChange={onOpenChange}>
         <DialogContent data-testid="pay-dialog" className="max-h-[94vh] overflow-y-auto sm:max-w-md">
           <DialogHeader><DialogTitle>Pembayaran</DialogTitle></DialogHeader>
-          <DiscountArea promoCode={promoCode} setPromoCode={setPromoCode} customerId={customerId} hasPromo={!!promo} hasPoints={!!points}
-            onPromo={() => setPinFor("promo")} onPoints={() => setPinFor("points")} />
           <div data-testid="pay-summary" className="space-y-1.5 rounded-xl bg-secondary p-4">
             <Line label="Subtotal" value={rp(subtotal)} testid="pay-subtotal" />
             {promo && <Line label={`Promo ${promo.code}`} value={`− ${rp(promo.discount)}`} tone="text-emerald-600" testid="pay-promo-discount" onRemove={() => setPromo(null)} />}
@@ -106,13 +125,33 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
           </div>
           {method === "Cash" && (
             <div className="space-y-3">
-              <input data-testid="pay-cash-input" type="number" inputMode="numeric" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="Uang diterima"
-                className="h-12 w-full rounded-xl border border-border bg-transparent px-4 font-mono text-lg outline-none focus:border-primary" />
+              <label htmlFor="pay-cash-input" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uang diterima</label>
+              <div tabIndex={0} onKeyDown={handleCashKeyDown} className="rounded-xl outline-none focus-within:border-primary">
+                <input id="pay-cash-input" data-testid="pay-cash-input" type="text" inputMode="none" readOnly value={cash}
+                  placeholder="Uang diterima"
+                  className="h-14 w-full cursor-pointer rounded-xl border border-border bg-transparent px-4 font-mono text-2xl font-semibold outline-none" />
+              </div>
               <div className="flex flex-wrap gap-2">
                 {quick.map((v, i) => (
                   <button type="button" key={v} data-testid={`pay-quick-${i}`} onClick={() => setCash(String(v))} className="touch-manipulation rounded-lg border border-border px-3 py-1.5 font-mono text-xs hover:border-primary">
                     {i === 0 ? "Uang pas" : rp(v)}
                   </button>
+                ))}
+              </div>
+              <div data-testid="pay-numpad" className="grid grid-cols-3 gap-2">
+                {NUMPAD_KEYS.map((key) => (
+                  key === "back" ? (
+                    <button type="button" key={key} data-testid="pay-numpad-backspace" onClick={backspace}
+                      aria-label="Hapus"
+                      className="flex h-14 touch-manipulation items-center justify-center rounded-xl border border-border bg-white text-muted-foreground transition-colors active:bg-primary/10">
+                      <Delete className="h-5 w-5" />
+                    </button>
+                  ) : (
+                    <button type="button" key={key} data-testid={`pay-numpad-${key}`} onClick={() => appendDigits(key)}
+                      className="h-14 touch-manipulation rounded-xl border border-border bg-white font-mono text-xl font-semibold transition-colors active:bg-primary/10">
+                      {key}
+                    </button>
+                  )
                 ))}
               </div>
               <div className="flex justify-between text-sm">
@@ -123,6 +162,8 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
               </div>
             </div>
           )}
+          <DiscountArea promoCode={promoCode} setPromoCode={setPromoCode} customerId={customerId} hasPromo={!!promo} hasPoints={!!points}
+            onPromo={() => setPinFor("promo")} onPoints={() => setPinFor("points")} />
           <button type="button" data-testid="pay-confirm-button" disabled={!valid || busy} onClick={pay}
             className="h-12 w-full touch-manipulation rounded-xl bg-primary font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40">
             {busy ? "Memproses..." : "Selesaikan Pembayaran"}
