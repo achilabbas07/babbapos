@@ -37,7 +37,7 @@ export const OpenShiftForm = ({ onOpened }) => {
         className="h-14 w-full rounded-xl border border-border bg-white px-4 font-mono text-2xl outline-none focus:border-primary"
       />
       <div className="flex flex-wrap gap-2">
-        {[0, 200000, 300000, 500000].map((v) => (
+        {[0, 50000, 100000, 150000].map((v) => (
           <button type="button" key={v} data-testid={`opening-quick-${v}`} onClick={() => setCash(String(v))}
             className="rounded-lg border border-border px-3 py-1.5 font-mono text-xs hover:border-primary">{rp(v)}</button>
         ))}
