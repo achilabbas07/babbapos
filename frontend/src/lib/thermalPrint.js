@@ -58,12 +58,14 @@ const addSeparator = (lines) => lines.push("-".repeat(PRINT_LINE_WIDTH));
 
 export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, currency, itemName }) {
   const lines = [];
+  const waiterName = trx.waiterName || trx.userName || trx.userId || "-";
+  const cashierName = trx.userName || trx.userId || "-";
   if (printCount >= 2) lines.push("DUPLIKAT");
   lines.push("STRUK PEMBAYARAN");
   addSeparator(lines);
   append(lines, `No. Pesanan: ${trx.id}`);
-  append(lines, `Kasir: ${trx.userName || trx.userId || "-"}`);
-  append(lines, `Pelayan: ${trx.waiterName || trx.userName || trx.userId || "-"}`);
+  append(lines, `Pelayan: ${waiterName}`);
+  append(lines, `Kasir: ${cashierName}`);
   append(lines, `Tanggal: ${dateText}`);
   append(lines, `No. Urut: ${trx.queueNumber == null ? "-" : String(trx.queueNumber)}`);
   if (trx.tableName) append(lines, `Meja: ${trx.tableName}`);

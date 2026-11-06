@@ -141,6 +141,7 @@ describe("Bluetooth ESC/POS receipts", () => {
       paymentMethod: "Cash",
       queueNumber: "9",
       cashier: "Siti",
+      waiter: "Budi",
       customerName: "Budi",
       tableName: "A-02",
       items: [
@@ -168,7 +169,8 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(text.some((line) => line.includes("Bayar Cash"))).toBe(true);
     expect(text.some((line) => line.includes("Terbayar  29/10/2026 10:00"))).toBe(true);
     expect(text.some((line) => line.startsWith("Kembalian") && line.includes("Rp 5.000"))).toBe(true);
-    expect(text).toContain("Order      : Siti");
+    expect(text).toContain("Order      : Budi");
+    expect(text).toContain("Kasir      : Siti");
     expect(text).toContain("Customer   : Budi");
     expect(text).toContain("Nomor Meja : A-02");
     expect(text.filter((line) => line.startsWith("2 Kopi Susu"))).toHaveLength(1);

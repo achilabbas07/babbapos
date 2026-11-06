@@ -303,6 +303,7 @@ async def get_waiter_shift_report(shift_id: str, user: User = Depends(get_curren
         "id": shift["_id"],
         "waiter_name": shift.get("userName", ""),
         "shift_id": shift["_id"],
+        "opened_at": shift.get("openedAt"),
         "closed_at": shift.get("closedAt"),
         "results": report,
     }

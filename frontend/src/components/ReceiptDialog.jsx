@@ -76,6 +76,7 @@ export const ReceiptDialog = ({ trx, onClose }) => {
         paidAt: fmtDate(trx.paidAt || trx.date),
         paymentMethod: trx.method,
         queueNumber: trx.queueNumber == null ? null : String(trx.queueNumber),
+        waiter: trx.waiterName || trx.userName || trx.userId || "-",
         cashier: trx.userName || trx.userId || "-",
         customerName: trx.customerName,
         tableName: trx.tableName,

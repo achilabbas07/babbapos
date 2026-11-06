@@ -11,6 +11,7 @@ const shift = {
   id: "WSHIFT-123",
   waiter_name: "Budi Santoso",
   shift_id: "SHIFT-SIANG-B",
+  opened_at: "2026-11-03 09:00:00",
   closed_at: "2026-11-03 21:00:00",
   results: {
     total_orders: 24,
@@ -34,7 +35,9 @@ describe("waiter shift report printer", () => {
     expect(lines[0]).toMatchObject({ text: "LAPORAN TUTUP", align: "center" });
     expect(lines[1]).toMatchObject({ text: "SHIFT PELAYAN", align: "center" });
     expect(lines.find(({ text }) => text.startsWith("Tanggal"))?.text.endsWith("03 Nov 2026")).toBe(true);
-    expect(lines.find(({ text }) => text.startsWith("Waktu"))?.text.endsWith("21:00")).toBe(true);
+    expect(lines.find(({ text }) => text.startsWith("Dibuka"))?.text.endsWith("09:00")).toBe(true);
+    expect(lines.find(({ text }) => text.startsWith("Ditutup"))?.text.endsWith("21:00")).toBe(true);
+    expect(lines.some(({ text }) => text.startsWith("Waktu"))).toBe(false);
     expect(lines.find(({ text }) => text.startsWith("35x "))?.text).toContain("Kopi Susu Gula Aren");
     expect(lines.some(({ text }) => text.includes("Salah Input Meja"))).toBe(true);
     const auditStart = lines.findIndex(({ text }) => text === "LOG AUDIT & KOREKSI");
@@ -45,6 +48,26 @@ describe("waiter shift report printer", () => {
     expect(lines[lines.length - 2].text).toBe("( Pelayan )       ( Supervisor )");
     expect(lines[lines.length - 1].text).toBe("_____________  _____________");
     expect(lines.every(({ text }) => Array.from(text).length <= 32)).toBe(true);
+  });
+
+  it("converts zoned UTC timestamps to local time", () => {
+    const utcShift = {
+      ...shift,
+      opened_at: "2026-11-03T01:00:00+00:00",
+      closed_at: "2026-11-03T13:00:00+00:00",
+    };
+    const lines = buildWaiterShiftReportLines(utcShift);
+    const expectedOpened = new Date(utcShift.opened_at).toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const expectedClosed = new Date(utcShift.closed_at).toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    expect(lines.find(({ text }) => text.startsWith("Dibuka"))?.text.endsWith(expectedOpened)).toBe(true);
+    expect(lines.find(({ text }) => text.startsWith("Ditutup"))?.text.endsWith(expectedClosed)).toBe(true);
   });
 
   it("encodes the report and feeds three lines before cutting", () => {

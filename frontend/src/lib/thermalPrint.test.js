@@ -43,6 +43,7 @@ describe("thermal print templates", () => {
     expect(lines[lines.length - 1]).toBe("Terima Kasih Atas Kunjungan Anda");
     expect(lines.every((line) => line.length <= PRINT_LINE_WIDTH)).toBe(true);
     expect(lines).toContain("Pelayan: Siti Pelayan");
+    expect(lines).toContain("Kasir: Siti Pelayan");
     expect(lines).toContain("Status: LUNAS");
     expect(lines).toContain("No. Urut: 3");
     expect(lines).toContain("Kembalian: Rp0");

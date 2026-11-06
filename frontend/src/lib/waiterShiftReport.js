@@ -12,13 +12,28 @@ const paddedRow = (label, value) => {
   return `${fit(label, leftWidth).padEnd(leftWidth)}${right.padStart(LINE_WIDTH - leftWidth)}`;
 };
 
-function formatClosedAt(value) {
-  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
-  if (!match) return { date: fit(value || "-", LINE_WIDTH), time: "-" };
+const pad2 = (number) => String(number).padStart(2, "0");
+
+// Backend stores shift timestamps in UTC (with an explicit offset). The receipt
+// must show the cashier/waiter local time, so any zoned value is converted while
+// legacy wall-clock strings (no offset) are printed as-is.
+function formatShiftDateTime(value) {
+  const raw = String(value ?? "").trim();
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)) {
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) {
+      return {
+        date: `${pad2(date.getDate())} ${MONTHS_ID[date.getMonth()]} ${date.getFullYear()}`,
+        time: `${pad2(date.getHours())}:${pad2(date.getMinutes())}`,
+      };
+    }
+  }
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+  if (!match) return { date: fit(raw || "-", LINE_WIDTH), time: "-" };
   const [, year, month, day, hour, minute] = match;
   const monthIndex = Number(month) - 1;
   if (monthIndex < 0 || monthIndex >= MONTHS_ID.length) {
-    return { date: fit(value || "-", LINE_WIDTH), time: "-" };
+    return { date: fit(raw, LINE_WIDTH), time: "-" };
   }
   return {
     date: `${day} ${MONTHS_ID[monthIndex]} ${year}`,
@@ -79,14 +94,19 @@ function validateReport(shift) {
 export function buildWaiterShiftReportLines(shift) {
   validateReport(shift);
   const results = shift.results;
-  const closedAt = formatClosedAt(shift.closed_at);
+  const closedAt = formatShiftDateTime(shift.closed_at);
+  const openedAt = formatShiftDateTime(shift.opened_at);
+  const openedLabel = openedAt.date === closedAt.date
+    ? openedAt.time
+    : `${openedAt.date} ${openedAt.time}`;
   const lines = [
     { text: "LAPORAN TUTUP", align: "center", bold: true },
     { text: "SHIFT PELAYAN", align: "center", bold: true },
     { text: rule("="), align: "center" },
     { text: paddedRow("Nama", shift.waiter_name), align: "left" },
     { text: paddedRow("Tanggal", closedAt.date), align: "left" },
-    { text: paddedRow("Waktu", closedAt.time), align: "left" },
+    { text: paddedRow("Dibuka", openedLabel), align: "left" },
+    { text: paddedRow("Ditutup", closedAt.time), align: "left" },
     { text: paddedRow("Shift", shift.shift_id), align: "left" },
     { text: rule(), align: "center" },
     { text: "AKTIVITAS PELAYANAN", align: "left", bold: true },
@@ -133,7 +153,7 @@ export function buildWaiterShiftReportLines(shift) {
   lines.push(
     { text: rule(), align: "center" },
     { text: rule(), align: "center" },
-    { text: "RINGKASAN TARGET", align: "left", bold: true },
+    { text: "RINGKASAN TARGET", align: "center", bold: true },
     { text: `+${"-".repeat(LINE_WIDTH - 2)}+`, align: "center" },
   );
   wrap(results.target_sales_status || "-", LINE_WIDTH - 4).forEach((text) => {

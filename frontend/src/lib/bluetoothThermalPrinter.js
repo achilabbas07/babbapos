@@ -112,6 +112,8 @@ function paymentLines(data) {
   const paymentMethod = data.paymentMethod || data.method || "-";
   const isCash = paymentMethod === "Cash" || paymentMethod === "Tunai";
   const orderTime = data.orderTime || data.createdAt || data.time || data.date;
+  const waiterName = data.waiter || data.waiterName || "-";
+  const cashierName = data.cashier || data.cashierName || data.userName || "-";
   const lines = [
     ...(profile.nama_usaha
       ? [{ type: "center", text: profile.nama_usaha, bold: true }]
@@ -126,7 +128,8 @@ function paymentLines(data) {
     { type: "text", text: fieldLine("No Nota", data.id || data.transactionNo || data.transactionId) },
     { type: "text", text: fieldLine("Waktu", orderTime) },
     { type: "text", text: fieldLine("No Urut", data.queueNumber == null ? "-" : String(data.queueNumber)) },
-    { type: "text", text: fieldLine("Order", data.cashier || data.cashierName || data.userName) },
+    { type: "text", text: fieldLine("Order", waiterName) },
+    { type: "text", text: fieldLine("Kasir", cashierName) },
     { type: "text", text: fieldLine("Customer", data.customerName) },
     { type: "text", text: fieldLine("Nomor Meja", data.tableName || data.table) },
     { type: "text", text: "--------------------------------" },
@@ -160,7 +163,7 @@ function paymentLines(data) {
     { type: "center", text: RECEIPT_FOOTER },    
     { type: "blank", text: "" },
     { type: "center", text: `Terbayar  ${data.paidAt || data.paymentTime || data.time || data.dateTime || data.date || "-"}` },
-    { type: "center", text: `dicetak: ${data.cashier || data.cashierName || data.userName || "-"}` },
+    { type: "center", text: `dicetak: ${cashierName}` },
   );
   return lines;
 }
