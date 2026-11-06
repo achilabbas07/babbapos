@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { errMsg, rp } from "@/lib/api";
 import { createAccount, deleteAccount, getAccounts, updateAccount } from "@/services/coaService";
+import { getAccountCategoryLabel, getAccountTypeLabel } from "@/lib/accountClassification";
 
 export default function COAManagement() {
   const [accounts, setAccounts] = useState([]);
@@ -96,8 +97,8 @@ export default function COAManagement() {
                 <TableRow key={account.id} data-testid={`coa-row-${account.id}`}>
                   <TableCell className="font-mono">{account.account_code}</TableCell>
                   <TableCell className="font-medium">{account.account_name}</TableCell>
-                  <TableCell>{account.account_type || "—"}</TableCell>
-                  <TableCell>{account.account_category || "—"}</TableCell>
+                  <TableCell>{getAccountTypeLabel(account)}</TableCell>
+                  <TableCell>{getAccountCategoryLabel(account)}</TableCell>
                   <TableCell className="text-right font-mono">{rp(account.current_balance)}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">

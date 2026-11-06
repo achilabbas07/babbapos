@@ -23,6 +23,8 @@ from finance import (
     debt_payment_lines,
     expense_lines,
     get_account_balances,
+    get_cash_bank_accounts,
+    get_cash_bank_balances,
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
     get_laporan_arus_kas,
@@ -47,7 +49,7 @@ import traceback
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request, Response
@@ -121,6 +123,7 @@ class PinIn(BaseModel):
 
 class JournalLineIn(BaseModel):
     accountName: str = Field(min_length=1, max_length=160)
+    accountCode: Optional[str] = Field(None, min_length=1, max_length=32)
     accountType: Literal["asset", "liability", "equity", "revenue", "expense"]
     debit: Decimal = Field(default=Decimal("0"), ge=0, max_digits=16, decimal_places=2)
     credit: Decimal = Field(default=Decimal("0"), ge=0, max_digits=16, decimal_places=2)
@@ -248,7 +251,7 @@ class PurchaseIn(BaseModel):
     supplier_id: int = Field(gt=0)
     items: List[PurchaseItemIn] = Field(min_length=1)
     metode_pembayaran: Literal["cash", "credit"] = "cash"
-    sumber_dana_akun: Optional[Literal["1-10001", "1-10002"]] = None
+    sumber_dana_akun: Optional[str] = Field(None, min_length=1, max_length=32)
 
     @model_validator(mode="after")
     def require_funding_account_for_cash(self):
@@ -260,12 +263,12 @@ class PurchaseIn(BaseModel):
 class DebtPaymentIn(BaseModel):
     purchase_id: str = Field(min_length=1)
     amount: int = Field(gt=0)
-    sumber_dana_akun: Literal["1-10001", "1-10002"]
+    sumber_dana_akun: str = Field(min_length=1, max_length=32)
 
 
 class SupplierPaymentIn(BaseModel):
     purchase_id: str = Field(min_length=1)
-    sumber_dana_akun: Literal["1-10001", "1-10002"]
+    sumber_dana_akun: str = Field(min_length=1, max_length=32)
     jumlah_bayar: float = Field(gt=0)
 
 
@@ -1297,6 +1300,8 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
     try:
         async with db.pool.acquire() as conn:
             async with conn.transaction():
+                if body.metode_pembayaran == "cash":
+                    await require_cash_bank_funding_account(conn, body.sumber_dana_akun)
                 await db.purchases.insert_one(purchase.to_mongo(), connection=conn)
                 await post_finance_source(
                     conn,
@@ -1310,6 +1315,10 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
                         body.metode_pembayaran,
                         body.sumber_dana_akun,
                     ),
+                    account_codes=[
+                        ACCOUNT_PERSEDIAAN_BAHAN_ID,
+                        "2-20001" if body.metode_pembayaran == "credit" else body.sumber_dana_akun,
+                    ],
                 )
                 await post_purchase_journal(
                     conn,
@@ -1348,6 +1357,7 @@ async def pay_purchase_debt(body: DebtPaymentIn, user: User = Depends(ADMIN)):
 
     async with db.pool.acquire() as conn:
         async with conn.transaction():
+            await require_cash_bank_funding_account(conn, body.sumber_dana_akun)
             purchase = await conn.fetchrow(
                 """
                 select id, sisa_utang, status_pembayaran
@@ -1385,6 +1395,7 @@ async def pay_purchase_debt(body: DebtPaymentIn, user: User = Depends(ADMIN)):
                 description,
                 user.id,
                 debt_payment_lines(body.amount, body.sumber_dana_akun),
+                account_codes=["2-20001", body.sumber_dana_akun],
             )
             await post_debt_payment_journal(
                 conn,
@@ -1416,6 +1427,7 @@ async def pay_supplier(body: SupplierPaymentIn, user: User = Depends(ADMIN)):
 
     async with db.pool.acquire() as conn:
         async with conn.transaction():
+            await require_cash_bank_funding_account(conn, body.sumber_dana_akun)
             purchase = await conn.fetchrow(
                 """
                 select id, sisa_utang, status_pembayaran
@@ -1484,6 +1496,7 @@ async def pay_supplier(body: SupplierPaymentIn, user: User = Depends(ADMIN)):
                 description,
                 user.id,
                 debt_payment_lines(amount, body.sumber_dana_akun),
+                account_codes=["2-20001", body.sumber_dana_akun],
             )
             await post_debt_payment_journal(
                 conn,
@@ -1653,32 +1666,56 @@ def finance_period_bounds(
     return None, None
 
 
+async def require_cash_bank_funding_account(connection, account_code: str) -> dict[str, Any]:
+    accounts = await get_cash_bank_accounts(connection, account_code)
+    if len(accounts) != 1:
+        raise HTTPException(422, "Sumber dana harus berupa akun kas atau bank yang valid.")
+    return accounts[0]
+
+
 @api.post("/finance/journals")
 async def create_finance_journal(body: JournalIn, user: User = Depends(ADMIN)):
     await db.connect()
     account_names = list({line.accountName.strip() for line in body.lines})
+    account_codes = list({line.accountCode.strip() for line in body.lines if line.accountCode})
     accounts = await db.pool.fetch(
         """
         select
           account_name,
-          min(account_category) as account_category
+          account_code,
+          account_category
         from public.chart_of_accounts
         where account_name = any($1::text[])
-        group by account_name
-        having count(distinct account_category) = 1
+           or account_code = any($2::text[])
         """,
         account_names,
+        account_codes,
     )
-    account_types = {
-        row["account_name"]: account_type_from_category(row["account_category"])
-        for row in accounts
-    }
+    accounts_by_code = {row["account_code"]: row for row in accounts}
+    accounts_by_name = {}
+    for row in accounts:
+        accounts_by_name.setdefault(row["account_name"], []).append(row)
+
+    resolved_lines = []
     for line in body.lines:
-        expected_type = account_types.get(line.accountName.strip())
+        if line.accountCode:
+            account = accounts_by_code.get(line.accountCode.strip())
+        else:
+            matches = accounts_by_name.get(line.accountName.strip(), [])
+            account = matches[0] if len(matches) == 1 else None
+        expected_type = (
+            account_type_from_category(account["account_category"], account["account_code"])
+            if account is not None
+            else None
+        )
         if expected_type is None:
-            raise HTTPException(422, f"Akun '{line.accountName}' tidak ditemukan atau kategorinya belum didukung.")
+            raise HTTPException(
+                422,
+                f"Akun '{line.accountName}' tidak ditemukan, ambigu, atau kategorinya belum didukung.",
+            )
         if line.accountType != expected_type:
             raise HTTPException(422, f"Kelompok akun '{line.accountName}' tidak sesuai dengan chart of accounts.")
+        resolved_lines.append((line, account))
 
     entry_id = uuid4()
     values = [
@@ -1686,21 +1723,22 @@ async def create_finance_journal(body: JournalIn, user: User = Depends(ADMIN)):
             entry_id,
             body.date,
             body.description.strip(),
-            line.accountName.strip(),
+            account["account_name"],
             line.accountType,
+            account["account_code"],
             line.debit,
             line.credit,
             user.id,
         )
-        for line in body.lines
+        for line, account in resolved_lines
     ]
     async with db.pool.acquire() as connection:
         async with connection.transaction():
             await connection.executemany(
                 """
                 insert into public.general_ledger
-                  (entry_id, transaction_date, entry_date, description, account_name, account_type, debit, credit, created_by)
-                values ($1, $2, $2, $3, $4, $5, $6, $7, $8)
+                  (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code, debit, credit, created_by)
+                values ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9)
                 """,
                 values,
             )
@@ -1712,21 +1750,25 @@ async def finance_accounts(_: User = Depends(ADMIN)):
     await db.connect()
     rows = await db.pool.fetch(
         """
-        select account_name, min(account_category) as account_category
+        select account_name, account_code, account_category
         from public.chart_of_accounts
         where nullif(btrim(account_name), '') is not null
-        group by account_name
-        having count(distinct account_category) = 1
-        order by account_name
+        order by account_name, account_code
         """
     )
     return [
         {
             **dict(row),
-            "account_type": account_type_from_category(row["account_category"]),
+            "account_type": account_type_from_category(row["account_category"], row["account_code"]),
         }
         for row in rows
     ]
+
+
+@api.get("/finance/funding-accounts")
+async def finance_funding_accounts(_: User = Depends(ADMIN)):
+    await db.connect()
+    return await get_cash_bank_accounts(db.pool)
 
 
 @api.get("/finance/account-balances")
@@ -1752,18 +1794,7 @@ async def finance_chart_of_accounts(
 @api.get("/finance/cash-flow")
 async def finance_cash_flow(_: User = Depends(ADMIN)):
     await db.connect()
-    rows = await db.pool.fetch(
-        """
-        select
-          sumber_dana,
-          sum(coalesce(uang_masuk, 0) - coalesce(uang_keluar, 0)) as saldo_berjalan
-        from public.view_buku_kas
-        where nullif(btrim(sumber_dana), '') is not null
-        group by sumber_dana
-        order by sumber_dana
-        """
-    )
-    return [dict(row) for row in rows]
+    return await get_cash_bank_balances(db.pool)
 
 
 @app.get("/api/v1/finance/dashboard-summary")
@@ -1821,33 +1852,95 @@ async def finance_balance_sheet(
     await db.connect()
     rows = await db.pool.fetch(
         """
-        with filtered_ledger as (
-          select account_name, account_type, debit, credit
-          from public.general_ledger
-          where ($1::date is null or transaction_date >= $1)
-            and ($2::date is null or transaction_date < $2)
+        with classified_ledger as (
+          select
+            ledger.account_code,
+            ledger.account_name,
+            ledger.debit,
+            ledger.credit,
+            case
+              when lower(coalesce(account.account_category, '')) = 'balance_sheet'
+                then case left(ledger.account_code, 1)
+                  when '1' then 'asset'
+                  when '2' then 'liability'
+                  when '3' then 'equity'
+                  when '4' then 'revenue'
+                  when '5' then 'expense'
+                  when '6' then 'expense'
+                  else ledger.account_type
+                end
+              when lower(coalesce(account.account_category, '')) like 'asset%'
+                or lower(coalesce(account.account_category, '')) like 'aset%'
+                or lower(coalesce(account.account_category, '')) like 'aktiva%'
+                or lower(coalesce(account.account_category, '')) like 'kas%'
+                or lower(coalesce(account.account_category, '')) like 'cash%'
+                then 'asset'
+              when lower(coalesce(account.account_category, '')) like 'liabilit%'
+                or lower(coalesce(account.account_category, '')) like 'kewajiban%'
+                or lower(coalesce(account.account_category, '')) like 'utang%'
+                or lower(coalesce(account.account_category, '')) like 'hutang%'
+                then 'liability'
+              when lower(coalesce(account.account_category, '')) like 'equity%'
+                or lower(coalesce(account.account_category, '')) like 'ekuitas%'
+                or lower(coalesce(account.account_category, '')) like 'modal%'
+                then 'equity'
+              when lower(coalesce(account.account_category, '')) like 'revenue%'
+                or lower(coalesce(account.account_category, '')) like 'pendapatan%'
+                or lower(coalesce(account.account_category, '')) like 'income%'
+                then 'revenue'
+              when lower(coalesce(account.account_category, '')) like 'expense%'
+                or lower(coalesce(account.account_category, '')) like 'beban%'
+                or lower(coalesce(account.account_category, '')) like 'biaya%'
+                or lower(coalesce(account.account_category, '')) in ('cost_of_goods_sold', 'operating_expense')
+                then 'expense'
+              when ledger.account_code like '1-%' then 'asset'
+              when ledger.account_code like '2-%' then 'liability'
+              when ledger.account_code like '3-%' then 'equity'
+              when ledger.account_code like '4-%' then 'revenue'
+              when ledger.account_code like '5-%' or ledger.account_code like '6-%' then 'expense'
+              else ledger.account_type
+            end as account_type
+          from public.general_ledger as ledger
+          left join lateral (
+            select coalesce(
+                     nullif(btrim(to_jsonb(account_row)->>'account_category'), ''),
+                     nullif(btrim(to_jsonb(account_row)->>'kategori_akun'), ''),
+                     nullif(btrim(to_jsonb(account_row)->>'category'), '')
+                   ) as account_category
+            from public.chart_of_accounts as account_row
+            where coalesce(
+                    nullif(btrim(to_jsonb(account_row)->>'account_code'), ''),
+                    nullif(btrim(to_jsonb(account_row)->>'kode_akun'), ''),
+                    nullif(btrim(to_jsonb(account_row)->>'code'), ''),
+                    nullif(btrim(to_jsonb(account_row)->>'kode'), '')
+                  ) = ledger.account_code
+            limit 1
+          ) as account on true
+          where ($1::date is null or ledger.transaction_date >= $1)
+            and ($2::date is null or ledger.transaction_date < $2)
         ),
         account_balances as (
           select
+            account_code,
             account_name,
             account_type,
             sum(case when account_type = 'asset' then debit - credit else credit - debit end) as balance
-          from filtered_ledger
+          from classified_ledger
           where account_type in ('asset', 'liability', 'equity')
-          group by account_name, account_type
+          group by account_code, account_name, account_type
           having sum(case when account_type = 'asset' then debit - credit else credit - debit end) <> 0
         ),
         profit_loss as (
           select coalesce(sum(
             case when account_type = 'revenue' then credit - debit else debit - credit end
           ), 0) as net_profit
-          from filtered_ledger
+          from classified_ledger
           where account_type in ('revenue', 'expense')
         )
-        select account_name, account_type, balance
+        select account_code, account_name, account_type, balance
         from account_balances
         union all
-        select 'Laba tahun berjalan', 'equity', net_profit
+        select null, 'Laba tahun berjalan', 'equity', net_profit
         from profit_loss
         where net_profit <> 0
         order by account_type, account_name

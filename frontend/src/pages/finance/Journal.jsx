@@ -14,7 +14,8 @@ const ACCOUNT_TYPES = [
   ["expense", "Beban"],
 ];
 
-const newLine = (accountName = "", accountType = "") => ({
+const newLine = (accountCode = "", accountName = "", accountType = "") => ({
+  accountCode,
   accountName,
   accountType,
   debit: "",
@@ -53,7 +54,7 @@ export default function Journal() {
   const validLines = lines.length >= 2 && lines.every((line) => {
     const debit = amountInCents(line.debit);
     const credit = amountInCents(line.credit);
-    const account = accounts.find(({ account_name }) => account_name === line.accountName);
+    const account = accounts.find(({ account_code }) => account_code === line.accountCode);
     return account?.account_type === line.accountType && (debit > 0) !== (credit > 0);
   });
   const canSave = balanced && validLines && Boolean(date && description.trim()) && !saving;
@@ -64,11 +65,16 @@ export default function Journal() {
     )));
   };
 
-  const selectAccount = (index, accountName) => {
-    const account = accounts.find((item) => item.account_name === accountName);
+  const selectAccount = (index, accountCode) => {
+    const account = accounts.find((item) => item.account_code === accountCode);
     setLines((current) => current.map((line, lineIndex) => (
       lineIndex === index
-        ? { ...line, accountName, accountType: account?.account_type || "" }
+        ? {
+          ...line,
+          accountCode,
+          accountName: account?.account_name || "",
+          accountType: account?.account_type || "",
+        }
         : line
     )));
   };
@@ -84,6 +90,7 @@ export default function Journal() {
         lines: lines.map((line) => ({
           ...line,
           accountName: line.accountName.trim(),
+          accountCode: line.accountCode,
           debit: Number(line.debit) || 0,
           credit: Number(line.credit) || 0,
         })),
@@ -129,11 +136,11 @@ export default function Journal() {
               <div key={index} className="grid gap-3 rounded-xl border border-border p-3 md:grid-cols-[minmax(160px,1.3fr)_minmax(130px,0.8fr)_minmax(130px,0.8fr)_minmax(130px,0.8fr)_40px] md:items-end">
                 <label className="space-y-1 text-xs font-medium text-muted-foreground">
                   Nama akun
-                  <select required value={line.accountName} disabled={accountsLoading || accounts.length === 0} onChange={(event) => selectAccount(index, event.target.value)} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground disabled:opacity-60">
+                  <select required value={line.accountCode} disabled={accountsLoading || accounts.length === 0} onChange={(event) => selectAccount(index, event.target.value)} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground disabled:opacity-60">
                     <option value="">{accountsLoading ? "Memuat akun..." : "Pilih akun"}</option>
                     {accounts.map((account) => (
-                      <option key={`${account.account_name}-${account.account_category}`} value={account.account_name} disabled={!account.account_type}>
-                        {account.account_name}
+                      <option key={account.account_code} value={account.account_code} disabled={!account.account_type}>
+                        {account.account_name} ({account.account_code})
                       </option>
                     ))}
                   </select>

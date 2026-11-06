@@ -10,7 +10,10 @@ from finance import (
     get_account_by_payment_method,
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
+    get_cash_bank_accounts,
+    get_cash_bank_balances,
     get_recent_finance_transactions,
+    is_cash_bank_account,
     post_cash_expense_journal,
     post_cash_movement_journal,
     post_checkout_journal_entries,
@@ -37,7 +40,56 @@ def test_chart_account_categories_map_to_journal_types():
     assert account_type_from_category("cost_of_goods_sold") == "expense"
     assert account_type_from_category("operating_expense") == "expense"
     assert account_type_from_category("balance_sheet", "2-20001") == "liability"
+    assert account_type_from_category("balance_sheet", "4-40001") == "revenue"
+    assert account_type_from_category("Kas & Bank - Aset Lancar", "2-10001") == "asset"
+    assert account_type_from_category("Unmapped", "6-60001") == "expense"
     assert account_type_from_category("Kategori Tidak Dikenal") is None
+
+
+def test_cash_bank_classification_uses_category_or_specific_liquid_account_name():
+    assert is_cash_bank_account("Kas & Bank - Aset Lancar", "8-10001", "Kas Usaha")
+    assert is_cash_bank_account("Aset Lancar", "1-10001", "Kas Tunai")
+    assert is_cash_bank_account("Aset Lancar", "1-10002", "Rekening Bank")
+    assert not is_cash_bank_account("Aset Lancar", "1-10003", "Persediaan Bahan Baku")
+
+
+def test_get_cash_bank_accounts_returns_only_classified_funding_accounts():
+    class FakeConnection:
+        async def fetch(self, query, account_code):
+            assert "from public.chart_of_accounts" in query
+            assert account_code is None
+            return [
+                {"account_code": "1-10001", "account_name": "Kas Tunai", "account_category": "Aset Lancar"},
+                {"account_code": "1-10003", "account_name": "Persediaan Bahan Baku", "account_category": "Aset Lancar"},
+                {"account_code": "2-10001", "account_name": "Bank", "account_category": "Kas & Bank"},
+            ]
+
+    accounts = asyncio.run(get_cash_bank_accounts(FakeConnection()))
+
+    assert [account["account_code"] for account in accounts] == ["1-10001", "2-10001"]
+
+
+def test_get_cash_bank_balances_groups_by_account_code_and_category():
+    class FakeConnection:
+        async def fetch(self, query):
+            assert "from public.general_ledger as ledger" in query
+            assert "from public.chart_of_accounts as account_row" in query
+            assert "group by coalesce(account.account_code, ledger.account_code)" in query
+            assert "lower(coalesce(account.account_category, '')) like '%bank%'" in query
+            assert "coalesce(account.account_code, ledger.account_code) like '1-%'" in query
+            return [{
+                "account_code": "1-10001",
+                "sumber_dana": "Kas Tunai",
+                "saldo_berjalan": Decimal("800.00"),
+            }]
+
+    balances = asyncio.run(get_cash_bank_balances(FakeConnection()))
+
+    assert balances == [{
+        "account_code": "1-10001",
+        "sumber_dana": "Kas Tunai",
+        "saldo_berjalan": Decimal("800.00"),
+    }]
 
 
 def test_get_chart_of_accounts_keeps_unmutated_master_accounts_and_sorts_by_code():

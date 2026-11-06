@@ -66,6 +66,9 @@ def test_account_input_accepts_account_category_aliases_and_legacy_type():
         account_type="Revenue",
     ).account_category == "Pendapatan"
     assert coa.account_type_from_category("balance_sheet", "2-20001") == "Liability"
+    assert coa.account_type_from_category("balance_sheet", "4-40001") == "Revenue"
+    assert coa.account_type_from_category("balance_sheet", "6-60001") == "Expense"
+    assert coa.account_type_from_category("Bank Account", "2-10001") == "Asset"
     assert coa.account_type_from_category("cost_of_goods_sold") == "Expense"
 
 

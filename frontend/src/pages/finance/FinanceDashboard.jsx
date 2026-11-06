@@ -3,6 +3,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { PageHeader, StatCard } from "@/components/PageHeader";
 import { api, errMsg, rp } from "@/lib/api";
 import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared";
+import { getAccountType, isCashBankAccount } from "@/lib/accountClassification";
 
 const ASSET_COLORS = ["#2563eb", "#10b981", "#f59e0b"];
 
@@ -37,13 +38,13 @@ export default function FinanceDashboard() {
   const hasMutations = accounts.some((account) => account.has_mutations);
   const summary = useMemo(() => accounts.reduce((totals, account) => {
     const balance = Number(account.balance) || 0;
-    const name = account.account_name || "";
-    if (account.account_type === "asset") {
+    const accountType = getAccountType(account) || account.account_type;
+    if (accountType === "asset") {
       totals.totalAssets += balance;
-      if (/(kas|bank|cash)/i.test(name)) totals.cashBank += balance;
-      if (/(persediaan|inventory)/i.test(name)) totals.inventory += balance;
+      if (isCashBankAccount(account)) totals.cashBank += balance;
+      if (/(persediaan|inventory)/i.test(account.account_name || "")) totals.inventory += balance;
     }
-    if (account.account_type === "liability" || account.account_type === "equity") {
+    if (accountType === "liability" || accountType === "equity") {
       totals.liabilitiesEquity += balance;
     }
     return totals;

@@ -5,7 +5,7 @@ from decimal import Decimal
 from finance import get_laporan_arus_kas
 
 
-def test_cash_flow_report_includes_cash_in_from_monthly_cash_view():
+def test_cash_flow_report_includes_cash_in_from_cash_bank_ledger_accounts():
     start_date = date(2026, 11, 1)
     end_date = date(2026, 11, 30)
 
@@ -16,8 +16,9 @@ def test_cash_flow_report_includes_cash_in_from_monthly_cash_view():
             return []
 
         async def fetchrow(self, query, *args):
-            assert "view_arus_kas_bulanan" in query
-            assert "sum(money_in)" in query.lower()
+            assert "from public.general_ledger as ledger" in query
+            assert "from public.chart_of_accounts as account" in query
+            assert "ledger.account_code like '1-%'" in query
             assert args == (start_date, end_date)
             return {"total_kas_masuk": Decimal("5000.00")}
 

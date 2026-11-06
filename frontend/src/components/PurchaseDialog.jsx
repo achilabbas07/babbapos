@@ -10,10 +10,11 @@ import { api, errMsg, rp, todayStr, dateToIso } from "@/lib/api";
 
 export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
   const [suppliers, setSuppliers] = useState([]);
+  const [fundingAccounts, setFundingAccounts] = useState([]);
   const [supplierId, setSupplierId] = useState("");
   const [date, setDate] = useState(todayStr());
   const [paymentMethod, setPaymentMethod] = useState("cash");
-  const [fundingAccount, setFundingAccount] = useState("1-10001");
+  const [fundingAccount, setFundingAccount] = useState("");
   const [lines, setLines] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -30,10 +31,21 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
       api.get("/v1/finance/suppliers")
         .then((response) => setSuppliers(response.data))
         .catch((error) => toast.error(errMsg(error)));
+      api.get("/finance/funding-accounts")
+        .then(({ data }) => {
+          if (!Array.isArray(data)) throw new Error("Respons daftar sumber dana tidak valid.");
+          setFundingAccounts(data);
+          setFundingAccount((current) => (
+            data.some((account) => account.account_code === current)
+              ? current
+              : data[0]?.account_code || ""
+          ));
+        })
+        .catch((error) => toast.error(errMsg(error)));
       setSupplierId("");
       setDate(todayStr());
       setPaymentMethod("cash");
-      setFundingAccount("1-10001");
+      setFundingAccount("");
       setLines([{ inventoryId: "", qty: 1, total_price: 0, cost_per_unit: 0 }]);
     }
   }, [open]);
@@ -50,6 +62,10 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
   const save = async () => {
     if (!supplierId) {
       toast.error("Pilih supplier terlebih dahulu.");
+      return;
+    }
+    if (paymentMethod === "cash" && !fundingAccount) {
+      toast.error("Tidak ada akun kas atau bank yang tersedia sebagai sumber dana.");
       return;
     }
     setSaving(true);
@@ -108,11 +124,14 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
             <Label htmlFor="purchase-funding-account">Sumber Dana</Label>
             <Select value={fundingAccount} onValueChange={setFundingAccount}>
               <SelectTrigger id="purchase-funding-account" data-testid="purchase-funding-account">
-                <SelectValue />
+                <SelectValue placeholder="Pilih sumber dana" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1-10001">Kas Tunai</SelectItem>
-                <SelectItem value="1-10002">Kas Bank / QRIS</SelectItem>
+                {fundingAccounts.map((account) => (
+                  <SelectItem key={account.account_code} value={account.account_code}>
+                    {account.account_name} ({account.account_code})
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>}

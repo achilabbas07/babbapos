@@ -8,14 +8,22 @@ import { Label } from "@/components/ui/label";
 import { api, errMsg, rp } from "@/lib/api";
 
 export function SupplierPaymentDialog({ open, onOpenChange, purchase, onSaved }) {
-  const [fundingAccount, setFundingAccount] = useState("1-10001");
+  const [fundingAccount, setFundingAccount] = useState("");
+  const [fundingAccounts, setFundingAccounts] = useState([]);
   const [amount, setAmount] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open && purchase) {
-      setFundingAccount("1-10001");
+      setFundingAccount("");
       setAmount(String(purchase.sisa_utang));
+      api.get("/finance/funding-accounts")
+        .then(({ data }) => {
+          if (!Array.isArray(data)) throw new Error("Respons daftar sumber dana tidak valid.");
+          setFundingAccounts(data);
+          setFundingAccount(data[0]?.account_code || "");
+        })
+        .catch((error) => toast.error(errMsg(error)));
     }
   }, [open, purchase]);
 
@@ -28,6 +36,10 @@ export function SupplierPaymentDialog({ open, onOpenChange, purchase, onSaved })
     }
     if (paidAmount > Number(purchase.sisa_utang)) {
       toast.error("Jumlah pembayaran melebihi sisa utang aktual.");
+      return;
+    }
+    if (!fundingAccount) {
+      toast.error("Tidak ada akun kas atau bank yang tersedia sebagai sumber dana.");
       return;
     }
 
@@ -65,11 +77,14 @@ export function SupplierPaymentDialog({ open, onOpenChange, purchase, onSaved })
               <Label htmlFor="supplier-payment-account">Sumber Dana Akun</Label>
               <Select value={fundingAccount} onValueChange={setFundingAccount}>
                 <SelectTrigger id="supplier-payment-account" data-testid="supplier-payment-account">
-                  <SelectValue />
+                  <SelectValue placeholder="Pilih sumber dana" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1-10001">Kas Tunai (1-10001)</SelectItem>
-                  <SelectItem value="1-10002">Kas Bank (1-10002)</SelectItem>
+                  {fundingAccounts.map((account) => (
+                    <SelectItem key={account.account_code} value={account.account_code}>
+                      {account.account_name} ({account.account_code})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -92,7 +107,7 @@ export function SupplierPaymentDialog({ open, onOpenChange, purchase, onSaved })
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
                 Batal
               </Button>
-              <Button data-testid="supplier-payment-submit" type="submit" disabled={saving || !amount}>
+              <Button data-testid="supplier-payment-submit" type="submit" disabled={saving || !amount || !fundingAccount}>
                 {saving ? "Memproses..." : "Konfirmasi Bayar"}
               </Button>
             </DialogFooter>

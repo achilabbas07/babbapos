@@ -93,24 +93,51 @@ def account_type_from_category(
     account_category: Optional[str],
     account_code: Optional[str] = None,
 ) -> Optional[str]:
-    if not account_category:
-        return None
-
-    category = account_category.strip().lower()
+    category = (account_category or "").strip().casefold()
     canonical_types = {
         "asset": "asset",
+        "assets": "asset",
+        "aset": "asset",
+        "aktiva": "asset",
+        "kas": "asset",
+        "cash": "asset",
+        "kas & bank": "asset",
+        "kas dan bank": "asset",
+        "cash & bank": "asset",
+        "cash and bank": "asset",
         "liability": "liability",
+        "liabilities": "liability",
+        "liabilitas": "liability",
+        "kewajiban": "liability",
+        "utang": "liability",
+        "hutang": "liability",
         "equity": "equity",
+        "ekuitas": "equity",
+        "modal": "equity",
         "revenue": "revenue",
+        "pendapatan": "revenue",
+        "income": "revenue",
         "cost_of_goods_sold": "expense",
         "operating_expense": "expense",
+        "expense": "expense",
+        "expenses": "expense",
+        "beban": "expense",
+        "biaya": "expense",
     }
     if category in canonical_types:
         return canonical_types[category]
     if category == "balance_sheet":
-        return {"1": "asset", "2": "liability", "3": "equity"}.get((account_code or "")[:1])
+        return {
+            "1": "asset",
+            "2": "liability",
+            "3": "equity",
+            "4": "revenue",
+            "5": "expense",
+            "6": "expense",
+        }.get((account_code or "").strip()[:1])
 
     category_prefixes = (
+        (("kas", "cash", "bank"), "asset"),
         (("asset", "assets", "aset", "aktiva"), "asset"),
         (("liabilit", "kewajiban", "utang", "hutang"), "liability"),
         (("equity", "ekuitas", "modal"), "equity"),
@@ -120,7 +147,136 @@ def account_type_from_category(
     for prefixes, account_type in category_prefixes:
         if category.startswith(prefixes):
             return account_type
-    return None
+    return {
+        "1": "asset",
+        "2": "liability",
+        "3": "equity",
+        "4": "revenue",
+        "5": "expense",
+        "6": "expense",
+    }.get((account_code or "").strip()[:1])
+
+
+def is_cash_bank_account(
+    account_category: Optional[str],
+    account_code: Optional[str],
+    account_name: Optional[str],
+) -> bool:
+    category = (account_category or "").strip().casefold()
+    if re.search(r"kas|cash|bank", category):
+        return True
+    return bool(
+        (account_code or "").strip().startswith("1-")
+        and re.search(r"kas|bank|cash|qris|rekening", account_name or "", re.IGNORECASE)
+    )
+
+
+async def get_cash_bank_accounts(connection: Any, account_code: Optional[str] = None) -> list[dict[str, Any]]:
+    rows = await connection.fetch(
+        """
+        select
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'account_code'), ''),
+            nullif(btrim(to_jsonb(account)->>'kode_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'code'), ''),
+            nullif(btrim(to_jsonb(account)->>'kode'), '')
+          ) as account_code,
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'account_name'), ''),
+            nullif(btrim(to_jsonb(account)->>'nama_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'name'), '')
+          ) as account_name,
+          coalesce(
+            nullif(btrim(to_jsonb(account)->>'account_category'), ''),
+            nullif(btrim(to_jsonb(account)->>'kategori_akun'), ''),
+            nullif(btrim(to_jsonb(account)->>'category'), '')
+          ) as account_category
+        from public.chart_of_accounts as account
+        where ($1::text is null or coalesce(
+          nullif(btrim(to_jsonb(account)->>'account_code'), ''),
+          nullif(btrim(to_jsonb(account)->>'kode_akun'), ''),
+          nullif(btrim(to_jsonb(account)->>'code'), ''),
+          nullif(btrim(to_jsonb(account)->>'kode'), '')
+        ) = $1)
+        order by account_code
+        """,
+        account_code,
+    )
+    return [
+        {
+            "account_code": row["account_code"],
+            "account_name": row["account_name"],
+            "account_category": row["account_category"],
+        }
+        for row in rows
+        if is_cash_bank_account(
+            row["account_category"],
+            row["account_code"],
+            row["account_name"],
+        )
+    ]
+
+
+async def get_cash_bank_balances(connection: Any) -> list[dict[str, Any]]:
+    rows = await connection.fetch(
+        """
+        select
+          coalesce(account.account_code, ledger.account_code) as account_code,
+          ledger.account_name as sumber_dana,
+          sum(coalesce(ledger.debit, 0) - coalesce(ledger.credit, 0)) as saldo_berjalan
+        from public.general_ledger as ledger
+        left join lateral (
+          select
+            coalesce(
+              nullif(btrim(to_jsonb(account_row)->>'account_code'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'kode_akun'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'code'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'kode'), '')
+            ) as account_code,
+            coalesce(
+              nullif(btrim(to_jsonb(account_row)->>'account_category'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'kategori_akun'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'category'), '')
+            ) as account_category
+          from public.chart_of_accounts as account_row
+          where coalesce(
+                  nullif(btrim(to_jsonb(account_row)->>'account_code'), ''),
+                  nullif(btrim(to_jsonb(account_row)->>'kode_akun'), ''),
+                  nullif(btrim(to_jsonb(account_row)->>'code'), ''),
+                  nullif(btrim(to_jsonb(account_row)->>'kode'), '')
+                ) = ledger.account_code
+             or coalesce(
+                  nullif(btrim(to_jsonb(account_row)->>'account_name'), ''),
+                  nullif(btrim(to_jsonb(account_row)->>'nama_akun'), ''),
+                  nullif(btrim(to_jsonb(account_row)->>'name'), '')
+                ) = ledger.account_name
+          order by case
+            when coalesce(
+              nullif(btrim(to_jsonb(account_row)->>'account_code'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'kode_akun'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'code'), ''),
+              nullif(btrim(to_jsonb(account_row)->>'kode'), '')
+            ) = ledger.account_code then 0 else 1 end
+          limit 1
+        ) as account on true
+        where nullif(btrim(ledger.account_name), '') is not null
+          and (
+            lower(coalesce(account.account_category, '')) like '%kas%'
+            or lower(coalesce(account.account_category, '')) like '%cash%'
+            or lower(coalesce(account.account_category, '')) like '%bank%'
+            or (
+                            (
+                                coalesce(account.account_code, ledger.account_code) like '1-%'
+                                or ledger.account_code is null
+                            )
+              and lower(ledger.account_name) ~ '(kas|bank|cash|qris|rekening)'
+            )
+          )
+        group by coalesce(account.account_code, ledger.account_code), ledger.account_name
+        order by coalesce(account.account_code, ledger.account_code), ledger.account_name
+        """
+    )
+    return [dict(row) for row in rows]
 
 
 def _normal_balance_side(account: dict, account_type: Optional[str]) -> str:
@@ -235,26 +391,50 @@ async def get_profit_and_loss_report(
               account_name,
               account_category,
               case
+                when lower(account_category) = 'cost_of_goods_sold'
+                  or lower(account_category) like 'beban pokok%'
+                  then 'cost_of_goods_sold'
                 when account_code = '5-51099'
+                  or lower(account_category) = 'operating_expense'
+                  or lower(account_category) like 'beban operasional%'
                   then 'operating_expense'
+                when lower(account_category) in ('revenue', 'income')
+                  or lower(account_category) like 'pendapatan%'
+                  then 'revenue'
                 when coalesce(account_code, '') like '5-%'
-                  or lower(account_name) like '%beban pokok%'
+                  then 'cost_of_goods_sold'
+                when lower(account_name) like '%beban pokok%'
                   or lower(account_name) like '%hpp%'
                   or lower(account_name) like '%tissu%'
                   or lower(account_name) like '%bumbu%'
                   or lower(account_name) like '%persediaan bahan%'
                   or lower(account_name) like '%persediaan barang%'
                   then 'cost_of_goods_sold'
-                when lower(account_category) like 'revenue%'
+                when coalesce(account_code, '') like '4-%'
+                  or lower(account_category) like 'revenue%'
                   or lower(account_category) like 'pendapatan%'
                   or lower(account_category) like 'income%'
-                  or coalesce(account_code, '') like '4-%'
                   then 'revenue'
-                when lower(account_category) like 'expense%'
-                  or lower(account_category) like 'beban%'
+                when coalesce(account_code, '') like '6-%'
+                  or lower(account_category) in ('expense', 'expenses')
                   or lower(account_category) like 'biaya%'
-                  or coalesce(account_code, '') like '6-%'
+                  or lower(account_category) like 'beban%'
                   then 'operating_expense'
+                when lower(account_category) like 'expense%'
+                  then 'operating_expense'
+                when coalesce(account_code, '') like '1-%'
+                  or coalesce(account_code, '') like '2-%'
+                  or coalesce(account_code, '') like '3-%'
+                  or lower(account_category) in ('asset', 'liability', 'equity', 'balance_sheet')
+                  then 'balance_sheet'
+                when lower(account_name) like '%pendapatan%'
+                  or lower(account_name) like '%omset%'
+                  then 'revenue'
+                when lower(account_name) like '%kas%'
+                  or lower(account_name) like '%bank%'
+                  or lower(account_name) like '%qris%'
+                  or lower(account_name) like '%utang%'
+                  then 'balance_sheet'
                 else 'balance_sheet'
               end as account_type,
               sum(balance) as balance
@@ -890,8 +1070,8 @@ def purchase_journal_lines(
         credit_account = {
             "1-10001": "Kas",
             "1-10002": "Bank",
-        }.get(funding_account_code or "")
-        if credit_account is None:
+        }.get(funding_account_code or "", funding_account_code)
+        if not isinstance(credit_account, str) or not credit_account.strip():
             raise ValueError("Sumber dana pembelian tunai tidak valid.")
         credit_type = "asset"
     return [
@@ -905,10 +1085,10 @@ def debt_payment_lines(amount: Any, funding_account_code: str) -> list[JournalLi
     funding_account = {
         "1-10001": "Kas",
         "1-10002": "Bank",
-    }.get(funding_account_code)
+    }.get(funding_account_code, funding_account_code)
     if value <= 0:
         return []
-    if funding_account is None:
+    if not isinstance(funding_account, str) or not funding_account.strip():
         raise ValueError("Sumber dana pelunasan tidak valid.")
     return [
         ("Utang Usaha", "liability", value, Decimal("0")),
@@ -926,7 +1106,7 @@ async def post_purchase_journal(
     if payment_method == "credit":
         credit_code = "2-20001"
     else:
-        if funding_account_code not in {"1-10001", "1-10002"}:
+        if not isinstance(funding_account_code, str) or not funding_account_code.strip():
             raise ValueError("Sumber dana pembelian tunai tidak valid.")
         credit_code = funding_account_code
     value = _positive_journal_amount(amount, "pembelian").quantize(
@@ -956,7 +1136,7 @@ async def post_debt_payment_journal(
     funding_account_code: str,
     description: str,
 ) -> None:
-    if funding_account_code not in {"1-10001", "1-10002"}:
+    if not isinstance(funding_account_code, str) or not funding_account_code.strip():
         raise ValueError("Sumber dana pelunasan tidak valid.")
     value = _money(amount)
     if value <= 0:
@@ -1236,9 +1416,35 @@ async def get_laporan_arus_kas(
     )
     cash_totals = await connection.fetchrow(
         """
-        SELECT COALESCE(SUM(money_in), 0) AS total_kas_masuk
-        FROM public.view_arus_kas_bulanan
-        WHERE entry_date BETWEEN $1 AND $2;
+        select coalesce(sum(ledger.debit), 0) as total_kas_masuk
+        from public.general_ledger as ledger
+        left join lateral (
+          select coalesce(
+                   nullif(btrim(to_jsonb(account)->>'account_category'), ''),
+                   nullif(btrim(to_jsonb(account)->>'kategori_akun'), ''),
+                   nullif(btrim(to_jsonb(account)->>'category'), '')
+                 ) as account_category
+          from public.chart_of_accounts as account
+          where coalesce(
+                  nullif(btrim(to_jsonb(account)->>'account_code'), ''),
+                  nullif(btrim(to_jsonb(account)->>'kode_akun'), ''),
+                  nullif(btrim(to_jsonb(account)->>'code'), ''),
+                  nullif(btrim(to_jsonb(account)->>'kode'), '')
+                ) = ledger.account_code
+          limit 1
+        ) as account on true
+        where ledger.transaction_date >= $1::date
+          and ledger.transaction_date < ($2::date + interval '1 day')
+          and ledger.debit > 0
+          and (
+            lower(coalesce(account.account_category, '')) like '%kas%'
+            or lower(coalesce(account.account_category, '')) like '%bank%'
+            or lower(coalesce(account.account_category, '')) like '%cash%'
+            or (
+                            (ledger.account_code like '1-%' or ledger.account_code is null)
+              and lower(ledger.account_name) ~ '(kas|bank|cash|qris|rekening)'
+            )
+          )
         """,
         start_date,
         end_date,

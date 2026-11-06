@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader, StatCard } from "@/components/PageHeader";
 import { api, errMsg, rp } from "@/lib/api";
+import { isCashBankAccount } from "@/lib/accountClassification";
 import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared";
 import FinanceDateFilter from "./FinanceDateFilter";
 
-const isCashAccount = (name) => /(kas|bank|cash)/i.test(name || "");
 const isInventoryAccount = (name) => /(persediaan bahan baku|persediaan|inventory)/i.test(name || "");
 
 export default function BalanceSheet() {
@@ -33,7 +33,7 @@ export default function BalanceSheet() {
     if (row.account_type === "asset") result.assets += balance;
     if (row.account_type === "liability") result.liabilities += balance;
     if (row.account_type === "equity") result.equity += balance;
-    if (row.account_type === "asset" && isCashAccount(row.account_name)) result.cash += balance;
+    if (row.account_type === "asset" && isCashBankAccount(row)) result.cash += balance;
     if (row.account_type === "asset" && isInventoryAccount(row.account_name)) result.inventory += balance;
     return result;
   }, { assets: 0, liabilities: 0, equity: 0, cash: 0, inventory: 0 }), [rows]);
@@ -56,6 +56,7 @@ export default function BalanceSheet() {
           rows={rows}
           emptyText="Belum ada saldo akun di neraca."
           columns={[
+            { key: "account_code", label: "Kode akun" },
             { key: "account_name", label: "Nama akun" },
             { key: "account_type", label: "Kelompok", render: (row) => ({ asset: "Aset", liability: "Liabilitas", equity: "Ekuitas" }[row.account_type] || row.account_type) },
             { key: "balance", label: "Saldo akhir", className: "text-right", render: (row) => <Money value={row.balance} /> },

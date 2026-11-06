@@ -44,6 +44,7 @@ export default function CashBankReport() {
           emptyText="Belum ada saldo kas atau bank."
           columns={[
             { key: "sumber_dana", label: "Sumber dana" },
+            { key: "account_code", label: "Kode akun" },
             { key: "saldo_berjalan", label: "Saldo berjalan", className: "text-right", render: (row) => <Money value={row.saldo_berjalan} /> },
           ]}
         />

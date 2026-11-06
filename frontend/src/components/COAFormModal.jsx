@@ -7,9 +7,11 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { errMsg } from "@/lib/api";
+import { getAccountCategoryFallback, getAccountType } from "@/lib/accountClassification";
 
 const ACCOUNT_CATEGORIES = [
   { value: "asset", label: "Aset" },
+  { value: "Kas & Bank", label: "Kas & Bank" },
   { value: "liability", label: "Liabilitas" },
   { value: "equity", label: "Ekuitas" },
   { value: "revenue", label: "Pendapatan" },
@@ -36,6 +38,18 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
   const setField = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }));
   };
+  const accountCategory = getAccountType({
+    account_category: form.account_category,
+  })
+    ? form.account_category
+    : getAccountCategoryFallback({
+      account_code: form.account_code,
+      account_name: form.account_name,
+    });
+  const categoryOption = ACCOUNT_CATEGORIES.find(({ value }) => value === accountCategory);
+  const customCategory = accountCategory && !categoryOption
+    ? { value: accountCategory, label: accountCategory }
+    : null;
 
   const submit = async (event) => {
     event.preventDefault();
@@ -44,7 +58,7 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
       await onSubmit({
         account_code: form.account_code.trim(),
         account_name: form.account_name.trim(),
-        account_category: form.account_category,
+        account_category: accountCategory,
       });
       onOpenChange(false);
     } catch (error) {
@@ -95,14 +109,14 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
             <select
               id="coa-account-category"
               data-testid="coa-account-category"
-              value={form.account_category}
+              value={accountCategory}
               onChange={setField("account_category")}
               required
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <option value="" disabled>Pilih jenis akun</option>
-              {form.account_category && !ACCOUNT_CATEGORIES.some(({ value }) => value === form.account_category) && (
-                <option value={form.account_category}>{form.account_category}</option>
+              {customCategory && getAccountType({ account_category: customCategory.value }) && (
+                <option value={customCategory.value}>{customCategory.label}</option>
               )}
               {ACCOUNT_CATEGORIES.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
             </select>

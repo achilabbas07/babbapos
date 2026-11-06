@@ -16,7 +16,7 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
             assert "sum(balance) as balance" in normalized_query
             assert "group by account_code, account_name, account_category" in normalized_query
             assert "account_id" not in normalized_query
-            assert "when account_code = '5-51099' then 'operating_expense'" in normalized_query
+            assert "when account_code = '5-51099' or lower(account_category) = 'operating_expense'" in normalized_query
             assert normalized_query.index("when account_code = '5-51099'") < normalized_query.index(
                 "when coalesce(account_code, '') like '5-%'"
             )

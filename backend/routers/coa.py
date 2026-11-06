@@ -88,7 +88,16 @@ def account_type_from_category(
         return legacy_type
     if normalized == "balance_sheet":
         code_prefix = (account_code or "").strip()[:1]
-        return {"1": "Asset", "2": "Liability", "3": "Equity"}.get(code_prefix)
+        return {
+            "1": "Asset",
+            "2": "Liability",
+            "3": "Equity",
+            "4": "Revenue",
+            "5": "Expense",
+            "6": "Expense",
+        }.get(code_prefix)
+    if normalized.startswith(("kas", "cash", "bank")):
+        return "Asset"
     if normalized.startswith(("aset", "aktiva", "asset")):
         return "Asset"
     if normalized.startswith(("kewajiban", "liabilitas", "utang", "hutang", "liability")):
@@ -99,7 +108,14 @@ def account_type_from_category(
         return "Revenue"
     if normalized.startswith(("beban", "biaya", "expense")):
         return "Expense"
-    return None
+    return {
+        "1": "Asset",
+        "2": "Liability",
+        "3": "Equity",
+        "4": "Revenue",
+        "5": "Expense",
+        "6": "Expense",
+    }.get((account_code or "").strip()[:1])
 
 
 def _row_value(row: asyncpg.Record, *names: str):
@@ -228,14 +244,17 @@ async def list_accounts(_: User = Depends(ADMIN)):
                       lower(btrim(coalesce(account_master.account_category, ''))) like 'asset%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'aset%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'aktiva%'
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'kas%'
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'cash%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'expense%'
-                        or lower(btrim(coalesce(account_master.account_category, '')))
-                          in ('asset', 'cost_of_goods_sold', 'operating_expense')
-                        or (
-                          lower(btrim(coalesce(account_master.account_category, ''))) = 'balance_sheet'
-                          and left(account_master.account_code, 1) = '1'
-                        )
-                        or lower(btrim(coalesce(account_master.account_category, ''))) like 'beban%'
+                      or lower(btrim(coalesce(account_master.account_category, '')))
+                        in ('asset', 'cost_of_goods_sold', 'operating_expense')
+                      or (
+                        lower(btrim(coalesce(account_master.account_category, ''))) = 'balance_sheet'
+                        and left(account_master.account_code, 1) in ('1', '5', '6')
+                      )
+                      or left(account_master.account_code, 1) in ('1', '5', '6')
+                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'beban%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'biaya%'
                     )
                   )
