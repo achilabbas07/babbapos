@@ -13,8 +13,8 @@ def test_list_accounts_calculates_balances_from_general_ledger(monkeypatch):
             assert "ledger.account_name = account_master.account_name" in query
             assert "'cost_of_goods_sold', 'operating_expense'" in query
             assert "= 'balance_sheet'" in query
-            assert "then ledger.debit - ledger.credit" in query
-            assert "else ledger.credit - ledger.debit" in query
+            assert "coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)" in query
+            assert "coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)" in query
             assert "to_jsonb(account)->>'current_balance'" not in query
             assert "ledger.transaction_date >= $1" in query
             assert "ledger.transaction_date <= $2" in query
@@ -244,6 +244,8 @@ def test_list_account_transactions_builds_running_balance(monkeypatch):
         async def fetch(self, query, *args):
             assert "from public.general_ledger as ledger" in query
             assert "ledger.account_code = $1" in query
+            assert "coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0) as debit" in query
+            assert "coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0) as credit" in query
             assert args == ("5-51001", "Beban Pokok Bahan Baku", date(2026, 1, 1), date(2026, 1, 31))
             return [
                 {
@@ -326,3 +328,74 @@ def test_list_account_transactions_returns_404_for_unknown_code(monkeypatch):
         assert error.status_code == 404
     else:  # pragma: no cover
         raise AssertionError("HTTPException 404 seharusnya dilempar")
+
+
+def test_list_account_transactions_reads_amount_columns_when_legacy_is_zero(monkeypatch):
+    """Baris ditulis trigger POS: debit/credit = 0, nilainya di debit_amount/credit_amount."""
+    from datetime import date
+
+    class FakePool:
+        async def fetchrow(self, query, *args):
+            return {
+                "account_code": "5-51001",
+                "account_name": "Air Galon",
+                "account_category": "operating_expense",
+                "normal_balance": None,
+            }
+
+        async def fetch(self, query, *args):
+            # Kolom gabungan harus dipakai, bukan ledger.debit / ledger.credit mentah.
+            assert "ledger.debit_amount" in query
+            assert "ledger.credit_amount" in query
+            return [
+                {
+                    "id": "a7c11a38-a8fe-4fbe-8ad7-205a15d15256",
+                    "entry_id": None,
+                    "transaction_date": date(2026, 11, 6),
+                    "entry_date": date(2026, 11, 6),
+                    "description": "Pengeluaran Kas: Air Galon - Air",
+                    "reference_number": "EXP-KAS-0073",
+                    "account_code": "5-51001",
+                    "account_name": "Air Galon",
+                    "account_type": "expense",
+                    "debit": Decimal("25000.00"),
+                    "credit": Decimal("0.00"),
+                    "source_type": None,
+                    "source_id": None,
+                },
+                {
+                    "id": "27ae8e20-49e1-4332-b1a5-a94c7b62fb95",
+                    "entry_id": None,
+                    "transaction_date": date(2026, 11, 5),
+                    "entry_date": date(2026, 11, 5),
+                    "description": "Pengeluaran Kas: Air Galon - Galon",
+                    "reference_number": "EXP-KAS-0059",
+                    "account_code": "5-51001",
+                    "account_name": "Air Galon",
+                    "account_type": "expense",
+                    "debit": Decimal("20000.00"),
+                    "credit": Decimal("0.00"),
+                    "source_type": None,
+                    "source_id": None,
+                },
+            ]
+
+    async def connect():
+        return None
+
+    monkeypatch.setattr(coa.db, "connect", connect)
+    monkeypatch.setattr(coa.db, "pool", FakePool())
+
+    result = asyncio.run(
+        coa.list_account_transactions(
+            "5-51001",
+            _=User(id="admin", name="Admin", role="admin"),
+        )
+    )
+
+    assert result["summary"]["total_debit"] == Decimal("45000.00")
+    assert result["summary"]["total_credit"] == Decimal("0.00")
+    assert result["summary"]["closing_balance"] == Decimal("45000.00")
+    assert result["summary"]["transaction_count"] == 2
+    assert result["transactions"][0]["debit"] == Decimal("25000.00")
+    assert result["transactions"][0]["reference_number"] == "EXP-KAS-0073"

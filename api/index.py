@@ -7,6 +7,7 @@ from seed import seed_all
 from shifts import router as shifts_router, get_open_shift
 from targets import router as targets_router, log_order_diff, resolve_waiter
 from discounts import router as discounts_router, promo_discount, points_discount
+from routers.coa import router as coa_router
 from variants import (
     router as variants_router,
     load_variants,
@@ -1057,6 +1058,7 @@ app.include_router(shifts_router)
 app.include_router(targets_router)
 app.include_router(discounts_router)
 app.include_router(variants_router)
+app.include_router(coa_router)
 
 configured_origins = [
     origin.strip().rstrip("/")

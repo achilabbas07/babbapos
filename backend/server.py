@@ -1737,8 +1737,9 @@ async def create_finance_journal(body: JournalIn, user: User = Depends(ADMIN)):
             await connection.executemany(
                 """
                 insert into public.general_ledger
-                  (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code, debit, credit, created_by)
-                values ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9)
+                                    (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code,
+                                     debit, credit, debit_amount, credit_amount, created_by)
+                                values ($1, $2, $2, $3, $4, $5, $6, $7, $8, $7, $8, $9)
                 """,
                 values,
             )
@@ -1856,8 +1857,8 @@ async def finance_balance_sheet(
           select
             ledger.account_code,
             ledger.account_name,
-            ledger.debit,
-            ledger.credit,
+                        coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0) as debit,
+                        coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0) as credit,
             case
               when lower(coalesce(account.account_category, '')) = 'balance_sheet'
                 then case left(ledger.account_code, 1)

@@ -11,6 +11,15 @@ from core import User, db, require_roles
 
 AccountType = Literal["Asset", "Liability", "Equity", "Revenue", "Expense"]
 
+# Tabel public.general_ledger punya DUA pasangan kolom nominal:
+#   - debit / credit            (warisan, NOT NULL DEFAULT 0, ditulis backend lama)
+#   - debit_amount / credit_amount (nullable, ditulis trigger POS & view DB)
+# Sebagian besar baris hanya terisi di salah satu pasangan, sehingga query yang
+# hanya membaca satu pasangan akan menghasilkan 0. Ekspresi di bawah menyatukan
+# keduanya: pakai *_amount bila bernilai, jika tidak jatuh ke kolom warisan.
+LEDGER_DEBIT_SQL = "coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)"
+LEDGER_CREDIT_SQL = "coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)"
+
 ACCOUNT_CATEGORIES: dict[AccountType, str] = {
     "Asset": "Aset Lancar",
     "Liability": "Kewajiban",
@@ -203,7 +212,7 @@ async def list_accounts(
         raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
     await db.connect()
     rows = await db.pool.fetch(
-        """
+        f"""
         with account_master as (
           select
             coalesce(
@@ -266,8 +275,8 @@ async def list_accounts(
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'biaya%'
                     )
                   )
-                  then ledger.debit - ledger.credit
-                else ledger.credit - ledger.debit
+                                    then {LEDGER_DEBIT_SQL} - {LEDGER_CREDIT_SQL}
+                                else {LEDGER_CREDIT_SQL} - {LEDGER_DEBIT_SQL}
               end
             )
             from public.general_ledger as ledger
@@ -366,18 +375,19 @@ async def list_account_transactions(
 
     account = dict(account_row)
     rows = await db.pool.fetch(
-        """
+                f"""
         select
           ledger.id,
           ledger.entry_id,
           ledger.transaction_date,
           ledger.entry_date,
           ledger.description,
+                    ledger.reference_number,
           ledger.account_code,
           ledger.account_name,
           ledger.account_type,
-          ledger.debit,
-          ledger.credit,
+                    {LEDGER_DEBIT_SQL} as debit,
+                    {LEDGER_CREDIT_SQL} as credit,
           ledger.source_type,
           ledger.source_id
         from public.general_ledger as ledger

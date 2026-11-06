@@ -223,7 +223,10 @@ async def get_cash_bank_balances(connection: Any) -> list[dict[str, Any]]:
         select
           coalesce(account.account_code, ledger.account_code) as account_code,
           ledger.account_name as sumber_dana,
-          sum(coalesce(ledger.debit, 0) - coalesce(ledger.credit, 0)) as saldo_berjalan
+                    sum(
+                        coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)
+                        - coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)
+                    ) as saldo_berjalan
         from public.general_ledger as ledger
         left join lateral (
           select
@@ -322,8 +325,8 @@ async def get_chart_of_accounts(
           account_code,
           account_name,
           account_type,
-          sum(debit) as total_debit,
-          sum(credit) as total_credit,
+                    sum(coalesce(nullif(debit_amount, 0), debit, 0)) as total_debit,
+                    sum(coalesce(nullif(credit_amount, 0), credit, 0)) as total_credit,
           count(*) as mutation_count
         from public.general_ledger
         where ($1::date is null or transaction_date >= $1)
@@ -452,7 +455,10 @@ async def get_profit_and_loss_report(
             ledger.account_name,
             coalesce(nullif(btrim(account.account_category), ''), 'Beban Operasional') as account_category,
             'operating_expense' as account_type,
-            sum(ledger.debit - ledger.credit) as balance
+                        sum(
+                            coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)
+                            - coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)
+                        ) as balance
           from public.general_ledger as ledger
           left join lateral (
             select coalesce(
@@ -1384,8 +1390,8 @@ async def post_finance_source(
         """
         insert into public.general_ledger
           (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code, account_id,
-           debit, credit, created_by, source_type, source_id)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           debit, credit, debit_amount, credit_amount, created_by, source_type, source_id)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $9, $10, $11, $12, $13)
         """,
         rows,
     )
@@ -1416,7 +1422,7 @@ async def get_laporan_arus_kas(
     )
     cash_totals = await connection.fetchrow(
         """
-        select coalesce(sum(ledger.debit), 0) as total_kas_masuk
+        select coalesce(sum(coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)), 0) as total_kas_masuk
         from public.general_ledger as ledger
         left join lateral (
           select coalesce(
@@ -1435,7 +1441,7 @@ async def get_laporan_arus_kas(
         ) as account on true
         where ledger.transaction_date >= $1::date
           and ledger.transaction_date < ($2::date + interval '1 day')
-          and ledger.debit > 0
+          and coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0) > 0
           and (
             lower(coalesce(account.account_category, '')) like '%kas%'
             or lower(coalesce(account.account_category, '')) like '%bank%'

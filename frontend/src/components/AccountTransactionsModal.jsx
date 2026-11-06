@@ -141,7 +141,14 @@ export default function AccountTransactionsModal({ open, onOpenChange, account, 
                   <TableRow key={`${row.id ?? row.entry_id ?? index}`} data-testid={`coa-trx-row-${index}`}>
                     <TableCell className="whitespace-nowrap">{fmtDate(row.transaction_date)}</TableCell>
                     <TableCell className="min-w-[200px]">{row.description || "-"}</TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{sourceLabel(row.source_type)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      <span className="block">{sourceLabel(row.source_type)}</span>
+                      {row.reference_number && (
+                        <span className="block font-mono text-[11px] text-muted-foreground/80">
+                          {row.reference_number}
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
                       {Number(row.debit) ? rp(row.debit) : "—"}
                     </TableCell>
