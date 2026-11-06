@@ -80,7 +80,7 @@ export default function ProfitAndLoss() {
           </button>
         </PageHeader>
       </div>
-      <div className="no-print print:hidden">
+      <div className="relative z-10 no-print print:hidden">
         <FinanceDateFilter initialMode="month" onApply={setFilters} />
       </div>
       {error && <div className="no-print print:hidden mb-5"><FinanceError message={error} onRetry={load} /></div>}

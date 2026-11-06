@@ -16,6 +16,11 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
             assert "sum(balance) as balance" in normalized_query
             assert "group by account_code, account_name, account_category" in normalized_query
             assert "account_id" not in normalized_query
+            assert "when account_code = '5-51099' then 'operating_expense'" in normalized_query
+            assert normalized_query.index("when account_code = '5-51099'") < normalized_query.index(
+                "when coalesce(account_code, '') like '5-%'"
+            )
+            assert "where account_type not in ('operating_expense', 'balance_sheet')" in normalized_query
             assert "from public.expenses as expense" in normalized_query
             assert "from public.cash_movements as movement" in normalized_query
             assert "from public.expense_categories as expense_category" in normalized_query
@@ -54,6 +59,13 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
                     "account_category": "Beban Pokok Pendapatan",
                     "account_type": "cost_of_goods_sold",
                     "balance": Decimal("30.00"),
+                },
+                {
+                    "account_code": "5-51099",
+                    "account_name": "Beban Selisih Stok",
+                    "account_category": "Beban Operasional",
+                    "account_type": "operating_expense",
+                    "balance": Decimal("12.00"),
                 },
                 {
                     "account_code": "6-60000",
@@ -108,12 +120,13 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
         "revenue": Decimal("1075.00"),
         "sales_discount": Decimal("75.00"),
         "hpp": Decimal("260.00"),
-        "expenses": Decimal("65.00"),
-        "net_profit": Decimal("675.00"),
+        "expenses": Decimal("77.00"),
+        "net_profit": Decimal("663.00"),
     }
     assert [row["account_name"] for row in report["rows"]] == [
         "Penjualan",
         "Potongan Penjualan",
+        "Beban Selisih Stok",
         "Beban Operasional",
         "Uang Makan",
         "Uang Makan",
@@ -123,9 +136,12 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
         "6-60153",
         "6-60154",
     ]
+    assert len([row for row in report["rows"] if row["account_code"] == "5-51099"]) == 1
+    assert next(row for row in report["rows"] if row["account_code"] == "5-51099")["balance"] == Decimal("12.00")
     assert [row["account_type"] for row in report["rows"]] == [
         "revenue",
         "revenue",
+        "expense",
         "expense",
         "expense",
         "expense",

@@ -219,6 +219,8 @@ async def get_profit_and_loss_report(
               account_name,
               account_category,
               case
+                when account_code = '5-51099'
+                  then 'operating_expense'
                 when coalesce(account_code, '') like '5-%'
                   or lower(account_name) like '%beban pokok%'
                   or lower(account_name) like '%hpp%'
