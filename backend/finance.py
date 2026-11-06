@@ -212,37 +212,93 @@ async def get_profit_and_loss_report(
     rows = await pool.fetch(
         """
         with report_rows as (
-          select account_name, account_type, subtotal_balance as balance
-          from public.view_profit_and_loss_summary
-          where transaction_date >= $1::date
-            and transaction_date < $2::date
-            and account_type <> 'operating_expense'
-
-          union all
-
-          select account_name, 'operating_expense' as account_type,
-                 sum(debit - credit) as balance
-          from public.general_ledger
-          where transaction_date >= $1::date
-            and transaction_date < $2::date
-            and account_type = 'expense'
-            and source_type is distinct from 'expense'
-            and lower(account_name) not like '%beban pokok%'
-            and lower(account_name) not like '%hpp%'
-            and lower(account_name) not like '%tissu%'
-            and lower(account_name) not like '%bumbu%'
-            and lower(account_name) not like '%persediaan bahan%'
-            and lower(account_name) not like '%persediaan barang%'
-          group by account_name
+          select account_code, account_name, account_category, account_type, balance
+          from (
+            select
+              account_code,
+              account_name,
+              account_category,
+              case
+                when coalesce(account_code, '') like '5-%'
+                  or lower(account_name) like '%beban pokok%'
+                  or lower(account_name) like '%hpp%'
+                  or lower(account_name) like '%tissu%'
+                  or lower(account_name) like '%bumbu%'
+                  or lower(account_name) like '%persediaan bahan%'
+                  or lower(account_name) like '%persediaan barang%'
+                  then 'cost_of_goods_sold'
+                when lower(account_category) like 'revenue%'
+                  or lower(account_category) like 'pendapatan%'
+                  or lower(account_category) like 'income%'
+                  or coalesce(account_code, '') like '4-%'
+                  then 'revenue'
+                when lower(account_category) like 'expense%'
+                  or lower(account_category) like 'beban%'
+                  or lower(account_category) like 'biaya%'
+                  or coalesce(account_code, '') like '6-%'
+                  then 'operating_expense'
+                else 'balance_sheet'
+              end as account_type,
+              balance
+            from public.view_profit_and_loss_summary
+            where transaction_date >= $1::date
+              and transaction_date < $2::date
+          ) as summary_rows
+          where account_type not in ('operating_expense', 'balance_sheet')
 
           union all
 
           select
+            ledger.account_code,
+            ledger.account_name,
+            coalesce(nullif(btrim(account.account_category), ''), 'Beban Operasional') as account_category,
+            'operating_expense' as account_type,
+            sum(ledger.debit - ledger.credit) as balance
+          from public.general_ledger as ledger
+          left join lateral (
+            select coalesce(
+                     nullif(btrim(to_jsonb(account_row)->>'account_category'), ''),
+                     nullif(btrim(to_jsonb(account_row)->>'kategori_akun'), ''),
+                     nullif(btrim(to_jsonb(account_row)->>'category'), '')
+                   ) as account_category
+            from public.chart_of_accounts as account_row
+            where coalesce(
+                    nullif(to_jsonb(account_row)->>'account_code', ''),
+                    nullif(to_jsonb(account_row)->>'kode_akun', ''),
+                    nullif(to_jsonb(account_row)->>'code', ''),
+                    nullif(to_jsonb(account_row)->>'kode', '')
+                  ) = ledger.account_code
+            limit 1
+          ) as account on true
+          where ledger.entry_date >= $1::date
+            and ledger.entry_date < $2::date
+            and ledger.account_type = 'expense'
+            and ledger.source_type is distinct from 'expense'
+            and lower(ledger.account_name) not like '%beban pokok%'
+            and lower(ledger.account_name) not like '%hpp%'
+            and lower(ledger.account_name) not like '%tissu%'
+            and lower(ledger.account_name) not like '%bumbu%'
+            and lower(ledger.account_name) not like '%persediaan bahan%'
+            and lower(ledger.account_name) not like '%persediaan barang%'
+          group by ledger.account_code, ledger.account_name, account_category
+
+          union all
+
+          select
+            coalesce(account.account_code, category.account_code) as account_code,
             coalesce(
               nullif(btrim(account.account_name), ''),
               nullif(btrim(category.category_name), ''),
               nullif(btrim(expense.category), '')
             ) as account_name,
+            coalesce(
+              nullif(btrim(account.account_category), ''),
+              case
+                when coalesce(account.account_code, category.account_code, '') like '5-%'
+                  then 'Beban Pokok Pendapatan'
+                else 'Beban Operasional'
+              end
+            ) as account_category,
             case
               when coalesce(category.account_code, '') like '5-%'
                 or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
@@ -284,7 +340,18 @@ async def get_profit_and_loss_report(
             select coalesce(
                      nullif(btrim(to_jsonb(chart_account)->>'account_name'), ''),
                      nullif(btrim(to_jsonb(chart_account)->>'nama_akun'), '')
-                   ) as account_name
+                   ) as account_name,
+                   coalesce(
+                     nullif(btrim(to_jsonb(chart_account)->>'account_code'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'kode_akun'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'code'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'kode'), '')
+                   ) as account_code,
+                   coalesce(
+                     nullif(btrim(to_jsonb(chart_account)->>'account_category'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'kategori_akun'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'category'), '')
+                   ) as account_category
             from public.chart_of_accounts as chart_account
             where coalesce(
                     nullif(to_jsonb(chart_account)->>'account_code', ''),
@@ -297,17 +364,26 @@ async def get_profit_and_loss_report(
           where expense.date >= $1::date
             and expense.date < $2::date
             and expense.amount > 0
-          group by 1, 2
+          group by 1, 2, 3, 4
 
           union all
 
           select
+            coalesce(account.account_code, category.account_code) as account_code,
             coalesce(
               nullif(btrim(account.account_name), ''),
               nullif(btrim(category.category_name), ''),
               nullif(btrim(movement.note), ''),
               'Kas Keluar'
             ) as account_name,
+            coalesce(
+              nullif(btrim(account.account_category), ''),
+              case
+                when coalesce(account.account_code, category.account_code, '') like '5-%'
+                  then 'Beban Pokok Pendapatan'
+                else 'Beban Operasional'
+              end
+            ) as account_category,
             case
               when coalesce(category.account_code, '') like '5-%'
                 or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
@@ -342,7 +418,18 @@ async def get_profit_and_loss_report(
             select coalesce(
                      nullif(btrim(to_jsonb(chart_account)->>'account_name'), ''),
                      nullif(btrim(to_jsonb(chart_account)->>'nama_akun'), '')
-                   ) as account_name
+                   ) as account_name,
+                   coalesce(
+                     nullif(btrim(to_jsonb(chart_account)->>'account_code'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'kode_akun'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'code'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'kode'), '')
+                   ) as account_code,
+                   coalesce(
+                     nullif(btrim(to_jsonb(chart_account)->>'account_category'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'kategori_akun'), ''),
+                     nullif(btrim(to_jsonb(chart_account)->>'category'), '')
+                   ) as account_category
             from public.chart_of_accounts as chart_account
             where coalesce(
                     nullif(to_jsonb(chart_account)->>'account_code', ''),
@@ -356,12 +443,17 @@ async def get_profit_and_loss_report(
             and movement."timestamp" >= $1::date
             and movement."timestamp" < $2::date
             and movement.amount > 0
-          group by 1, 2
+          group by 1, 2, 3, 4
         )
-        select account_name, account_type, sum(balance) as balance
+        select
+          account_code,
+          account_name,
+          account_category,
+          max(account_type) as account_type,
+          sum(balance) as balance
         from report_rows
-        group by account_name, account_type
-        order by account_type, account_name
+        group by account_code, account_name, account_category
+        order by account_type, account_code, account_name
         """,
         start_date,
         end_date,
@@ -469,6 +561,8 @@ async def get_profit_and_loss_report(
     totals["cogs"] = calculated_hpp
     report_rows.append({
         "account_name": "Beban Pokok Pendapatan",
+        "account_code": ACCOUNT_HPP_ID,
+        "account_category": "Beban Pokok Pendapatan",
         "account_type": "cogs",
         "balance": calculated_hpp,
     })
@@ -488,6 +582,8 @@ async def get_profit_and_loss_report(
         )
         report_rows.insert(revenue_end, {
             "account_name": "Potongan Penjualan",
+            "account_code": None,
+            "account_category": "Pendapatan",
             "account_type": "revenue",
             "balance": -sales_discount,
         })

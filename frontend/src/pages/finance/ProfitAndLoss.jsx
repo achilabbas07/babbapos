@@ -45,10 +45,10 @@ export default function ProfitAndLoss() {
       ["LAPORAN LABA RUGI"],
       ["Tanggal cetak", new Date().toLocaleDateString("id-ID")],
       [],
-      ["Jenis", "Nama akun", "Jumlah (Rp)"],
-      ...revenues.map((row) => ["Pendapatan", row.account_name, Number(row.balance) || 0]),
-      ...hppRows.map((row) => ["HPP", row.account_name, Number(row.balance) || 0]),
-      ...expenses.map((row) => ["Beban", row.account_name, Number(row.balance) || 0]),
+      ["Jenis", "No. akun", "Nama akun", "Jumlah (Rp)"],
+      ...revenues.map((row) => ["Pendapatan", row.account_code || "", row.account_name, Number(row.balance) || 0]),
+      ...hppRows.map((row) => ["HPP", row.account_code || "", row.account_name, Number(row.balance) || 0]),
+      ...expenses.map((row) => ["Beban", row.account_code || "", row.account_name, Number(row.balance) || 0]),
       [],
       ["Ringkasan", "Total"],
       ["Total pendapatan", Number(summary?.revenue) || 0],
@@ -57,10 +57,10 @@ export default function ProfitAndLoss() {
       ["Total beban", Number(summary?.expenses) || 0],
       ["Laba / (rugi) bersih", Number(summary?.net_profit) || 0],
     ]);
-    sheet["!cols"] = [{ wch: 24 }, { wch: 40 }, { wch: 22 }];
+    sheet["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 40 }, { wch: 22 }];
     const range = XLSX.utils.decode_range(sheet["!ref"]);
     for (let row = 5; row <= range.e.r; row += 1) {
-      const cell = sheet[XLSX.utils.encode_cell({ r: row, c: 2 })];
+      const cell = sheet[XLSX.utils.encode_cell({ r: row, c: 3 })];
       if (cell && typeof cell.v === "number") cell.z = '"Rp" #,##0.00';
     }
     const workbook = XLSX.utils.book_new();
@@ -123,6 +123,7 @@ export default function ProfitAndLoss() {
               rows={expenses}
               emptyText="Belum ada beban tercatat."
               columns={[
+                { key: "account_code", label: "No. akun" },
                 { key: "account_name", label: "Beban operasional" },
                 { key: "balance", label: "Jumlah", className: "finance-amount text-right", render: (row) => <Money value={row.balance} /> },
               ]}
