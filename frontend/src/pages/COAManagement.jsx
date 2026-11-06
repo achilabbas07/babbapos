@@ -97,7 +97,7 @@ export default function COAManagement() {
                   <TableCell className="font-mono">{account.account_code}</TableCell>
                   <TableCell className="font-medium">{account.account_name}</TableCell>
                   <TableCell>{account.account_type || "—"}</TableCell>
-                  <TableCell>{account.account_category}</TableCell>
+                  <TableCell>{account.account_category || "—"}</TableCell>
                   <TableCell className="text-right font-mono">{rp(account.current_balance)}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">

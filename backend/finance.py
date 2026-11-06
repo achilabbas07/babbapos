@@ -89,11 +89,27 @@ async def get_account_balances(pool: Any) -> list[dict[str, Any]]:
         raise
 
 
-def account_type_from_category(account_category: Optional[str]) -> Optional[str]:
+def account_type_from_category(
+    account_category: Optional[str],
+    account_code: Optional[str] = None,
+) -> Optional[str]:
     if not account_category:
         return None
 
     category = account_category.strip().lower()
+    canonical_types = {
+        "asset": "asset",
+        "liability": "liability",
+        "equity": "equity",
+        "revenue": "revenue",
+        "cost_of_goods_sold": "expense",
+        "operating_expense": "expense",
+    }
+    if category in canonical_types:
+        return canonical_types[category]
+    if category == "balance_sheet":
+        return {"1": "asset", "2": "liability", "3": "equity"}.get((account_code or "")[:1])
+
     category_prefixes = (
         (("asset", "assets", "aset", "aktiva"), "asset"),
         (("liabilit", "kewajiban", "utang", "hutang"), "liability"),
@@ -184,7 +200,7 @@ async def get_chart_of_accounts(
     result = []
     for account_row in accounts:
         account = dict(account_row)
-        account_type = account_type_from_category(account["account_category"])
+        account_type = account_type_from_category(account["account_category"], account["account_code"])
         mutation = balances_by_code.get((account["account_code"], account_type))
         if mutation is None:
             mutation = balances_by_name.get((account["account_name"], account_type))

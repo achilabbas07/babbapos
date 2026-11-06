@@ -34,6 +34,9 @@ def test_chart_account_categories_map_to_journal_types():
     assert account_type_from_category("Modal Pemilik") == "equity"
     assert account_type_from_category("Pendapatan Operasional") == "revenue"
     assert account_type_from_category("Beban Gaji") == "expense"
+    assert account_type_from_category("cost_of_goods_sold") == "expense"
+    assert account_type_from_category("operating_expense") == "expense"
+    assert account_type_from_category("balance_sheet", "2-20001") == "liability"
     assert account_type_from_category("Kategori Tidak Dikenal") is None
 
 

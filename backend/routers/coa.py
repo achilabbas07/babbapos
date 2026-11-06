@@ -3,7 +3,7 @@ from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from core import User, db, require_roles
 
@@ -15,6 +15,17 @@ ACCOUNT_CATEGORIES: dict[AccountType, str] = {
     "Equity": "Ekuitas",
     "Revenue": "Pendapatan",
     "Expense": "Beban Operasional",
+}
+LEGACY_CATEGORY_TYPES: dict[str, AccountType] = {
+    "asset": "Asset",
+    "liability": "Liability",
+    "equity": "Equity",
+    "revenue": "Revenue",
+    "cost_of_goods_sold": "Expense",
+    "operating_expense": "Expense",
+    "beban pokok pendapatan": "Expense",
+    "beban operasional": "Expense",
+    "expense": "Expense",
 }
 NORMAL_BALANCES: dict[AccountType, str] = {
     "Asset": "debit",
@@ -38,7 +49,25 @@ ADMIN = require_roles("admin")
 class AccountIn(BaseModel):
     account_code: str = Field(min_length=1, max_length=32)
     account_name: str = Field(min_length=1, max_length=160)
-    account_type: AccountType
+    account_category: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        validation_alias=AliasChoices("account_category", "accountCategory"),
+    )
+    account_type: AccountType | None = None
+
+    @model_validator(mode="after")
+    def require_account_category(self):
+        if self.account_category is None and self.account_type is None:
+            raise ValueError("Jenis akun wajib dipilih.")
+        if self.account_category is None:
+            self.account_category = ACCOUNT_CATEGORIES[self.account_type]
+        else:
+            self.account_category = self.account_category.strip()
+            if not self.account_category:
+                raise ValueError("Jenis akun wajib dipilih.")
+        return self
 
     @field_validator("account_code", "account_name")
     @classmethod
@@ -49,8 +78,17 @@ class AccountIn(BaseModel):
         return value
 
 
-def account_type_from_category(category: str | None) -> AccountType | None:
+def account_type_from_category(
+    category: str | None,
+    account_code: str | None = None,
+) -> AccountType | None:
     normalized = (category or "").strip().casefold()
+    legacy_type = LEGACY_CATEGORY_TYPES.get(normalized)
+    if legacy_type is not None and normalized != "balance_sheet":
+        return legacy_type
+    if normalized == "balance_sheet":
+        code_prefix = (account_code or "").strip()[:1]
+        return {"1": "Asset", "2": "Liability", "3": "Equity"}.get(code_prefix)
     if normalized.startswith(("aset", "aktiva", "asset")):
         return "Asset"
     if normalized.startswith(("kewajiban", "liabilitas", "utang", "hutang", "liability")):
@@ -80,7 +118,7 @@ def serialize_account(row: asyncpg.Record) -> dict:
         "account_code": account_code,
         "account_name": _row_value(row, "account_name", "nama_akun", "name"),
         "account_category": category,
-        "account_type": account_type_from_category(category),
+        "account_type": account_type_from_category(category, account_code),
         "normal_balance": _row_value(row, "normal_balance", "saldo_normal"),
         "current_balance": _row_value(row, "current_balance"),
     }
@@ -191,7 +229,13 @@ async def list_accounts(_: User = Depends(ADMIN)):
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'aset%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'aktiva%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'expense%'
-                      or lower(btrim(coalesce(account_master.account_category, ''))) like 'beban%'
+                        or lower(btrim(coalesce(account_master.account_category, '')))
+                          in ('asset', 'cost_of_goods_sold', 'operating_expense')
+                        or (
+                          lower(btrim(coalesce(account_master.account_category, ''))) = 'balance_sheet'
+                          and left(account_master.account_code, 1) = '1'
+                        )
+                        or lower(btrim(coalesce(account_master.account_category, ''))) like 'beban%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'biaya%'
                     )
                   )
@@ -218,12 +262,14 @@ async def create_account(body: AccountIn, _: User = Depends(ADMIN)):
     await db.connect()
     resolved, _ = _account_schema()
     await ensure_unique_code(body.account_code, resolved=resolved, columns=db.columns["chart_of_accounts"])
-    category = ACCOUNT_CATEGORIES[body.account_type]
-    normal_balance = NORMAL_BALANCES[body.account_type]
+    account_type = account_type_from_category(body.account_category, body.account_code)
+    if account_type is None:
+        raise HTTPException(422, "Jenis akun tidak didukung.")
+    normal_balance = NORMAL_BALANCES[account_type]
     values = [
         (resolved["account_code"], body.account_code),
         (resolved["account_name"], body.account_name),
-        (resolved["account_category"], category),
+        (resolved["account_category"], body.account_category),
     ]
     if resolved["normal_balance"]:
         values.append((resolved["normal_balance"], normal_balance))
@@ -246,12 +292,14 @@ async def update_account(account_id: str, body: AccountIn, _: User = Depends(ADM
     key_column = _quoted(resolved["id"])
     account_key = _account_key_value(account_id, resolved["id"], columns)
     await ensure_unique_code(body.account_code, account_id, resolved, columns)
-    category = ACCOUNT_CATEGORIES[body.account_type]
-    normal_balance = NORMAL_BALANCES[body.account_type]
+    account_type = account_type_from_category(body.account_category, body.account_code)
+    if account_type is None:
+        raise HTTPException(422, "Jenis akun tidak didukung.")
+    normal_balance = NORMAL_BALANCES[account_type]
     values = [
         (resolved["account_code"], body.account_code),
         (resolved["account_name"], body.account_name),
-        (resolved["account_category"], category),
+        (resolved["account_category"], body.account_category),
     ]
     if resolved["normal_balance"]:
         values.append((resolved["normal_balance"], normal_balance))

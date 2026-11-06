@@ -8,8 +8,16 @@ import {
 } from "@/components/ui/dialog";
 import { errMsg } from "@/lib/api";
 
-const ACCOUNT_TYPES = ["Asset", "Liability", "Equity", "Revenue", "Expense"];
-const EMPTY_FORM = { account_code: "", account_name: "", account_type: "" };
+const ACCOUNT_CATEGORIES = [
+  { value: "asset", label: "Aset" },
+  { value: "liability", label: "Liabilitas" },
+  { value: "equity", label: "Ekuitas" },
+  { value: "revenue", label: "Pendapatan" },
+  { value: "cost_of_goods_sold", label: "Harga Pokok Penjualan" },
+  { value: "operating_expense", label: "Beban Operasional" },
+  { value: "balance_sheet", label: "Neraca" },
+];
+const EMPTY_FORM = { account_code: "", account_name: "", account_category: "" };
 
 export default function COAFormModal({ open, onOpenChange, account, onSubmit }) {
   const [form, setForm] = useState(EMPTY_FORM);
@@ -20,7 +28,7 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
       setForm({
         account_code: account?.account_code ?? "",
         account_name: account?.account_name ?? "",
-        account_type: account?.account_type ?? "",
+        account_category: account?.account_category ?? "",
       });
     }
   }, [open, account]);
@@ -36,7 +44,7 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
       await onSubmit({
         account_code: form.account_code.trim(),
         account_name: form.account_name.trim(),
-        account_type: form.account_type,
+        account_category: form.account_category,
       });
       onOpenChange(false);
     } catch (error) {
@@ -83,17 +91,20 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="coa-account-type">Jenis Akun</Label>
+            <Label htmlFor="coa-account-category">Jenis Akun</Label>
             <select
-              id="coa-account-type"
-              data-testid="coa-account-type"
-              value={form.account_type}
-              onChange={setField("account_type")}
+              id="coa-account-category"
+              data-testid="coa-account-category"
+              value={form.account_category}
+              onChange={setField("account_category")}
               required
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <option value="" disabled>Pilih jenis akun</option>
-              {ACCOUNT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+              {form.account_category && !ACCOUNT_CATEGORIES.some(({ value }) => value === form.account_category) && (
+                <option value={form.account_category}>{form.account_category}</option>
+              )}
+              {ACCOUNT_CATEGORIES.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
             </select>
           </div>
           <DialogFooter>
