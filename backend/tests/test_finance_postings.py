@@ -6,6 +6,7 @@ from uuid import UUID
 
 from finance import (
     account_type_from_category,
+    expense_account_codes,
     expense_lines,
     get_account_by_payment_method,
     get_dashboard_neraca_kas,
@@ -26,6 +27,7 @@ from finance import (
     debt_payment_lines,
     purchase_journal_lines,
     purchase_lines,
+    resolve_expense_account_code,
     transaction_account_codes,
     transaction_lines,
 )
@@ -201,7 +203,7 @@ def test_cash_sale_uses_required_account_codes():
         1000,
         "Cash",
         [{"hpp": 12.5, "qty": 2}],
-    ) == ["1-10001", "4-40000", None, None]
+    ) == ["1-10001", "4-40000", "5-50000", "1-10003"]
     assert transaction_account_codes(1000, "QRIS", []) == ["1-10002", "4-40000"]
 
 
@@ -527,6 +529,41 @@ def test_purchase_and_expense_post_balanced_lines():
     ]
 
 
+def test_expense_account_codes_never_leave_the_expense_line_uncoded():
+    assert expense_account_codes(350, "6-60203") == ["6-60203", "1-10001"]
+    # Tanpa kode dari kategori, pengeluaran tetap dibukukan ke akun penampung
+    # 6-9999 agar laporan laba rugi tidak kehilangan bebannya.
+    assert expense_account_codes(350) == ["6-9999", "1-10001"]
+    assert expense_account_codes(0, "6-60203") == []
+
+
+def test_resolve_expense_account_code_prefers_category_id_then_name_then_fallback():
+    class FakeConnection:
+        async def fetchrow(self, query, category_id):
+            assert "from public.expense_categories" in query
+            if category_id == 5:
+                return {"account_code": "6-60153"}
+            if category_id == 99:
+                return {"account_code": "   "}
+            return None
+
+        async def fetch(self, query, category):
+            assert "from public.expense_categories" in query
+            if category == "Uang Makan IMRAN":
+                return [{"account_code": "6-60153"}]
+            return []
+
+    assert asyncio.run(
+        resolve_expense_account_code(FakeConnection(), "Uang Makan IMRAN", 5)
+    ) == "6-60153"
+    assert asyncio.run(
+        resolve_expense_account_code(FakeConnection(), "Uang Makan IMRAN")
+    ) == "6-60153"
+    assert asyncio.run(
+        resolve_expense_account_code(FakeConnection(), "Kategori Asing", 99)
+    ) == "6-9999"
+
+
 def test_purchase_journal_uses_inventory_and_cash_or_ap_accounts():
     assert purchase_journal_lines(1200, "cash", "1-10002") == [
         ("Persediaan Barang", "asset", Decimal("1200.00"), Decimal("0")),
@@ -809,6 +846,10 @@ def test_post_finance_source_fills_missing_transaction_account_names():
     class FakeConnection:
         rows = []
 
+        async def fetch(self, sql, account_codes):
+            assert account_codes == ["4-40000"]
+            return []
+
         async def executemany(self, sql, rows):
             self.rows = list(rows)
 
@@ -827,6 +868,7 @@ def test_post_finance_source_fills_missing_transaction_account_names():
     ))
 
     assert [row[4] for row in connection.rows] == ["Kas Tunai", "Pendapatan"]
+    assert [row[6] for row in connection.rows] == [None, "4-40000"]
 
 
 def test_post_finance_source_keeps_posting_when_master_account_uuid_is_missing():

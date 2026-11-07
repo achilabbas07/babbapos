@@ -17,11 +17,15 @@ from variants import (
     variant_hpp,
 )
 from finance import (
+    expense_account_codes,
+    expense_lines,
     get_chart_of_accounts,
+    get_profit_and_loss_report,
     get_recent_finance_transactions,
     post_cash_expense_journal,
     post_finance_source,
     post_purchase_payment_journal,
+    resolve_expense_account_code,
     transaction_account_codes,
     transaction_lines,
 )
@@ -954,6 +958,19 @@ async def create_expense(body: ExpenseIn, user: User = Depends(ADMIN)):
     async with db.pool.acquire() as conn:
         async with conn.transaction():
             await db.expenses.insert_one(exp.to_mongo(), connection=conn)
+            expense_account_code = await resolve_expense_account_code(
+                conn, exp.category, exp.category_id
+            )
+            await post_finance_source(
+                conn,
+                "expense",
+                exp.id,
+                date.fromisoformat(exp.date[:10]),
+                exp.description.strip() or f"Pengeluaran {exp.category}",
+                user.id,
+                expense_lines(exp.category, exp.amount),
+                expense_account_codes(exp.amount, expense_account_code),
+            )
             expense_description = " - ".join(
                 part for part in (exp.category.strip(), exp.description.strip()) if part
             )
@@ -963,9 +980,19 @@ async def create_expense(body: ExpenseIn, user: User = Depends(ADMIN)):
 
 @api.delete("/expenses/{eid}")
 async def delete_expense(eid: str, _: User = Depends(ADMIN)):
-    res = await db.expenses.delete_one({"_id": eid})
-    if not res.deleted_count:
-        raise HTTPException(404, "Pengeluaran tidak ditemukan")
+    await db.connect()
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            deleted = await conn.fetchval(
+                "delete from public.expenses where id = $1 returning id",
+                eid,
+            )
+            if deleted is None:
+                raise HTTPException(404, "Pengeluaran tidak ditemukan")
+            await conn.execute(
+                "delete from public.general_ledger where source_type = 'expense' and source_id = $1",
+                eid,
+            )
     return {"ok": True}
 
 
@@ -1052,6 +1079,54 @@ async def finance_recent_transactions(
         logger.exception("Failed to load recent finance transactions")
         raise HTTPException(500, "Gagal memuat transaksi keuangan terbaru.") from error
     return {"status": "success", "data": data}
+
+
+# ---------- Profit & Loss ----------
+def _finance_period_bounds(
+    start: Optional[date],
+    end: Optional[date],
+    month: Optional[int],
+    year: Optional[int],
+):
+    if (start is None) != (end is None):
+        raise HTTPException(422, "Tanggal mulai dan tanggal selesai harus diisi bersama.")
+    if (month is None) != (year is None):
+        raise HTTPException(422, "Bulan dan tahun harus diisi bersama.")
+    if start is not None and month is not None:
+        raise HTTPException(422, "Gunakan rentang tanggal atau periode bulan, bukan keduanya.")
+    if start is not None:
+        if end is None or end < start:
+            raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
+        return start, end + timedelta(days=1)
+    if month is not None:
+        if year is None or not 1 <= month <= 12 or not 1 <= year <= 9999:
+            raise HTTPException(422, "Bulan atau tahun tidak valid.")
+        period_start = date(year, month, 1)
+        period_end = date(year + (1 if month == 12 else 0), month % 12 + 1, 1)
+        return period_start, period_end
+    return None, None
+
+
+@api.get("/finance/profit-loss")
+async def finance_profit_loss(
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    _: User = Depends(ADMIN),
+):
+    period_start, period_end = _finance_period_bounds(start, end, month, year)
+    if period_start is None or period_end is None:
+        today = date.today()
+        period_start, period_end = _finance_period_bounds(None, None, today.month, today.year)
+    try:
+        await db.connect()
+        return await get_profit_and_loss_report(db.pool, period_start, period_end)
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Failed to load profit and loss report")
+        raise HTTPException(500, "Gagal memuat laporan laba rugi.") from error
 
 
 @api.get("/schema")

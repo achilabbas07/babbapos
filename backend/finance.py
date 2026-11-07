@@ -451,7 +451,10 @@ async def get_profit_and_loss_report(
           union all
 
           select
-            ledger.account_code,
+                                                coalesce(
+                                                        nullif(btrim(ledger.account_code), ''),
+                                                        account.account_code
+                                                ) as account_code,
             ledger.account_name,
             coalesce(nullif(btrim(account.account_category), ''), 'Beban Operasional') as account_category,
             'operating_expense' as account_type,
@@ -461,36 +464,78 @@ async def get_profit_and_loss_report(
                         ) as balance
           from public.general_ledger as ledger
           left join lateral (
-            select coalesce(
+                        select coalesce(
+                                         nullif(btrim(to_jsonb(account_row)->>'account_code'), ''),
+                                         nullif(btrim(to_jsonb(account_row)->>'kode_akun'), ''),
+                                         nullif(btrim(to_jsonb(account_row)->>'code'), ''),
+                                         nullif(btrim(to_jsonb(account_row)->>'kode'), '')
+                                     ) as account_code,
+                                     coalesce(
                      nullif(btrim(to_jsonb(account_row)->>'account_category'), ''),
                      nullif(btrim(to_jsonb(account_row)->>'kategori_akun'), ''),
                      nullif(btrim(to_jsonb(account_row)->>'category'), '')
                    ) as account_category
             from public.chart_of_accounts as account_row
-            where coalesce(
+                        where coalesce(
                     nullif(to_jsonb(account_row)->>'account_code', ''),
                     nullif(to_jsonb(account_row)->>'kode_akun', ''),
                     nullif(to_jsonb(account_row)->>'code', ''),
                     nullif(to_jsonb(account_row)->>'kode', '')
                   ) = ledger.account_code
+                             or (
+                                 nullif(btrim(ledger.account_code), '') is null
+                                 and lower(btrim(ledger.account_name)) = lower(btrim(coalesce(
+                                     to_jsonb(account_row)->>'account_name',
+                                     to_jsonb(account_row)->>'nama_akun',
+                                     ''
+                                 )))
+                             )
+                        order by (
+                            coalesce(
+                                nullif(to_jsonb(account_row)->>'account_code', ''),
+                                nullif(to_jsonb(account_row)->>'kode_akun', ''),
+                                nullif(to_jsonb(account_row)->>'code', ''),
+                                nullif(to_jsonb(account_row)->>'kode', '')
+                            ) = ledger.account_code
+                        ) desc
             limit 1
           ) as account on true
           where ledger.entry_date >= $1::date
             and ledger.entry_date < $2::date
-            and ledger.account_type = 'expense'
+                        and (
+                            coalesce(ledger.account_code, '') like '6-%'
+                            or coalesce(ledger.account_code, '') = '5-51099'
+                            or (
+                                nullif(btrim(ledger.account_code), '') is null
+                                and coalesce(account.account_code, '') like '6-%'
+                            )
+                        )
             and ledger.source_type is distinct from 'expense'
+                        and not exists (
+                            select 1
+                            from public.expenses as expense_mirror
+                            where coalesce(ledger.reference_number, '') = 'EXP-' || left(expense_mirror.id::text, 8)
+                        )
             and lower(ledger.account_name) not like '%beban pokok%'
             and lower(ledger.account_name) not like '%hpp%'
             and lower(ledger.account_name) not like '%tissu%'
             and lower(ledger.account_name) not like '%bumbu%'
             and lower(ledger.account_name) not like '%persediaan bahan%'
             and lower(ledger.account_name) not like '%persediaan barang%'
-          group by ledger.account_code, ledger.account_name, account_category
+                    group by ledger.account_code, ledger.account_name, account_category,
+                                     account.account_code, account.account_category
 
           union all
 
           select
-            coalesce(account.account_code, category.account_code) as account_code,
+                        coalesce(
+                            account.account_code,
+                            category.account_code,
+                            case
+                                when coalesce(category.account_code, '') like '5-%' then '5-51099'
+                                else '6-9999'
+                            end
+                        ) as account_code,
             coalesce(
               nullif(btrim(account.account_name), ''),
               nullif(btrim(category.category_name), ''),
@@ -569,85 +614,6 @@ async def get_profit_and_loss_report(
           where expense.date >= $1::date
             and expense.date < $2::date
             and expense.amount > 0
-          group by 1, 2, 3, 4
-
-          union all
-
-          select
-            coalesce(account.account_code, category.account_code) as account_code,
-            coalesce(
-              nullif(btrim(account.account_name), ''),
-              nullif(btrim(category.category_name), ''),
-              nullif(btrim(movement.note), ''),
-              'Kas Keluar'
-            ) as account_name,
-            coalesce(
-              nullif(btrim(account.account_category), ''),
-              case
-                when coalesce(account.account_code, category.account_code, '') like '5-%'
-                  then 'Beban Pokok Pendapatan'
-                else 'Beban Operasional'
-              end
-            ) as account_category,
-            case
-              when coalesce(category.account_code, '') like '5-%'
-                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
-                   like '%beban pokok%'
-                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
-                   like '%hpp%'
-                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
-                   like '%tissu%'
-                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
-                   like '%bumbu%'
-                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
-                   like '%persediaan bahan%'
-                or lower(coalesce(account.account_name, category.category_name, movement.note, ''))
-                   like '%persediaan barang%'
-                then 'cost_of_goods_sold'
-              else 'operating_expense'
-            end as account_type,
-            sum(movement.amount)::numeric as balance
-          from public.cash_movements as movement
-          left join lateral (
-            select
-              nullif(btrim(expense_category.name), '') as category_name,
-              nullif(btrim(expense_category.account_code), '') as account_code
-            from public.expense_categories as expense_category
-            where coalesce(
-                    to_jsonb(expense_category)->>'id',
-                    to_jsonb(expense_category)->>'_id'
-                  ) = to_jsonb(movement)->>'expense_category_id'
-            limit 1
-          ) as category on true
-          left join lateral (
-            select coalesce(
-                     nullif(btrim(to_jsonb(chart_account)->>'account_name'), ''),
-                     nullif(btrim(to_jsonb(chart_account)->>'nama_akun'), '')
-                   ) as account_name,
-                   coalesce(
-                     nullif(btrim(to_jsonb(chart_account)->>'account_code'), ''),
-                     nullif(btrim(to_jsonb(chart_account)->>'kode_akun'), ''),
-                     nullif(btrim(to_jsonb(chart_account)->>'code'), ''),
-                     nullif(btrim(to_jsonb(chart_account)->>'kode'), '')
-                   ) as account_code,
-                   coalesce(
-                     nullif(btrim(to_jsonb(chart_account)->>'account_category'), ''),
-                     nullif(btrim(to_jsonb(chart_account)->>'kategori_akun'), ''),
-                     nullif(btrim(to_jsonb(chart_account)->>'category'), '')
-                   ) as account_category
-            from public.chart_of_accounts as chart_account
-            where coalesce(
-                    nullif(to_jsonb(chart_account)->>'account_code', ''),
-                    nullif(to_jsonb(chart_account)->>'kode_akun', ''),
-                    nullif(to_jsonb(chart_account)->>'code', ''),
-                    nullif(to_jsonb(chart_account)->>'kode', '')
-                  ) = category.account_code
-            limit 1
-          ) as account on true
-          where movement.type = 'out'
-            and movement."timestamp" >= $1::date
-            and movement."timestamp" < $2::date
-            and movement.amount > 0
           group by 1, 2, 3, 4
         )
         select
@@ -1048,7 +1014,7 @@ def transaction_account_codes(
         Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
         for item in items
     )) > 0:
-        account_codes.extend([None, None])
+        account_codes.extend(["5-50000", "1-10003"])
     return account_codes
 
 
@@ -1167,6 +1133,67 @@ def expense_lines(category: str, amount: float) -> list[JournalLine]:
     return [
         (category.strip(), "expense", value, Decimal("0")),
         ("Kas", "asset", Decimal("0"), value),
+    ]
+
+
+ACCOUNT_BEBAN_OPERASIONAL_LAINNYA_ID = "6-9999"
+
+
+async def resolve_expense_account_code(
+    connection: Any,
+    category: str,
+    category_id: Any = None,
+) -> str:
+    """
+    Menentukan kode akun beban untuk sebuah pengeluaran.
+
+    Urutan pencarian: kategori berdasarkan id, kategori berdasarkan nama pada
+    public.expense_categories, lalu peta fallback lokal. Bila semuanya gagal,
+    pengeluaran dibukukan ke akun penampung 6-9999 agar laporan laba rugi tetap
+    memuat bebannya dan kode akun tidak pernah NULL.
+    """
+    if category_id is not None:
+        try:
+            row = await connection.fetchrow(
+                """
+                select nullif(btrim(account_code), '') as account_code
+                from public.expense_categories
+                where id = $1
+                """,
+                category_id,
+            )
+        except (
+            asyncpg.PostgresConnectionError,
+            asyncpg.InterfaceError,
+            ConnectionError,
+            OSError,
+            TimeoutError,
+        ):
+            row = None
+        if row is not None:
+            resolved = str(row["account_code"] or "").strip()
+            if resolved:
+                return resolved
+
+    if isinstance(category, str) and category.strip():
+        try:
+            return await _cash_movement_account_code(connection, category)
+        except ValueError:
+            pass
+
+    return ACCOUNT_BEBAN_OPERASIONAL_LAINNYA_ID
+
+
+def expense_account_codes(
+    amount: float,
+    account_code: Optional[str] = None,
+) -> list[Optional[str]]:
+    """Kode akun pendamping expense_lines() agar baris ledger tidak berkode NULL."""
+    if Decimal(int(round(amount))) <= 0:
+        return []
+    return [
+        account_code or ACCOUNT_BEBAN_OPERASIONAL_LAINNYA_ID,
+        ACCOUNT_KAS_TUNAI_ID,
     ]
 
 
@@ -1302,6 +1329,7 @@ async def post_finance_source(
     created_by: Optional[str],
     lines: Sequence[JournalLine],
     account_codes: Optional[Sequence[Optional[str]]] = None,
+    reference_number: Optional[str] = None,
 ) -> None:
     if not lines:
         return
@@ -1311,10 +1339,41 @@ async def post_finance_source(
         description = f"{description_label} - {source_id}"
     if account_codes is not None and len(account_codes) != len(lines):
         raise ValueError("Kode akun harus sesuai dengan jumlah baris jurnal.")
+    reference_number = (
+        reference_number.strip()
+        if isinstance(reference_number, str) and reference_number.strip()
+        else source_id
+    )
+
+    def _effective_account_code(
+        index: int,
+        account_name: Optional[str],
+        account_type: str,
+        debit: Any,
+        credit: Any,
+    ) -> Optional[str]:
+        code = account_codes[index] if account_codes is not None else None
+        if not code and source_type == "transaction":
+            # Penjualan POS tidak boleh jatuh ke akun penampung 41999.
+            if account_type == "revenue" and credit > 0 and debit == 0:
+                return "4-40000"
+            if (
+                account_type == "expense"
+                and debit > 0
+                and credit == 0
+                and account_name == "Beban HPP"
+            ):
+                return "5-50000"
+        return code
+
+    effective_codes = [
+        _effective_account_code(index, account_name, account_type, debit, credit)
+        for index, (account_name, account_type, debit, credit) in enumerate(lines)
+    ]
 
     account_ids: dict[str, Any] = {}
     master_account_names: dict[str, str] = {}
-    required_codes = sorted({code for code in account_codes or [] if code})
+    required_codes = sorted({code for code in effective_codes if code})
     if required_codes:
         accounts = await connection.fetch(
             """
@@ -1357,7 +1416,7 @@ async def post_finance_source(
     }
     rows = []
     for index, (account_name, account_type, debit, credit) in enumerate(lines):
-        account_code = account_codes[index] if account_codes is not None else None
+        account_code = effective_codes[index]
         account_name = (
             account_names_by_code.get(account_code)
             or master_account_names.get(account_code)
@@ -1384,14 +1443,15 @@ async def post_finance_source(
             created_by,
             source_type,
             source_id,
+            reference_number,
         ))
 
     await connection.executemany(
         """
         insert into public.general_ledger
           (entry_id, transaction_date, entry_date, description, account_name, account_type, account_code, account_id,
-           debit, credit, debit_amount, credit_amount, created_by, source_type, source_id)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $9, $10, $11, $12, $13)
+           debit, credit, debit_amount, credit_amount, created_by, source_type, source_id, reference_number)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $9, $10, $11, $12, $13, $14)
         """,
         rows,
     )

@@ -21,6 +21,7 @@ from finance import (
     ACCOUNT_BEBAN_SELISIH_STOK_ID,
     ACCOUNT_PERSEDIAAN_BAHAN_ID,
     debt_payment_lines,
+    expense_account_codes,
     expense_lines,
     get_account_balances,
     get_cash_bank_accounts,
@@ -38,6 +39,7 @@ from finance import (
     post_finance_source,
     post_purchase_journal,
     purchase_journal_lines,
+    resolve_expense_account_code,
     transaction_account_codes,
     transaction_lines,
 )
@@ -1607,6 +1609,9 @@ async def create_expense(body: ExpenseIn, user: User = Depends(ADMIN)):
     async with db.pool.acquire() as conn:
         async with conn.transaction():
             await db.expenses.insert_one(exp.to_mongo(), connection=conn)
+            expense_account_code = await resolve_expense_account_code(
+                conn, exp.category, exp.category_id
+            )
             await post_finance_source(
                 conn,
                 "expense",
@@ -1615,6 +1620,7 @@ async def create_expense(body: ExpenseIn, user: User = Depends(ADMIN)):
                 exp.description.strip() or f"Pengeluaran {exp.category}",
                 user.id,
                 expense_lines(exp.category, exp.amount),
+                expense_account_codes(exp.amount, expense_account_code),
             )
             expense_description = " - ".join(
                 part for part in (exp.category.strip(), exp.description.strip()) if part
