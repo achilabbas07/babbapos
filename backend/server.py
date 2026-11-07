@@ -1878,6 +1878,7 @@ async def finance_balance_sheet(
                   when '4' then 'revenue'
                   when '5' then 'expense'
                   when '6' then 'expense'
+                                    when '8' then 'expense'
                   else ledger.account_type
                 end
               when lower(coalesce(account.account_category, '')) like 'asset%'
@@ -1908,7 +1909,9 @@ async def finance_balance_sheet(
               when ledger.account_code like '2-%' then 'liability'
               when ledger.account_code like '3-%' then 'equity'
               when ledger.account_code like '4-%' then 'revenue'
-              when ledger.account_code like '5-%' or ledger.account_code like '6-%' then 'expense'
+                            when ledger.account_code like '5-%'
+                                or ledger.account_code like '6-%'
+                                or ledger.account_code like '8-%' then 'expense'
               else ledger.account_type
             end as account_type
           from public.general_ledger as ledger

@@ -16,6 +16,15 @@ export const orderProfitLossRevenueRows = (rows) => [...rows].sort((left, right)
   return priority(left) - priority(right);
 });
 
+// HPP selalu tampil sebagai satu pos induk "Beban Pokok Pendapatan" yang
+// diikuti rincian biaya penunjang (akun seri 8-) tepat di bawahnya.
+export const orderProfitLossHppRows = (rows) => [...rows].sort((left, right) => {
+  const priority = (row) => (row.is_hpp_parent ? 0 : 1);
+  const byPriority = priority(left) - priority(right);
+  if (byPriority !== 0) return byPriority;
+  return String(left.account_code || "").localeCompare(String(right.account_code || ""));
+});
+
 export const normalizeProfitLossData = (data) => {
   if (!Array.isArray(data?.rows)) {
     throw new Error("Format rincian laporan laba-rugi dari server tidak valid.");

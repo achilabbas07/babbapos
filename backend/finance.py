@@ -18,6 +18,18 @@ ACCOUNT_BEBAN_OPERASIONAL_ID = "6-60000"
 ACCOUNT_HPP_ID = "5-50000"
 ACCOUNT_KAS_TUNAI_ID = "1-10001"
 
+# Akun biaya penunjang produksi (air galon, bumbu, es kristal, tissu, cup, dll.)
+# dipindahkan dari seri 5- ke seri 8-. Semua kode berawalan "8-" adalah rincian
+# Harga Pokok Penjualan (HPP) dan ditampilkan sebagai anak dari
+# "Beban Pokok Pendapatan", bukan sebagai beban operasional.
+ACCOUNT_HPP_DETAIL_PREFIX = "8-"
+ACCOUNT_HPP_DETAIL_CATEGORY = "Bahan Penunjang"
+
+
+def is_hpp_detail_account_code(account_code: Optional[str]) -> bool:
+    """True bila kode akun termasuk kelompok biaya penunjang HPP (seri 8-)."""
+    return str(account_code or "").strip().startswith(ACCOUNT_HPP_DETAIL_PREFIX)
+
 KATEGORI_PENGELUARAN_FALLBACK = {
     "pembelian bahan baku": ACCOUNT_PERSEDIAAN_BAHAN_ID,
     "biaya operasional": ACCOUNT_BEBAN_OPERASIONAL_ID,
@@ -25,6 +37,13 @@ KATEGORI_PENGELUARAN_FALLBACK = {
     "uang makan": "6-60153",
     "belanja bahan baku": ACCOUNT_HPP_ID,
     "operasional harian": "6-60203",
+    # Biaya penunjang produksi (HPP) — seri 8-
+    "air galon": "8-51001",
+    "creamer/fullcream": "8-51002",
+    "es kristal": "8-51004",
+    "bumbu/sayur": "8-51005",
+    "tissu": "8-51006",
+    "cup/sealer/pipet/tutup": "8-51007",
 }
 
 
@@ -123,6 +142,7 @@ def account_type_from_category(
         "expenses": "expense",
         "beban": "expense",
         "biaya": "expense",
+        "bahan penunjang": "expense",
     }
     if category in canonical_types:
         return canonical_types[category]
@@ -134,6 +154,7 @@ def account_type_from_category(
             "4": "revenue",
             "5": "expense",
             "6": "expense",
+            "8": "expense",
         }.get((account_code or "").strip()[:1])
 
     category_prefixes = (
@@ -154,6 +175,7 @@ def account_type_from_category(
         "4": "revenue",
         "5": "expense",
         "6": "expense",
+        "8": "expense",
     }.get((account_code or "").strip()[:1])
 
 
@@ -401,6 +423,9 @@ async def get_profit_and_loss_report(
                   or lower(account_category) = 'operating_expense'
                   or lower(account_category) like 'beban operasional%'
                   then 'operating_expense'
+                                when coalesce(account_code, '') like '8-%'
+                                    or lower(account_category) like 'bahan penunjang%'
+                                    then 'cost_of_goods_sold'
                 when lower(account_category) in ('revenue', 'income')
                   or lower(account_category) like 'pendapatan%'
                   then 'revenue'
@@ -447,8 +472,51 @@ async def get_profit_and_loss_report(
             group by account_code, account_name, account_category
           ) as summary_rows
           where account_type not in ('operating_expense', 'balance_sheet')
+                        and coalesce(account_code, '') not like '8-%'
+                        and lower(coalesce(account_category, '')) not like 'bahan penunjang%'
 
           union all
+
+                    select
+                        ledger.account_code,
+                        ledger.account_name,
+                        coalesce(
+                            nullif(btrim(account.account_category), ''),
+                            'Bahan Penunjang'
+                        ) as account_category,
+                        'cost_of_goods_sold' as account_type,
+                        sum(
+                            coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)
+                            - coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)
+                        ) as balance
+                    from public.general_ledger as ledger
+                    left join lateral (
+                        select coalesce(
+                                         nullif(btrim(to_jsonb(account_row)->>'account_category'), ''),
+                                         nullif(btrim(to_jsonb(account_row)->>'kategori_akun'), ''),
+                                         nullif(btrim(to_jsonb(account_row)->>'category'), '')
+                                     ) as account_category
+                        from public.chart_of_accounts as account_row
+                        where coalesce(
+                                        nullif(to_jsonb(account_row)->>'account_code', ''),
+                                        nullif(to_jsonb(account_row)->>'kode_akun', ''),
+                                        nullif(to_jsonb(account_row)->>'code', ''),
+                                        nullif(to_jsonb(account_row)->>'kode', '')
+                                    ) = ledger.account_code
+                        limit 1
+                    ) as account on true
+                    where ledger.entry_date >= $1::date
+                        and ledger.entry_date < $2::date
+                        and coalesce(ledger.account_code, '') like '8-%'
+                        and ledger.source_type is distinct from 'expense'
+                        and not exists (
+                            select 1
+                            from public.expenses as expense_mirror
+                            where coalesce(ledger.reference_number, '') = 'EXP-' || left(expense_mirror.id::text, 8)
+                        )
+                    group by ledger.account_code, ledger.account_name, account.account_category
+
+                    union all
 
           select
                                                 coalesce(
@@ -532,6 +600,7 @@ async def get_profit_and_loss_report(
                             account.account_code,
                             category.account_code,
                             case
+                                when coalesce(category.account_code, '') like '8-%' then category.account_code
                                 when coalesce(category.account_code, '') like '5-%' then '5-51099'
                                 else '6-9999'
                             end
@@ -544,13 +613,18 @@ async def get_profit_and_loss_report(
             coalesce(
               nullif(btrim(account.account_category), ''),
               case
+                                when coalesce(account.account_code, category.account_code, '') like '8-%'
+                                    then 'Bahan Penunjang'
                 when coalesce(account.account_code, category.account_code, '') like '5-%'
                   then 'Beban Pokok Pendapatan'
                 else 'Beban Operasional'
               end
             ) as account_category,
             case
-              when coalesce(category.account_code, '') like '5-%'
+                            when coalesce(category.account_code, '') like '8-%'
+                                or coalesce(account.account_code, '') like '8-%'
+                                then 'cost_of_goods_sold'
+                            when coalesce(category.account_code, '') like '5-%'
                 or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
                    like '%beban pokok%'
                 or lower(coalesce(account.account_name, category.category_name, expense.category, ''))
@@ -699,20 +773,36 @@ async def get_profit_and_loss_report(
         "expense": "expense",
     }
     report_rows = []
+    hpp_detail_rows = []
     totals = {"revenue": Decimal("0"), "cogs": Decimal("0"), "expense": Decimal("0")}
     for row in rows:
         report_row = dict(row)
         account_type = account_type_aliases.get(str(report_row.get("account_type") or "").strip().lower())
         if account_type is None:
             raise ValueError(f"Tipe akun laporan laba-rugi tidak didukung: {report_row.get('account_type')!r}.")
-        if account_type == "cogs":
-            continue
         try:
             balance = Decimal(str(report_row["balance"]))
         except (KeyError, TypeError, ValueError, InvalidOperation) as error:
             raise ValueError("Saldo akun laporan laba-rugi tidak valid.") from error
         if not balance.is_finite() or not isinstance(report_row.get("account_name"), str):
             raise ValueError("Akun atau saldo laporan laba-rugi tidak valid.")
+        if account_type == "cogs":
+            # HPP dihitung ulang dari transaksi penjualan. Hanya akun biaya
+            # penunjang seri 8- yang dipertahankan sebagai rincian HPP di bawah
+            # "Beban Pokok Pendapatan"; sisanya dilewati agar tidak dobel.
+            is_hpp_detail = (
+                is_hpp_detail_account_code(report_row.get("account_code"))
+                or str(report_row.get("account_category") or "").strip().casefold()
+                == ACCOUNT_HPP_DETAIL_CATEGORY.casefold()
+            )
+            if not is_hpp_detail:
+                continue
+            report_row["account_type"] = "cogs"
+            report_row["balance"] = balance
+            report_row["is_hpp_detail"] = True
+            report_row["parent_account_code"] = ACCOUNT_HPP_ID
+            hpp_detail_rows.append(report_row)
+            continue
         report_row["account_type"] = account_type
         report_row["balance"] = balance
         report_rows.append(report_row)
@@ -729,14 +819,36 @@ async def get_profit_and_loss_report(
         )
     if not calculated_hpp.is_finite() or calculated_hpp < 0:
         raise ValueError("Nilai HPP berdasarkan transaksi tidak valid.")
-    totals["cogs"] = calculated_hpp
+    merged_hpp_details = []
+    merged_index = {}
+    for detail_row in hpp_detail_rows:
+        code = str(detail_row.get("account_code") or "").strip()
+        key = code or detail_row.get("account_name")
+        if key in merged_index:
+            existing = merged_hpp_details[merged_index[key]]
+            existing["balance"] += detail_row["balance"]
+            candidate_name = str(detail_row.get("account_name") or "").strip()
+            if candidate_name and len(candidate_name) < len(str(existing.get("account_name") or "")):
+                existing["account_name"] = candidate_name
+            continue
+        merged_index[key] = len(merged_hpp_details)
+        merged_hpp_details.append(detail_row)
+    hpp_detail_rows = sorted(
+        merged_hpp_details,
+        key=lambda detail: str(detail.get("account_code") or ""),
+    )
+    hpp_detail_total = sum((row["balance"] for row in hpp_detail_rows), Decimal("0"))
+    totals["cogs"] = calculated_hpp + hpp_detail_total
     report_rows.append({
         "account_name": "Beban Pokok Pendapatan",
         "account_code": ACCOUNT_HPP_ID,
         "account_category": "Beban Pokok Pendapatan",
         "account_type": "cogs",
         "balance": calculated_hpp,
+        "is_hpp_parent": True,
+        "hpp_detail_total": hpp_detail_total,
     })
+    report_rows.extend(hpp_detail_rows)
 
     try:
         sales_discount = Decimal(str(discount_row["sales_discount"] if discount_row else 0))

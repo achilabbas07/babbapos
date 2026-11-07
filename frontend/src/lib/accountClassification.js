@@ -23,6 +23,7 @@ const CATEGORY_TYPES = new Map([
   ["income", "revenue"],
   ["cost_of_goods_sold", "expense"],
   ["operating_expense", "expense"],
+  ["bahan penunjang", "expense"],
   ["expense", "expense"],
   ["expenses", "expense"],
   ["beban", "expense"],
@@ -36,6 +37,7 @@ const CODE_TYPES = new Map([
   ["4", "revenue"],
   ["5", "expense"],
   ["6", "expense"],
+  ["8", "expense"],
 ]);
 
 const normalize = (value) => String(value || "").trim().toLocaleLowerCase("id-ID");
@@ -94,6 +96,7 @@ export const getAccountCategoryFallback = (account = {}) => {
       : "operating_expense";
   }
   if (prefix === "6") return "operating_expense";
+  if (prefix === "8") return "bahan penunjang";
   return "";
 };
 
@@ -109,5 +112,6 @@ export const getAccountCategoryLabel = (account = {}) => {
     revenue: "Pendapatan",
     cost_of_goods_sold: "Harga Pokok Penjualan",
     operating_expense: "Beban Operasional",
+    "bahan penunjang": "Bahan Penunjang",
   })[getAccountCategoryFallback(account)] || "—";
 };

@@ -36,6 +36,7 @@ LEGACY_CATEGORY_TYPES: dict[str, AccountType] = {
     "operating_expense": "Expense",
     "beban pokok pendapatan": "Expense",
     "beban operasional": "Expense",
+    "bahan penunjang": "Expense",
     "expense": "Expense",
 }
 NORMAL_BALANCES: dict[AccountType, str] = {
@@ -106,6 +107,7 @@ def account_type_from_category(
             "4": "Revenue",
             "5": "Expense",
             "6": "Expense",
+            "8": "Expense",
         }.get(code_prefix)
     if normalized.startswith(("kas", "cash", "bank")):
         return "Asset"
@@ -126,6 +128,7 @@ def account_type_from_category(
         "4": "Revenue",
         "5": "Expense",
         "6": "Expense",
+        "8": "Expense",
     }.get((account_code or "").strip()[:1])
 
 
@@ -268,9 +271,9 @@ async def list_accounts(
                         in ('asset', 'cost_of_goods_sold', 'operating_expense')
                       or (
                         lower(btrim(coalesce(account_master.account_category, ''))) = 'balance_sheet'
-                        and left(account_master.account_code, 1) in ('1', '5', '6')
+                                                and left(account_master.account_code, 1) in ('1', '5', '6', '8')
                       )
-                      or left(account_master.account_code, 1) in ('1', '5', '6')
+                                            or left(account_master.account_code, 1) in ('1', '5', '6', '8')
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'beban%'
                       or lower(btrim(coalesce(account_master.account_category, ''))) like 'biaya%'
                     )
@@ -300,7 +303,7 @@ async def list_accounts(
 
 
 DEBIT_NORMAL_CATEGORY_PREFIXES = (
-    "asset", "aset", "aktiva", "kas", "cash", "expense", "beban", "biaya",
+    "asset", "aset", "aktiva", "kas", "cash", "expense", "beban", "biaya", "bahan penunjang",
 )
 DEBIT_NORMAL_CATEGORIES = ("asset", "cost_of_goods_sold", "operating_expense")
 
@@ -318,7 +321,7 @@ def normal_balance_side(account: dict) -> str:
     if category in DEBIT_NORMAL_CATEGORIES:
         return "debit"
     code_prefix = str(account.get("account_code") or "").strip()[:1]
-    if code_prefix in ("1", "5", "6"):
+    if code_prefix in ("1", "5", "6", "8"):
         return "debit"
     return "credit"
 

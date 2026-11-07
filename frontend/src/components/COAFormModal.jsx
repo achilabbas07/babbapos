@@ -16,6 +16,7 @@ const ACCOUNT_CATEGORIES = [
   { value: "equity", label: "Ekuitas" },
   { value: "revenue", label: "Pendapatan" },
   { value: "cost_of_goods_sold", label: "Harga Pokok Penjualan" },
+  { value: "bahan penunjang", label: "Bahan Penunjang" },
   { value: "operating_expense", label: "Beban Operasional" },
   { value: "balance_sheet", label: "Neraca" },
 ];

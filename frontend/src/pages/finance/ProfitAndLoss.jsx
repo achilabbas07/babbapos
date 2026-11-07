@@ -6,7 +6,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { api, errMsg, rp } from "@/lib/api";
 import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared";
 import FinanceDateFilter from "./FinanceDateFilter";
-import { normalizeProfitLossData, orderProfitLossRevenueRows } from "./profitAndLossData";
+import { normalizeProfitLossData, orderProfitLossHppRows, orderProfitLossRevenueRows } from "./profitAndLossData";
 
 export default function ProfitAndLoss() {
   const { profile, appName } = useProfile();
@@ -37,7 +37,7 @@ export default function ProfitAndLoss() {
   useEffect(() => { load(); }, [load]);
 
   const revenues = orderProfitLossRevenueRows(rows.filter((row) => row.account_type === "revenue"));
-  const hppRows = rows.filter((row) => row.account_type === "cogs");
+  const hppRows = orderProfitLossHppRows(rows.filter((row) => row.account_type === "cogs"));
   const expenses = rows.filter((row) => row.account_type === "expense");
   const exportExcel = () => {
     const sheet = XLSX.utils.aoa_to_sheet([
@@ -47,7 +47,12 @@ export default function ProfitAndLoss() {
       [],
       ["Jenis", "No. akun", "Nama akun", "Jumlah (Rp)"],
       ...revenues.map((row) => ["Pendapatan", row.account_code || "", row.account_name, Number(row.balance) || 0]),
-      ...hppRows.map((row) => ["HPP", row.account_code || "", row.account_name, Number(row.balance) || 0]),
+      ...hppRows.map((row) => [
+        row.is_hpp_parent ? "HPP" : "HPP - Rincian",
+        row.account_code || "",
+        row.is_hpp_parent ? row.account_name : `   ${row.account_name}`,
+        Number(row.balance) || 0,
+      ]),
       ...expenses.map((row) => ["Beban", row.account_code || "", row.account_name, Number(row.balance) || 0]),
       [],
       ["Ringkasan", "Total"],
@@ -115,7 +120,15 @@ export default function ProfitAndLoss() {
               rows={hppRows}
               emptyText="Belum ada HPP tercatat."
               columns={[
-                { key: "account_name", label: "Harga Pokok Penjualan (HPP)" },
+                {
+                  key: "account_name",
+                  label: "Harga Pokok Penjualan (HPP)",
+                  render: (row) => (
+                    <span className={row.is_hpp_detail ? "pl-6 text-muted-foreground" : "font-semibold"}>
+                      {row.account_name}
+                    </span>
+                  ),
+                },
                 { key: "balance", label: "Jumlah", className: "finance-amount text-right", render: (row) => <Money value={row.balance} /> },
               ]}
             />
@@ -131,7 +144,7 @@ export default function ProfitAndLoss() {
             <section className="ml-auto max-w-md space-y-2 border-t-2 border-slate-800 pt-4">
               <div className="flex justify-between gap-4 text-sm"><span>Total pendapatan</span><Money value={summary.revenue} /></div>
               <div className="flex justify-between gap-4 text-sm"><span>Potongan Penjualan</span><Money value={-summary.sales_discount} /></div>
-              <div className="flex justify-between gap-4 text-sm"><span>HPP</span><Money value={summary.hpp} /></div>
+              <div className="flex justify-between gap-4 text-sm"><span>Harga Pokok Penjualan (HPP)</span><Money value={summary.hpp} /></div>
               <div className="flex justify-between gap-4 text-sm"><span>Total beban</span><Money value={summary.expenses} /></div>
               <div className="flex justify-between gap-4 border-t border-slate-400 pt-2 font-bold"><span>Laba / (rugi) bersih</span><Money value={summary.net_profit} /></div>
             </section>
