@@ -20,6 +20,7 @@ from finance import (
     expense_account_codes,
     expense_lines,
     get_chart_of_accounts,
+    get_laporan_arus_kas,
     get_profit_and_loss_report,
     get_recent_finance_transactions,
     post_cash_expense_journal,
@@ -1129,6 +1130,24 @@ async def finance_profit_loss(
     except Exception as error:
         logger.exception("Failed to load profit and loss report")
         raise HTTPException(500, "Gagal memuat laporan laba rugi.") from error
+
+
+@api.get("/finance/cash-flow-statement")
+async def finance_cash_flow_statement(
+    start: date,
+    end: date,
+    _: User = Depends(ADMIN),
+):
+    if end < start:
+        raise HTTPException(422, "Tanggal selesai tidak boleh sebelum tanggal mulai.")
+    try:
+        await db.connect()
+        return await get_laporan_arus_kas(db.pool, start, end)
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Failed to load cash flow statement")
+        raise HTTPException(500, "Gagal memuat laporan arus kas.") from error
 
 
 @api.get("/schema")

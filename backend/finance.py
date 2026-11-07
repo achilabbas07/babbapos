@@ -1647,6 +1647,18 @@ async def get_laporan_arus_kas(
               and lower(ledger.account_name) ~ '(kas|bank|cash|qris|rekening)'
             )
           )
+                    -- Jangan hitung dua kali: kas masuk yang berasal dari transaksi
+                    -- modal/ekuitas ('3-') atau aset investasi ('9-') sudah disajikan
+                    -- pada Aktivitas Pendanaan (CFF) / Aktivitas Investasi (CFI).
+                    and not exists (
+                        select 1
+                        from public.general_ledger as funding
+                        where funding.entry_id is not distinct from ledger.entry_id
+                            and (
+                                funding.account_code like '3-%'
+                                or funding.account_code like '9-%'
+                            )
+                    )
         """,
         start_date,
         end_date,
