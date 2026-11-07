@@ -1625,7 +1625,9 @@ async def create_expense(body: ExpenseIn, user: User = Depends(ADMIN)):
             expense_description = " - ".join(
                 part for part in (exp.category.strip(), exp.description.strip()) if part
             )
-            await post_cash_expense_journal(conn, exp.amount, expense_description)
+            await post_cash_expense_journal(
+                conn, exp.amount, expense_description, expense_account_code
+            )
     return exp
 
 

@@ -16,14 +16,18 @@ export const orderProfitLossRevenueRows = (rows) => [...rows].sort((left, right)
   return priority(left) - priority(right);
 });
 
-// HPP selalu tampil sebagai satu pos induk "Beban Pokok Pendapatan" yang
-// diikuti rincian biaya penunjang (akun seri 8-) tepat di bawahnya.
+// Setiap akun HPP adalah baris yang berdiri sendiri: pos 5-50000 "Beban Pokok
+// Pendapatan" tampil paling atas, lalu seluruh akun biaya penunjang seri 8-
+// diurutkan berdasarkan kode akun. Tidak ada penggabungan nilai antar akun.
 export const orderProfitLossHppRows = (rows) => [...rows].sort((left, right) => {
   const priority = (row) => (row.is_hpp_parent ? 0 : 1);
   const byPriority = priority(left) - priority(right);
   if (byPriority !== 0) return byPriority;
   return String(left.account_code || "").localeCompare(String(right.account_code || ""));
 });
+
+// Total HPP = penjumlahan murni seluruh baris akun HPP independen.
+export const sumProfitLossHppRows = (rows) => rows.reduce((total, row) => total + row.balance, 0);
 
 export const normalizeProfitLossData = (data) => {
   if (!Array.isArray(data?.rows)) {
@@ -56,7 +60,7 @@ export const normalizeProfitLossData = (data) => {
   const revenue = revenues
     .filter((row) => row.account_name !== "Potongan Penjualan")
     .reduce((total, row) => total + row.balance, 0);
-  const hpp = hppRows.reduce((total, row) => total + row.balance, 0);
+  const hpp = sumProfitLossHppRows(hppRows);
   const expense = expenses.reduce((total, row) => total + row.balance, 0);
 
   return {

@@ -22,7 +22,7 @@ def test_bahan_penunjang_accounts_are_classified_as_hpp_details():
     assert account_type_from_category("balance_sheet", "8-51006") == "expense"
 
 
-def test_profit_loss_keeps_seri_8_rows_as_hpp_details_below_beban_pokok_pendapatan():
+def test_profit_loss_keeps_seri_8_rows_as_independent_hpp_rows_below_beban_pokok_pendapatan():
     class FakePool:
         async def fetch(self, query, *args):
             normalized_query = " ".join(query.lower().split())
@@ -96,11 +96,12 @@ def test_profit_loss_keeps_seri_8_rows_as_hpp_details_below_beban_pokok_pendapat
     parent = next(row for row in hpp_rows if row.get("is_hpp_parent"))
     details = [row for row in hpp_rows if row.get("is_hpp_detail")]
 
-    # Pos induk memakai HPP hasil transaksi, rincian 8- menjadi anaknya.
+    # Pos induk memakai HPP hasil transaksi, rincian 8- berdiri sendiri.
     assert parent["account_code"] == "5-50000"
     assert parent["balance"] == Decimal("200.00")
-    assert parent["hpp_detail_total"] == Decimal("80.00")
-    # Rincian dengan kode akun sama digabung menjadi satu baris per akun.
+    assert "hpp_detail_total" not in parent
+    # Rincian dengan kode akun sama digabung menjadi satu baris per akun; akun
+    # berbeda tidak pernah dijumlahkan ke dalam baris akun lain.
     assert [(row["account_code"], row["balance"]) for row in details] == [
         ("8-51001", Decimal("50.00")),
         ("8-51005", Decimal("30.00")),
@@ -108,12 +109,46 @@ def test_profit_loss_keeps_seri_8_rows_as_hpp_details_below_beban_pokok_pendapat
     assert next(row for row in details if row["account_code"] == "8-51001")["account_name"] == "Air Galon"
     assert all(row["parent_account_code"] == "5-50000" for row in details)
 
-    # HPP total = HPP transaksi + rincian bahan penunjang. Akun 5- lain tetap
-    # diabaikan agar tidak dobel dengan hasil perhitungan transaksi.
+    # HPP total = penjumlahan murni seluruh baris akun HPP independen
+    # (5-50000 hasil transaksi + seluruh akun seri 8-). Akun 5- lain selain
+    # 5-50000 tetap diabaikan agar tidak dobel.
     assert report["summary"]["hpp"] == Decimal("280.00")
+    assert report["summary"]["hpp"] == sum(row["balance"] for row in hpp_rows)
     assert report["summary"]["expenses"] == Decimal("50.00")
     assert report["summary"]["net_profit"] == Decimal("1000.00") - Decimal("280.00") - Decimal("50.00")
 
     # Rincian HPP muncul setelah pos induk, bukan sebelum pendapatan.
     names = [row["account_name"] for row in report["rows"]]
     assert names.index("Beban Pokok Pendapatan") < names.index("Air Galon")
+    assert names.index("Air Galon") < names.index("Bumbu/Sayur")
+
+
+def test_profit_loss_does_not_double_add_variant_hpp_on_top_of_product_hpp():
+    """HPP per baris penjualan tidak boleh menjumlahkan HPP produk + HPP varian."""
+
+    class FakePool:
+        async def fetch(self, query, *args):
+            return []
+
+        async def fetchrow(self, query, *args):
+            normalized_query = " ".join(query.lower().split())
+            if "as sales_discount" in normalized_query:
+                return {"sales_discount": Decimal("0")}
+            # Formula baru: snapshot HPP dipakai lebih dulu, lalu varian ATAU
+            # produk — tidak pernah keduanya dijumlahkan.
+            assert "nullif(sold.snapshot_hpp, 0)" in normalized_query
+            assert "coalesce(variant.variant_hpp, product.hpp, 0)" in normalized_query
+            assert "coalesce(product.hpp, 0) + case" not in normalized_query
+            return {"hpp": Decimal("150.00"), "missing_products": 0}
+
+    report = asyncio.run(
+        get_profit_and_loss_report(
+            FakePool(),
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 12, 1),
+        )
+    )
+
+    hpp_rows = [row for row in report["rows"] if row["account_type"] == "cogs"]
+    assert [row["account_code"] for row in hpp_rows] == ["5-50000"]
+    assert report["summary"]["hpp"] == Decimal("150.00")

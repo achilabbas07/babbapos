@@ -108,6 +108,11 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
             assert "join public.products" in normalized_query
             assert "ingredient.qty_needed * inventory.cost_per_unit" in normalized_query
             assert "trx.date >= $1::date and trx.date < $2::date" in normalized_query
+            # Snapshot HPP diprioritaskan; HPP produk dan HPP varian tidak
+            # boleh dijumlahkan bersamaan (dulu menyebabkan HPP membengkak).
+            assert "nullif(sold.snapshot_hpp, 0)" in normalized_query
+            assert "coalesce(variant.variant_hpp, product.hpp, 0)" in normalized_query
+            assert "coalesce(product.hpp, 0) + case" not in normalized_query
             return {"hpp": Decimal("260.00"), "missing_products": 0}
 
     report = asyncio.run(
@@ -150,3 +155,6 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
         "cogs",
     ]
     assert report["rows"][-1]["balance"] == Decimal("260.00")
+    # Hanya akun 5-50000 yang menjadi baris HPP; akun 5- lain (mis. 5-50100
+    # "Beban HPP - Tissu") tidak lagi ditampilkan agar tidak dobel.
+    assert [row["account_code"] for row in report["rows"] if row["account_type"] == "cogs"] == ["5-50000"]

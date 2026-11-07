@@ -725,7 +725,8 @@ async def get_profit_and_loss_report(
           select
             nullif(item.value ->> 'productId', '') as product_id,
             nullif(item.value ->> 'variantId', '')::bigint as variant_id,
-            coalesce(nullif(item.value ->> 'qty', '')::numeric, 0) as qty
+                        coalesce(nullif(item.value ->> 'qty', '')::numeric, 0) as qty,
+                        coalesce(nullif(item.value ->> 'hpp', '')::numeric, 0) as snapshot_hpp
           from public.transactions as trx
           cross join lateral jsonb_array_elements(
             coalesce(trx.items_json, '[]'::jsonb)
@@ -745,13 +746,17 @@ async def get_profit_and_loss_report(
         select
           coalesce(
             sum(
-              (
-                coalesce(product.hpp, 0)
-                + case
-                    when sold.variant_id is null then 0
-                    else coalesce(variant.variant_hpp, 0)
-                  end
-              ) * sold.qty
+                            -- HPP per baris penjualan diambil dari snapshot HPP yang sudah
+                            -- dibekukan saat transaksi terjadi (items_json.hpp). Bila snapshot
+                            -- belum ada, pakai HPP master: varian bila ada, jika tidak HPP
+                            -- produk. Kedua sumber TIDAK dijumlahkan agar tidak dobel.
+                            coalesce(
+                                nullif(sold.snapshot_hpp, 0),
+                                case
+                                    when sold.variant_id is null then coalesce(product.hpp, 0)
+                                    else coalesce(variant.variant_hpp, product.hpp, 0)
+                                end
+                            ) * sold.qty
             ),
             0
           ) as hpp,
@@ -773,7 +778,8 @@ async def get_profit_and_loss_report(
         "expense": "expense",
     }
     report_rows = []
-    hpp_detail_rows = []
+    hpp_detail_index: dict[Any, int] = {}
+    hpp_detail_rows: list[dict[str, Any]] = []
     totals = {"revenue": Decimal("0"), "cogs": Decimal("0"), "expense": Decimal("0")}
     for row in rows:
         report_row = dict(row)
@@ -787,9 +793,10 @@ async def get_profit_and_loss_report(
         if not balance.is_finite() or not isinstance(report_row.get("account_name"), str):
             raise ValueError("Akun atau saldo laporan laba-rugi tidak valid.")
         if account_type == "cogs":
-            # HPP dihitung ulang dari transaksi penjualan. Hanya akun biaya
-            # penunjang seri 8- yang dipertahankan sebagai rincian HPP di bawah
-            # "Beban Pokok Pendapatan"; sisanya dilewati agar tidak dobel.
+            # HPP dihitung ulang dari transaksi penjualan untuk akun induk
+            # 5-50000. Baris jurnal 5-50000 dari buku besar dilewati karena
+            # sebagian transaksi tercatat ganda (nama akun "Beban HPP" dan
+            # "Beban Pokok Pendapatan" untuk transaksi yang sama).
             is_hpp_detail = (
                 is_hpp_detail_account_code(report_row.get("account_code"))
                 or str(report_row.get("account_category") or "").strip().casefold()
@@ -801,6 +808,19 @@ async def get_profit_and_loss_report(
             report_row["balance"] = balance
             report_row["is_hpp_detail"] = True
             report_row["parent_account_code"] = ACCOUNT_HPP_ID
+            # Satu baris per kode akun. Penggabungan HANYA dilakukan untuk kode
+            # akun yang sama (mis. "Air Galon" dan "Beban HPP - Air Galon"),
+            # tidak pernah antar akun berbeda.
+            detail_key = str(report_row.get("account_code") or "").strip() or report_row.get("account_name")
+            if detail_key in hpp_detail_index:
+                existing = hpp_detail_rows[hpp_detail_index[detail_key]]
+                existing["balance"] += balance
+                candidate_name = str(report_row.get("account_name") or "").strip()
+                current_name = str(existing.get("account_name") or "").strip()
+                if candidate_name and len(candidate_name) < len(current_name):
+                    existing["account_name"] = candidate_name
+                continue
+            hpp_detail_index[detail_key] = len(hpp_detail_rows)
             hpp_detail_rows.append(report_row)
             continue
         report_row["account_type"] = account_type
@@ -819,36 +839,26 @@ async def get_profit_and_loss_report(
         )
     if not calculated_hpp.is_finite() or calculated_hpp < 0:
         raise ValueError("Nilai HPP berdasarkan transaksi tidak valid.")
-    merged_hpp_details = []
-    merged_index = {}
-    for detail_row in hpp_detail_rows:
-        code = str(detail_row.get("account_code") or "").strip()
-        key = code or detail_row.get("account_name")
-        if key in merged_index:
-            existing = merged_hpp_details[merged_index[key]]
-            existing["balance"] += detail_row["balance"]
-            candidate_name = str(detail_row.get("account_name") or "").strip()
-            if candidate_name and len(candidate_name) < len(str(existing.get("account_name") or "")):
-                existing["account_name"] = candidate_name
-            continue
-        merged_index[key] = len(merged_hpp_details)
-        merged_hpp_details.append(detail_row)
-    hpp_detail_rows = sorted(
-        merged_hpp_details,
-        key=lambda detail: str(detail.get("account_code") or ""),
+    # Setiap akun HPP tampil sebagai baris independen: satu baris untuk akun
+    # induk 5-50000 (nilai HPP hasil perhitungan transaksi) dan satu baris untuk
+    # setiap akun biaya penunjang seri 8-. Tidak ada akumulasi antar akun di
+    # dalam baris; total HPP murni penjumlahan seluruh baris tersebut.
+    hpp_rows = [
+        {
+            "account_name": "Beban Pokok Pendapatan",
+            "account_code": ACCOUNT_HPP_ID,
+            "account_category": "Beban Pokok Pendapatan",
+            "account_type": "cogs",
+            "balance": calculated_hpp,
+            # Penanda urutan tampil (pos induk selalu di atas rincian).
+            "is_hpp_parent": True,
+        }
+    ]
+    hpp_rows.extend(
+        sorted(hpp_detail_rows, key=lambda detail: str(detail.get("account_code") or "")),
     )
-    hpp_detail_total = sum((row["balance"] for row in hpp_detail_rows), Decimal("0"))
-    totals["cogs"] = calculated_hpp + hpp_detail_total
-    report_rows.append({
-        "account_name": "Beban Pokok Pendapatan",
-        "account_code": ACCOUNT_HPP_ID,
-        "account_category": "Beban Pokok Pendapatan",
-        "account_type": "cogs",
-        "balance": calculated_hpp,
-        "is_hpp_parent": True,
-        "hpp_detail_total": hpp_detail_total,
-    })
-    report_rows.extend(hpp_detail_rows)
+    totals["cogs"] = sum((row["balance"] for row in hpp_rows), Decimal("0"))
+    report_rows.extend(hpp_rows)
 
     try:
         sales_discount = Decimal(str(discount_row["sales_discount"] if discount_row else 0))
@@ -1313,16 +1323,30 @@ async def post_cash_expense_journal(
     connection: Any,
     amount: Any,
     description: str,
+    account_code: Optional[str] = None,
 ) -> None:
-    await connection.execute(
+    """
+    Mencatat pengeluaran tunai pada jurnal kasir (public.jurnal_transaksi).
+
+    Jurnal ditulis BERPASANGAN: debit akun beban + kredit kas. Sebelumnya hanya
+    sisi kredit kas yang ditulis sehingga jurnal tidak seimbang; selisih itulah
+    yang dahulu "ditambal" trigger ke akun penampung 41999.
+    """
+    value = _money(amount)
+    if value <= 0:
+        return
+    expense_code = account_code or ACCOUNT_BEBAN_OPERASIONAL_LAINNYA_ID
+    keterangan = f"Pembayaran Tunai Kasir: {description}"
+    await connection.executemany(
         """
         insert into public.jurnal_transaksi
           (kode_akun, debit, kredit, keterangan)
-        values ($1, 0, $2, $3)
+        values ($1, $2, $3, $4)
         """,
-        "1-10001",
-        _money(amount),
-        f"Pembayaran Tunai Kasir: {description}",
+        [
+            (expense_code, value, Decimal("0"), keterangan),
+            (ACCOUNT_KAS_TUNAI_ID, Decimal("0"), value, keterangan),
+        ],
     )
 
 

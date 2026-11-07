@@ -47,7 +47,7 @@ describe("normalizeProfitLossData", () => {
   });
 
   describe("orderProfitLossHppRows", () => {
-    it("places the Beban Pokok Pendapatan parent before its seri 8- detail rows", () => {
+    it("places 5-50000 first then sorts every independent HPP account by code", () => {
       const rows = [
         { account_code: "8-51005", account_name: "Bumbu/Sayur", is_hpp_detail: true },
         { account_code: "5-50000", account_name: "Beban Pokok Pendapatan", is_hpp_parent: true },
@@ -62,7 +62,7 @@ describe("normalizeProfitLossData", () => {
     });
   });
 
-  it("keeps seri 8- HPP detail rows in the report and counts them in the HPP total", () => {
+  it("keeps seri 8- HPP rows as independent lines and sums them once into the HPP total", () => {
     const report = normalizeProfitLossData({
       rows: [
         { account_name: "Penjualan", account_type: "revenue", balance: 1000000 },
@@ -93,6 +93,9 @@ describe("normalizeProfitLossData", () => {
     ]);
     expect(hppRows[1].is_hpp_detail).toBe(true);
     expect(hppRows[1].parent_account_code).toBe("5-50000");
+    // Total HPP = penjumlahan murni tiap baris HPP independen (200000 + 45000).
+    expect(hppRows).toHaveLength(2);
+    expect(hppRows.reduce((total, row) => total + row.balance, 0)).toBe(245000);
     expect(report.summary).toEqual({
       revenue: 1000000,
       sales_discount: 0,

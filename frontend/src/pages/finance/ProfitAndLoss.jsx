@@ -6,7 +6,12 @@ import { useProfile } from "@/context/ProfileContext";
 import { api, errMsg, rp } from "@/lib/api";
 import { FinanceError, FinanceTable, LoadingPanel, Money } from "./FinanceShared";
 import FinanceDateFilter from "./FinanceDateFilter";
-import { normalizeProfitLossData, orderProfitLossHppRows, orderProfitLossRevenueRows } from "./profitAndLossData";
+import {
+  normalizeProfitLossData,
+  orderProfitLossHppRows,
+  orderProfitLossRevenueRows,
+  sumProfitLossHppRows,
+} from "./profitAndLossData";
 
 export default function ProfitAndLoss() {
   const { profile, appName } = useProfile();
@@ -48,9 +53,9 @@ export default function ProfitAndLoss() {
       ["Jenis", "No. akun", "Nama akun", "Jumlah (Rp)"],
       ...revenues.map((row) => ["Pendapatan", row.account_code || "", row.account_name, Number(row.balance) || 0]),
       ...hppRows.map((row) => [
-        row.is_hpp_parent ? "HPP" : "HPP - Rincian",
+        "HPP",
         row.account_code || "",
-        row.is_hpp_parent ? row.account_name : `   ${row.account_name}`,
+        row.account_name,
         Number(row.balance) || 0,
       ]),
       ...expenses.map((row) => ["Beban", row.account_code || "", row.account_name, Number(row.balance) || 0]),
@@ -120,11 +125,12 @@ export default function ProfitAndLoss() {
               rows={hppRows}
               emptyText="Belum ada HPP tercatat."
               columns={[
+                { key: "account_code", label: "No. akun" },
                 {
                   key: "account_name",
                   label: "Harga Pokok Penjualan (HPP)",
                   render: (row) => (
-                    <span className={row.is_hpp_detail ? "pl-6 text-muted-foreground" : "font-semibold"}>
+                    <span className={row.is_hpp_parent ? "font-semibold" : ""}>
                       {row.account_name}
                     </span>
                   ),
@@ -132,6 +138,10 @@ export default function ProfitAndLoss() {
                 { key: "balance", label: "Jumlah", className: "finance-amount text-right", render: (row) => <Money value={row.balance} /> },
               ]}
             />
+            <div className="flex justify-between gap-4 border-t border-slate-400 pt-2 text-sm font-semibold">
+              <span>Total HPP</span>
+              <Money value={sumProfitLossHppRows(hppRows)} />
+            </div>
             <FinanceTable
               rows={expenses}
               emptyText="Belum ada beban tercatat."

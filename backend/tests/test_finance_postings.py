@@ -616,26 +616,48 @@ def test_purchase_and_debt_payment_code_journals_use_required_account_codes():
     assert [row[0] for row in payment_connection.rows] == ["2-20001", "1-10002"]
 
 
-def test_cash_expense_posts_cash_credit_to_jurnal_transaksi():
+def test_cash_expense_posts_balanced_pair_to_jurnal_transaksi():
     class FakeConnection:
         sql = ""
-        args = ()
+        rows = []
 
-        async def execute(self, sql, *args):
+        async def executemany(self, sql, rows):
             self.sql = sql
-            self.args = args
+            self.rows = list(rows)
 
     connection = FakeConnection()
-    asyncio.run(post_cash_expense_journal(connection, 150000, "Tagihan Listrik & Air"))
+    asyncio.run(
+        post_cash_expense_journal(
+            connection, 150000, "Tagihan Listrik & Air", "6-60102"
+        )
+    )
 
     assert "insert into public.jurnal_transaksi" in connection.sql
     assert "(kode_akun, debit, kredit, keterangan)" in connection.sql
-    assert "values ($1, 0, $2, $3)" in connection.sql
-    assert connection.args == (
-        "1-10001",
-        Decimal("150000.00"),
-        "Pembayaran Tunai Kasir: Tagihan Listrik & Air",
-    )
+    assert "values ($1, $2, $3, $4)" in connection.sql
+    keterangan = "Pembayaran Tunai Kasir: Tagihan Listrik & Air"
+    assert connection.rows == [
+        ("6-60102", Decimal("150000.00"), Decimal("0.00"), keterangan),
+        ("1-10001", Decimal("0.00"), Decimal("150000.00"), keterangan),
+    ]
+    # Jurnal wajib seimbang: total debit == total kredit.
+    assert sum(row[1] for row in connection.rows) == sum(row[2] for row in connection.rows)
+
+
+def test_cash_expense_falls_back_to_container_account_and_skips_zero():
+    class FakeConnection:
+        rows = []
+
+        async def executemany(self, sql, rows):
+            self.rows = list(rows)
+
+    connection = FakeConnection()
+    asyncio.run(post_cash_expense_journal(connection, 25000, "Gas"))
+    assert connection.rows[0][0] == "6-9999"
+
+    empty = FakeConnection()
+    asyncio.run(post_cash_expense_journal(empty, 0, "Gas"))
+    assert empty.rows == []
 
 
 def test_cash_movement_posts_category_mapped_balanced_pair_with_group_id():
