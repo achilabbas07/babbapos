@@ -13,6 +13,20 @@ export const roundRupiah = (value) => Math.round(Number(value) || 0);
 export const sumLegs = (legs = []) => legs.reduce((sum, leg) => sum + amountOf(leg), 0);
 
 /**
+ * Total uang yang dibayarkan pada sebuah transaksi.
+ *
+ * Untuk split payment, jumlahkan seluruh kaki `payments[].amount` (mis.
+ * Cash Rp10.000 + QRIS Rp10.000 = Rp20.000) supaya baris "Bayar"/"Total Bayar"
+ * dan kembalian tidak pernah memakai nominal satu kaki saja. Bila tidak ada
+ * rincian `payments`, pakai nominal tunggal `fallback` (legacy: totalPaid →
+ * cashGiven → total).
+ */
+export const resolvePaidTotal = (payments = [], fallback = 0) => {
+  const legs = payments.filter((leg) => amountOf(leg) > 0);
+  return legs.length ? roundRupiah(sumLegs(legs)) : roundRupiah(fallback);
+};
+
+/**
  * Sisa tagihan yang belum dialokasikan ke salah satu metode.
  */
 export const remainingAmount = (total, legs = []) => roundRupiah(total) - roundRupiah(sumLegs(legs));

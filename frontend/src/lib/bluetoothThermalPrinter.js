@@ -1,4 +1,5 @@
 import { groupOrderItemsForDisplay } from "./openBillDisplay";
+import { resolvePaidTotal } from "./splitPayment";
 import { buildWaiterShiftReportBytes } from "./waiterShiftReport";
 
 export const RPP02_SERVICE_UUID = "000018f0-0000-1000-8000-00805f9b34fb";
@@ -153,20 +154,27 @@ function paymentLines(data) {
   const subtotal = data.subtotal ?? items.reduce((sum, item) => sum + itemTotal(item), 0);
   const total = data.total ?? subtotal;
   const cash = data.cashGiven ?? data.cash ?? 0;
-  const paid = data.totalPaid ?? data.amountPaid ?? cash;
+  const paid = resolvePaidTotal(payments, data.totalPaid ?? data.amountPaid ?? cash);
+  const cashLeg = payments.find((leg) => leg.method === "Cash" || leg.method === "Tunai");
+  const changeValue = Number(data.change);
+  const changeDue = Number.isFinite(changeValue)
+    ? changeValue
+    : cashLeg
+      ? Math.max(0, (Number(data.cashGiven) || 0) - (Number(cashLeg.amount) || 0))
+      : 0;
 
   lines.push(
     { type: "text", text: "--------------------------------" },
     { type: "text", text: formatLine(`Subtotal ${itemCount} Produk`, formatCurrency(subtotal)) },
     { type: "text", text: formatLine("Total", formatCurrency(total)), bold: true },
     { type: "text", text: "--------------------------------" },
-    { type: "text", text: formatLine(`Bayar ${isSplit ? "Split" : paymentMethod}`, formatCurrency(cash)) },
+    { type: "text", text: formatLine(`Bayar ${isSplit ? "Split" : paymentMethod}`, formatCurrency(isSplit ? paid : cash)) },
     { type: "text", text: formatLine("Total Bayar", formatCurrency(paid)) },
     ...(isSplit
       ? payments.map((leg) => ({ type: "text", text: formatLine(`  ${leg.method}`, formatCurrency(leg.amount)) }))
       : []),
     ...(isCash
-      ? [{ type: "text", text: formatLine("Kembalian", formatCurrency(data.change ?? 0)) }]
+      ? [{ type: "text", text: formatLine("Kembalian", formatCurrency(changeDue)) }]
       : []),
     { type: "text", text: "================================" },    
     { type: "center", text: RECEIPT_FOOTER },    

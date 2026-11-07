@@ -1,3 +1,5 @@
+import { resolvePaidTotal } from "./splitPayment";
+
 export const PRINT_LINE_WIDTH = 32;
 
 export function wrapPrintText(value, width = PRINT_LINE_WIDTH) {
@@ -83,13 +85,23 @@ export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, c
   const payments = Array.isArray(trx.payments) ? trx.payments.filter((leg) => Number(leg?.amount) > 0) : [];
   const isSplit = payments.length > 1;
   const cashTender = payments.find((leg) => leg.method === "Cash" || leg.method === "Tunai");
+  // Total dibayar = penjumlahan seluruh kaki `payments` (split), bukan salah satu leg.
+  const paidTotal = resolvePaidTotal(payments, trx.totalPaid ?? trx.cashGiven ?? trx.total ?? 0);
+  // Kembalian = uang tunai diterima dikurangi porsi tunai; fallback bila backend belum mengirim `change`.
+  const cashApplied = cashTender ? Number(cashTender.amount) || 0 : 0;
+  const changeValue = Number(trx.change);
+  const changeDue = Number.isFinite(changeValue)
+    ? changeValue
+    : cashTender
+      ? Math.max(0, (Number(trx.cashGiven) || 0) - cashApplied)
+      : 0;
   append(lines, `Bayar ${isSplit ? "Split" : trx.method || "-"}`);
-  append(lines, `Bayar: ${currency(trx.cashGiven)}`);
+  append(lines, `Bayar: ${currency(paidTotal)}`);
   if (isSplit) {
     for (const leg of payments) append(lines, `• ${leg.method}: ${currency(leg.amount)}`);
   }
   if (cashTender || trx.method === "Cash" || trx.method === "Tunai") {
-    append(lines, `Kembalian: ${currency(trx.change)}`);
+    append(lines, `Kembalian: ${currency(changeDue)}`);
   }
   append(lines, "Status: LUNAS");
   if (trx.tableName) append(lines, "Status Meja: LUNAS");

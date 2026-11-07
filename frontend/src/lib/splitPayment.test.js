@@ -5,6 +5,7 @@ import {
   nextLegMethod,
   primaryMethod,
   remainingAmount,
+  resolvePaidTotal,
   splitPayArgs,
   sumLegs,
 } from "./splitPayment";
@@ -65,6 +66,18 @@ describe("split payment helpers", () => {
       { method: "Cash", amount: 30000 },
       { method: "Debit", amount: 70000 },
     ]);
+  });
+
+  it("resolves the paid total from every leg and falls back to a single value", () => {
+    expect(resolvePaidTotal([
+      { method: "Cash", amount: "10000" },
+      { method: "QRIS", amount: "10000" },
+    ], 0)).toBe(20000);
+    expect(resolvePaidTotal([], 25000)).toBe(25000);
+    expect(resolvePaidTotal([
+      { method: "Cash", amount: 0 },
+      { method: "QRIS", amount: "0" },
+    ], 40000)).toBe(40000);
   });
 
   it("returns onPay arguments carrying the payments array and only the cash tender", () => {

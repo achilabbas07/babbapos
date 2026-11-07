@@ -65,6 +65,35 @@ describe("thermal print templates", () => {
     expect(lines[lines.length - 1]).toBe("Terima Kasih Atas Kunjungan Anda");
   });
 
+  it("prints the combined split total with each leg and derives change from the cash leg", () => {
+    const lines = buildPaidReceiptLines({
+      trx: {
+        ...bill,
+        method: "QRIS",
+        total: 20000,
+        payments: [
+          { method: "Cash", amount: 10000 },
+          { method: "QRIS", amount: 10000 },
+        ],
+        cashGiven: 10000,
+      },
+      printCount: 0,
+      dateText: "29/10/2026 10:00",
+      paidAtText: "29/10/2026 10:03",
+      currency,
+      itemName,
+    });
+
+    // Bayar = jumlah seluruh kaki (10.000 + 10.000 = 20.000), bukan porsi tunai saja.
+    expect(lines).toContain("Bayar: Rp20000");
+    expect(lines).toContain("Bayar Split");
+    expect(lines).toContain("• Cash: Rp10000");
+    expect(lines).toContain("• QRIS: Rp10000");
+    // Kembalian dihitung dari total bayar gabungan (tanpa `change` dari backend → 0).
+    expect(lines).toContain("Kembalian: Rp0");
+    expect(lines.every((line) => line.length <= PRINT_LINE_WIDTH)).toBe(true);
+  });
+
   it("includes open-bill details and duplicate marking", () => {
     const lines = buildOpenBillLines({
       bill,
