@@ -169,6 +169,7 @@ class Transaction(BaseDocument):
     pointsRedeemed: int = 0
     pointsDiscount: float = 0
     queueNumber: Optional[str] = None
+    payments: List[dict] = Field(default_factory=list)
 
     def to_mongo(self) -> dict:
         data = super().to_mongo()

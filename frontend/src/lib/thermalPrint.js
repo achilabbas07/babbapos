@@ -80,9 +80,15 @@ export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, c
   if (trx.promoDiscount > 0) append(lines, `Promo: -${currency(trx.promoDiscount)}`);
   if (trx.pointsDiscount > 0) append(lines, `Poin: -${currency(trx.pointsDiscount)}`);
   append(lines, `Total: ${currency(trx.total)}`);
-  append(lines, `Bayar ${trx.method || "-"}`);
+  const payments = Array.isArray(trx.payments) ? trx.payments.filter((leg) => Number(leg?.amount) > 0) : [];
+  const isSplit = payments.length > 1;
+  const cashTender = payments.find((leg) => leg.method === "Cash" || leg.method === "Tunai");
+  append(lines, `Bayar ${isSplit ? "Split" : trx.method || "-"}`);
   append(lines, `Bayar: ${currency(trx.cashGiven)}`);
-  if (trx.method === "Cash" || trx.method === "Tunai") {
+  if (isSplit) {
+    for (const leg of payments) append(lines, `• ${leg.method}: ${currency(leg.amount)}`);
+  }
+  if (cashTender || trx.method === "Cash" || trx.method === "Tunai") {
     append(lines, `Kembalian: ${currency(trx.change)}`);
   }
   append(lines, "Status: LUNAS");

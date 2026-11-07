@@ -20,6 +20,9 @@ from finance import (
     account_type_from_category,
     ACCOUNT_BEBAN_SELISIH_STOK_ID,
     ACCOUNT_PERSEDIAAN_BAHAN_ID,
+    checkout_cash_amounts,
+    checkout_journal_account_codes,
+    checkout_journal_lines,
     debt_payment_lines,
     expense_account_codes,
     expense_lines,
@@ -31,7 +34,10 @@ from finance import (
     get_laporan_arus_kas,
     get_profit_and_loss_report,
     get_recent_finance_transactions,
+    legacy_checkout_journal_entries,
     normalize_payment_method,
+    normalize_checkout_payments,
+    primary_checkout_method,
     post_cash_expense_journal,
     post_checkout_journal_entries,
     post_debt_payment_journal,
@@ -56,7 +62,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.middleware.cors import CORSMiddleware
 import os
 
@@ -227,9 +233,21 @@ class OpenBillIn(BaseModel):
     waiterId: Optional[str] = None
 
 
+class PaymentIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    method: Literal["Cash", "QRIS", "Card", "Debit"]
+    amount: float = Field(gt=0)
+
+    @field_validator("method", mode="before")
+    @classmethod
+    def normalize_payment(cls, value):
+        return normalize_payment_method(value)
+
+
 class TransactionIn(OpenBillIn):
     method: Literal["Cash", "QRIS", "Card", "Debit"]
     cashGiven: float = Field(0, ge=0)
+    payments: List[PaymentIn] = Field(default_factory=list)
     openBillId: Optional[str] = None
     partial: bool = False
     promoCode: Optional[str] = None
@@ -1191,9 +1209,18 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
     promo_amount = amounts["promoDiscount"]
     points_amount = amounts["pointsDiscount"]
     total = amounts["total"]
-    if body.method == "Cash" and body.cashGiven < total:
+    try:
+        checkout_payments = normalize_checkout_payments(
+            total,
+            [payment.model_dump() for payment in body.payments] if body.payments else None,
+            body.method,
+        )
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    method = primary_checkout_method(checkout_payments, body.method)
+    cash, change = checkout_cash_amounts(checkout_payments, total, body.cashGiven)
+    if method == "Cash" and cash < total:
         raise HTTPException(400, "Uang tunai kurang dari total")
-    cash = body.cashGiven if body.method == "Cash" else total
 
     if body.waiterId:
         wid, wname = await resolve_waiter(body.waiterId, "", user)
@@ -1209,14 +1236,17 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
     trx = Transaction(
         id=await next_id(f"TRX-{datetime.now(timezone.utc):%Y%m%d}", 4), date=transaction_time,
         orderTime=bill.timestamp if bill else transaction_time, type=body.type,
-        method=body.method, tableId=table_id, customerId=customer_id, total=total, items_json=items,
-        userId=user.id, userName=user.name, cashGiven=cash, change=cash - total, shiftId=shift["_id"] if shift else None,
+        method=method, tableId=table_id, customerId=customer_id, total=total, items_json=items,
+        userId=user.id, userName=user.name, cashGiven=cash, change=change, shiftId=shift["_id"] if shift else None,
         waiterName=wname, waiterId=wid, subtotal=subtotal, discount=subtotal - total, promoCode=promo["code"],
         promoDiscount=promo_amount, pointsRedeemed=pts["pointsRequired"], pointsDiscount=points_amount,
         tableName=table["name"] if table else "",
         customerName=customer["name"] if customer else (body.customerName or (bill.customerName if bill else "")),
         queueNumber=str(queue_number) if queue_number is not None else None,
+        payments=checkout_payments,
     )
+    checkout_lines = checkout_journal_lines(total, method, items, checkout_payments)
+    checkout_codes = checkout_journal_account_codes(total, method, items, checkout_payments)
     try:
         await db.connect()
         async with db.pool.acquire() as conn:
@@ -1229,6 +1259,7 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
                             "transaction_id": trx.id,
                             "payment_method": trx.method,
                             "total": trx.total,
+                            "journal_entries": legacy_checkout_journal_entries(checkout_lines, checkout_codes),
                         },
                     )
                 await post_finance_source(
@@ -1238,8 +1269,8 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
                     date.fromisoformat(trx.date[:10]),
                     f"Penjualan {trx.id}",
                     user.id,
-                    transaction_lines(trx.total, trx.method, items),
-                    transaction_account_codes(trx.total, trx.method, items),
+                    checkout_lines,
+                    checkout_codes,
                 )
                 await consume_checkout_stock(conn, items)
                 total_hpp = sum(
@@ -1999,7 +2030,9 @@ async def report_summary(start: str, end: str, tz_offset: int = 0, _: User = Dep
         t_cogs = sum(i["hpp"] * i["qty"] for i in t["items_json"])
         revenue += t["total"]
         cogs += t_cogs
-        by_method[t["method"]] += t["total"]
+        legs = t.get("payments") or [{"method": t["method"], "amount": t["total"]}]
+        for leg in legs:
+            by_method[leg["method"]] += leg["amount"]
         by_type[t["type"]] += t["total"]
         day = (datetime.fromisoformat(t["date"]) - timedelta(minutes=tz_offset)).strftime("%Y-%m-%d")
         daily[day]["revenue"] += t["total"]

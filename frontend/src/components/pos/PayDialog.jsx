@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Banknote, QrCode, CreditCard, Landmark, TicketPercent, Gift, X, Delete } from "lucide-react";
+import { Banknote, QrCode, CreditCard, Landmark, TicketPercent, Gift, Plus, X, Delete } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
 import { api, rp } from "@/lib/api";
+import { appendLeg as appendSplitLeg, isSplitSettled, splitPayArgs } from "@/lib/splitPayment";
 
 const METHODS = [
   { id: "Cash", icon: Banknote },
@@ -49,6 +50,8 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
   const [points, setPoints] = useState(null);
   const [pinFor, setPinFor] = useState(null);
   const [pin, setPin] = useState(null);
+  const [legs, setLegs] = useState([]);
+  const [activeLeg, setActiveLeg] = useState(0);
 
   useEffect(() => {
     if (open) {
@@ -58,21 +61,92 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
       setPromo(null);
       setPoints(null);
       setPin(null);
+      setLegs([]);
+      setActiveLeg(0);
     }
   }, [open]);
 
   const total = Math.max(0, subtotal - (promo?.discount || 0) - (points?.discount || 0));
   const cashNum = Number(cash) || 0;
-  const valid = method !== "Cash" || cashNum >= total;
-  const quick = [...new Set([total, Math.ceil(total / 10000) * 10000, Math.ceil(total / 50000) * 50000, Math.ceil(total / 100000) * 100000])].filter((v) => v > 0);
-  const activeMethod = METHODS.find(({ id }) => id === method) || METHODS[0];
+
+  // Split payment (opsional). `legs` kosong = pembayaran tunggal -> perilaku lama.
+  const split = legs.length > 0;
+  const legAmount = (leg) => Number(leg?.amount) || 0;
+  const legIndex = split ? Math.min(activeLeg, legs.length - 1) : 0;
+  const currentLeg = split ? legs[legIndex] : null;
+  const splitSum = legs.reduce((sum, leg) => sum + legAmount(leg), 0);
+  const splitRemaining = total - splitSum;
+  const splitSettled = isSplitSettled(total, legs);
+  const allocated = splitSettled;
+
+  const valid = split ? allocated : method !== "Cash" || cashNum >= total;
+  const quickBase = split ? splitRemaining : total;
+  const quick = [...new Set([quickBase, Math.ceil(quickBase / 10000) * 10000, Math.ceil(quickBase / 50000) * 50000, Math.ceil(quickBase / 100000) * 100000])].filter((v) => v > 0);
+  const selectedMethod = split ? currentLeg?.method || method : method;
+  const activeMethod = METHODS.find(({ id }) => id === selectedMethod) || METHODS[0];
   const ActiveMethodIcon = activeMethod.icon;
 
   const appendDigits = (digits) => {
-    setCash((prev) => `${prev}${digits}`.replace(/^0+(?=\d)/, "").slice(0, 12));
+    const next = (prev) => `${prev}${digits}`.replace(/^0+(?=\d)/, "").slice(0, 12);
+    if (split) {
+      if (!currentLeg) return;
+      setLegs(legs.map((leg, i) => (i === legIndex ? { ...leg, amount: next(leg.amount || "") } : leg)));
+      return;
+    }
+    setCash((prev) => next(prev));
   };
 
-  const backspace = () => setCash((prev) => prev.slice(0, -1));
+  const backspace = () => {
+    if (split) {
+      if (!currentLeg) return;
+      setLegs(legs.map((leg, i) => (i === legIndex ? { ...leg, amount: (leg.amount || "").slice(0, -1) } : leg)));
+      return;
+    }
+    setCash((prev) => prev.slice(0, -1));
+  };
+
+  const addLeg = () => {
+    const next = appendSplitLeg(legs, method, cash);
+    if (next === legs || next.length === legs.length) return;
+    setLegs(next);
+    setActiveLeg(next.length - 1);
+  };
+
+  const setLegMethod = (index, nextMethod) => {
+    setLegs(legs.map((leg, i) => (i === index ? { ...leg, method: nextMethod } : leg)));
+  };
+
+  const removeLeg = (index) => {
+    const next = legs.filter((_, i) => i !== index);
+    if (next.length <= 1) {
+      if (next[0]) {
+        setMethod(next[0].method);
+        setCash(next[0].amount || "");
+      }
+      setLegs([]);
+      setActiveLeg(0);
+      return;
+    }
+    setLegs(next);
+    setActiveLeg(Math.min(activeLeg, next.length - 1));
+  };
+
+  const applyQuick = (value) => {
+    if (split) {
+      if (!currentLeg) return;
+      setLegs(legs.map((leg, i) => (i === legIndex ? { ...leg, amount: String(value) } : leg)));
+      return;
+    }
+    setCash(String(value));
+  };
+
+  const pickMethod = (id) => {
+    if (split) {
+      setLegMethod(legIndex, id);
+      return;
+    }
+    setMethod(id);
+  };
 
   const handleCashKeyDown = (e) => {
     if (/^\d$/.test(e.key)) {
@@ -99,9 +173,14 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
     setPinFor(null);
   };
 
-  const pay = () => onPay(method, method === "Cash" ? cashNum : total, {
-    promoCode: promo?.code || null, redeemPoints: !!points, discountPin: promo || points ? pin : null,
-  });
+  const pay = () => {
+    const extra = { promoCode: promo?.code || null, redeemPoints: !!points, discountPin: promo || points ? pin : null };
+    if (!split) return onPay(method, method === "Cash" ? cashNum : total, extra);
+
+    // Metode dominan dipakai untuk kolom `method` (CHECK constraint hanya menerima 4 metode).
+    const args = splitPayArgs(total, legs, extra);
+    return onPay(args.method, args.cashGiven, args.extra);
+  };
 
   return (
     <>
@@ -124,15 +203,65 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
               </div>
 
               <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Metode pembayaran</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {METHODS.map(({ id, icon: Icon }) => (
-                    <button type="button" key={id} data-testid={`pay-method-${id.toLowerCase()}`} onClick={() => setMethod(id)}
-                      className={`flex min-h-[4.5rem] touch-manipulation flex-col items-center justify-center gap-1.5 rounded-xl border py-3 text-xs font-medium transition-colors ${method === id ? "border-primary bg-primary/15 text-primary" : "border-border text-muted-foreground"}`}>
-                      <Icon className="h-5 w-5" />{id}
-                    </button>
-                  ))}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {split ? "Rincian metode bayar" : "Metode pembayaran"}
+                  </p>
+                  <button type="button" data-testid="pay-split-add" onClick={addLeg} disabled={legs.length >= METHODS.length}
+                    className="flex h-8 touch-manipulation items-center gap-1 rounded-lg border border-dashed border-primary/60 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 disabled:opacity-40">
+                    <Plus className="h-3.5 w-3.5" />Tambah Metode Bayar
+                  </button>
                 </div>
+                {!split && (
+                  <div className="grid grid-cols-4 gap-2">
+                    {METHODS.map(({ id, icon: Icon }) => (
+                      <button type="button" key={id} data-testid={`pay-method-${id.toLowerCase()}`} onClick={() => pickMethod(id)}
+                        className={`flex min-h-[4.5rem] touch-manipulation flex-col items-center justify-center gap-1.5 rounded-xl border py-3 text-xs font-medium transition-colors ${method === id ? "border-primary bg-primary/15 text-primary" : "border-border text-muted-foreground"}`}>
+                        <Icon className="h-5 w-5" />{id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {split && (
+                  <div data-testid="pay-split-legs" className="space-y-2">
+                    {legs.map((leg, index) => {
+                      const LegIcon = (METHODS.find(({ id }) => id === leg.method) || METHODS[0]).icon;
+                      const isActive = index === legIndex;
+                      return (
+                        <div key={index} data-testid={`pay-split-leg-${index}`} onClick={() => setActiveLeg(index)}
+                          className={`space-y-2 rounded-xl border p-2.5 transition-colors ${isActive ? "border-primary bg-primary/5" : "border-border"}`}>
+                          <div className="flex items-center gap-2">
+                            <LegIcon className="h-4 w-4 shrink-0 text-primary" />
+                            <div className="grid min-w-0 flex-1 grid-cols-4 gap-1">
+                              {METHODS.map(({ id }) => (
+                                <button type="button" key={id} data-testid={`pay-split-leg-${index}-method-${id.toLowerCase()}`} onClick={() => setLegMethod(index, id)}
+                                  className={`h-9 touch-manipulation rounded-lg border text-xs font-semibold transition-colors ${leg.method === id ? "border-primary bg-primary/15 text-primary" : "border-border text-muted-foreground"}`}>
+                                  {id}
+                                </button>
+                              ))}
+                            </div>
+                            <button type="button" data-testid={`pay-split-leg-${index}-remove`} onClick={() => removeLeg(index)} aria-label="Hapus metode"
+                              className="flex h-9 w-9 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border text-muted-foreground hover:border-destructive hover:text-destructive">
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-muted-foreground">Nominal</span>
+                            <span data-testid={`pay-split-leg-${index}-amount`} className={`font-mono text-lg font-semibold ${isActive ? "text-primary" : ""}`}>
+                              {legAmount(leg) > 0 ? rp(legAmount(leg)) : "—"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="flex items-center justify-between rounded-xl bg-secondary/60 px-3 py-2 text-sm">
+                      <span className="text-muted-foreground">Sisa belum dialokasikan</span>
+                      <span data-testid="pay-split-remaining" className={`font-mono font-semibold ${splitSettled ? "text-emerald-600" : "text-destructive"}`}>
+                        {rp(Math.max(0, splitRemaining))}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <DiscountArea promoCode={promoCode} setPromoCode={setPromoCode} customerId={customerId} hasPromo={!!promo} hasPoints={!!points}
@@ -141,18 +270,20 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
 
             {/* Kolom kanan: area input/keypad angka */}
             <div className="space-y-3 md:border-l md:border-border md:pl-6">
-              {method === "Cash" ? (
+              {split || method === "Cash" ? (
                 <>
-                  <label htmlFor="pay-cash-input" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uang diterima</label>
+                  <label htmlFor="pay-cash-input" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {split ? `Nominal ${selectedMethod}` : "Uang diterima"}
+                  </label>
                   <div tabIndex={0} onKeyDown={handleCashKeyDown} className="rounded-xl outline-none focus-within:border-primary">
-                    <input id="pay-cash-input" data-testid="pay-cash-input" type="text" inputMode="none" readOnly value={cash}
+                    <input id="pay-cash-input" data-testid="pay-cash-input" type="text" inputMode="none" readOnly value={split ? currentLeg?.amount || "" : cash}
                       placeholder="Uang diterima"
                       className="h-14 w-full cursor-pointer rounded-xl border border-border bg-transparent px-4 text-right font-mono text-2xl font-semibold outline-none" />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {quick.map((v, i) => (
-                      <button type="button" key={v} data-testid={`pay-quick-${i}`} onClick={() => setCash(String(v))} className="touch-manipulation rounded-lg border border-border px-3 py-2 font-mono text-xs hover:border-primary">
-                        {i === 0 ? "Uang pas" : rp(v)}
+                      <button type="button" key={v} data-testid={`pay-quick-${i}`} onClick={() => applyQuick(v)} className="touch-manipulation rounded-lg border border-border px-3 py-2 font-mono text-xs hover:border-primary">
+                        {i === 0 ? (split ? "Sisa penuh" : "Uang pas") : rp(v)}
                       </button>
                     ))}
                   </div>
@@ -173,10 +304,16 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
                     ))}
                   </div>
                   <div className="flex items-center justify-between rounded-xl bg-secondary/60 px-4 py-3 text-sm">
-                    <span className="text-muted-foreground">Kembalian</span>
-                    <span data-testid="pay-change" className={`font-mono text-lg font-semibold ${cashNum >= total ? "text-emerald-600" : "text-destructive"}`}>
-                      {cashNum >= total ? rp(cashNum - total) : "Uang kurang"}
-                    </span>
+                    <span className="text-muted-foreground">{split ? "Sisa belum dialokasikan" : "Kembalian"}</span>
+                    {split ? (
+                      <span data-testid="pay-change" className={`font-mono text-lg font-semibold ${splitSettled ? "text-emerald-600" : "text-destructive"}`}>
+                        {splitSettled ? "Pas" : rp(Math.max(0, splitRemaining))}
+                      </span>
+                    ) : (
+                      <span data-testid="pay-change" className={`font-mono text-lg font-semibold ${cashNum >= total ? "text-emerald-600" : "text-destructive"}`}>
+                        {cashNum >= total ? rp(cashNum - total) : "Uang kurang"}
+                      </span>
+                    )}
                   </div>
                 </>
               ) : (

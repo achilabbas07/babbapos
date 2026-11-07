@@ -110,7 +110,13 @@ function paymentLines(data) {
   const items = groupOrderItemsForDisplay(data.items || data.items_json || []);
   const profile = data.profile || {};
   const paymentMethod = data.paymentMethod || data.method || "-";
-  const isCash = paymentMethod === "Cash" || paymentMethod === "Tunai";
+  const payments = Array.isArray(data.payments)
+    ? data.payments.filter((leg) => Number(leg?.amount) > 0)
+    : [];
+  const isSplit = payments.length > 1;
+  const isCash = isSplit
+    ? payments.some((leg) => leg.method === "Cash" || leg.method === "Tunai")
+    : paymentMethod === "Cash" || paymentMethod === "Tunai";
   const orderTime = data.orderTime || data.createdAt || data.time || data.date;
   const waiterName = data.waiter || data.waiterName || "-";
   const cashierName = data.cashier || data.cashierName || data.userName || "-";
@@ -154,8 +160,11 @@ function paymentLines(data) {
     { type: "text", text: formatLine(`Subtotal ${itemCount} Produk`, formatCurrency(subtotal)) },
     { type: "text", text: formatLine("Total", formatCurrency(total)), bold: true },
     { type: "text", text: "--------------------------------" },
-    { type: "text", text: formatLine(`Bayar ${paymentMethod}`, formatCurrency(cash)) },
+    { type: "text", text: formatLine(`Bayar ${isSplit ? "Split" : paymentMethod}`, formatCurrency(cash)) },
     { type: "text", text: formatLine("Total Bayar", formatCurrency(paid)) },
+    ...(isSplit
+      ? payments.map((leg) => ({ type: "text", text: formatLine(`  ${leg.method}`, formatCurrency(leg.amount)) }))
+      : []),
     ...(isCash
       ? [{ type: "text", text: formatLine("Kembalian", formatCurrency(data.change ?? 0)) }]
       : []),

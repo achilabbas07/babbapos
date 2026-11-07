@@ -8,6 +8,18 @@ from pydantic import BaseModel, Field
 from core import BaseDocument, User, db, next_id, now_iso, require_roles
 from finance import post_cash_movement_journal
 
+
+def transaction_cash_portion(trx: dict) -> float:
+    """Porsi tunai sebuah transaksi (mendukung split payment)."""
+    payments = trx.get("payments") or []
+    if payments:
+        return sum(
+            float(leg.get("amount") or 0)
+            for leg in payments
+            if (leg.get("method") or "") == "Cash"
+        )
+    return float(trx.get("total") or 0) if trx.get("method") == "Cash" else 0.0
+
 router = APIRouter(prefix="/api")
 STAFF = require_roles("admin", "kasir")
 ADMIN = require_roles("admin")
@@ -73,9 +85,11 @@ async def require_open_shift(user: User) -> dict:
 async def summarize(shift_id: str) -> dict:
     txs = await db.transactions.find({"shiftId": shift_id}).to_list(None)
     movs = await db.cash_movements.find({"shiftId": shift_id}).to_list(None)
+    cash_sales = sum(transaction_cash_portion(t) for t in txs)
+    total_sales = sum(float(t["total"]) for t in txs)
     return {
-        "cashSales": sum(t["total"] for t in txs if t["method"] == "Cash"),
-        "nonCashSales": sum(t["total"] for t in txs if t["method"] != "Cash"),
+        "cashSales": cash_sales,
+        "nonCashSales": total_sales - cash_sales,
         "cashIn": sum(m["amount"] for m in movs if m["type"] == "in"),
         "cashOut": sum(m["amount"] for m in movs if m["type"] == "out"),
         "trxCount": len(txs),

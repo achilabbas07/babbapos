@@ -192,6 +192,38 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(lines.some((line) => line.includes("Kembalian"))).toBe(false);
   });
 
+  it("prints every split payment leg and keeps the change row for mixed cash", () => {
+    const lines = buildBluetoothReceiptLines("payment", {
+      paymentMethod: "QRIS",
+      payments: [
+        { method: "Cash", amount: 30000 },
+        { method: "QRIS", amount: 70000 },
+      ],
+      cashGiven: 50000,
+      total: 100000,
+      change: 20000,
+      items: [],
+    }).map(({ text }) => text);
+
+    expect(lines.some((line) => line.includes("Bayar Split"))).toBe(true);
+    expect(lines.some((line) => line.trimEnd().endsWith("Cash") === false && line.includes("Cash") && line.includes("Rp 30.000"))).toBe(true);
+    expect(lines.some((line) => line.includes("QRIS") && line.includes("Rp 70.000"))).toBe(true);
+    expect(lines.some((line) => line.startsWith("Kembalian") && line.includes("Rp 20.000"))).toBe(true);
+  });
+
+  it("does not print a split breakdown for a single payment leg", () => {
+    const lines = buildBluetoothReceiptLines("payment", {
+      paymentMethod: "Cash",
+      payments: [{ method: "Cash", amount: 25000 }],
+      cashGiven: 25000,
+      change: 0,
+      items: [],
+    }).map(({ text }) => text);
+
+    expect(lines.some((line) => line.includes("Bayar Split"))).toBe(false);
+    expect(lines.some((line) => line.includes("Bayar Cash"))).toBe(true);
+  });
+
   it("wraps centered text and formats left-right rows to 32 characters", () => {
     expect(wordWrapCenter("Alamat usaha dengan teks yang cukup panjang")).toEqual([
       "Alamat usaha dengan teks yang",

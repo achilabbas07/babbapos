@@ -119,7 +119,8 @@ create table if not exists transactions (
   "waiterName"  text not null default '',
   "waiterId"    text references users(id) on delete set null,
   "shiftId"     text,
-  "queueNumber" text
+  "queueNumber" text,
+  payments      jsonb not null default '[]'::jsonb  -- rincian multi-pembayaran (split payment)
 );
 create index if not exists transactions_date_idx on transactions(date);
 create index if not exists transactions_customer_idx on transactions("customerId");

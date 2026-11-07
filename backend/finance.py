@@ -1013,6 +1013,27 @@ async def post_checkout_journal_entries(
     if transaction_id is None or not str(transaction_id).strip():
         raise ValueError("ID transaksi wajib diisi untuk membuat jurnal checkout.")
 
+    provided_entries = payload.get("journal_entries")
+    if provided_entries is not None:
+        try:
+            journal_entries = [
+                (str(transaction_id), str(code), str(position).upper(), float(amount))
+                for code, position, amount in provided_entries
+            ]
+        except (TypeError, ValueError) as error:
+            raise ValueError("Baris jurnal checkout tidak valid.") from error
+        if not journal_entries:
+            raise ValueError("Baris jurnal checkout tidak boleh kosong.")
+        await connection.executemany(
+            """
+            insert into public.jurnal_entries
+              (transaction_id, account_code, position, amount)
+            values ($1, $2, $3, $4)
+            """,
+            journal_entries,
+        )
+        return
+
     payment_method = (
         payload.get("payment_method")
         or payload.get("method")
@@ -1138,6 +1159,215 @@ def transaction_account_codes(
     )) > 0:
         account_codes.extend(["5-50000", "1-10003"])
     return account_codes
+
+
+def normalize_checkout_payments(
+    total: Any,
+    payments: Any,
+    method: str,
+) -> list[dict]:
+    """Normalisasi pembayaran kasir menjadi daftar kaki pembayaran yang valid.
+
+    Mendukung pembayaran tunggal (kompatibilitas mundur: hanya ``method``) maupun
+    pembayaran terbagi (``payments`` = daftar metode + nominal). Semua kaki
+    pembayaran wajib berjumlah ``total`` agar jurnal tidak selisih.
+    """
+    try:
+        total_amount = _money(total)
+    except (InvalidOperation, TypeError, ValueError) as error:
+        raise ValueError("Total transaksi tidak valid.") from error
+    if not total_amount.is_finite() or total_amount < 0:
+        raise ValueError("Total transaksi tidak valid.")
+    total_integer = int(total_amount.to_integral_value(rounding=ROUND_HALF_UP))
+
+    legs: list[dict] = []
+    if payments:
+        if not isinstance(payments, (list, tuple)):
+            raise ValueError("Data pembayaran tidak valid.")
+        for payment in payments:
+            if not isinstance(payment, dict):
+                raise ValueError("Data pembayaran tidak valid.")
+            raw_method = payment.get("method") or payment.get("payment_method") or payment.get("metode")
+            try:
+                payment_method = normalize_payment_method(raw_method or "")
+            except ValueError as error:
+                raise ValueError(str(error)) from error
+            try:
+                amount = _money(payment.get("amount", payment.get("nominal")))
+            except (InvalidOperation, TypeError, ValueError) as error:
+                raise ValueError("Nominal pembayaran tidak valid.") from error
+            if not amount.is_finite() or amount <= 0:
+                raise ValueError("Nominal tiap metode pembayaran harus lebih besar dari 0.")
+            legs.append({
+                "method": payment_method,
+                "amount": int(amount.to_integral_value(rounding=ROUND_HALF_UP)),
+            })
+    elif total_amount > 0:
+        try:
+            legs.append({
+                "method": normalize_payment_method(method),
+                "amount": total_integer,
+            })
+        except ValueError as error:
+            raise ValueError(str(error)) from error
+
+    leg_total = sum(leg["amount"] for leg in legs)
+    if total_amount > 0 and leg_total != total_integer:
+        raise ValueError("Total pembayaran harus pas dengan total tagihan.")
+
+    legs.sort(key=lambda leg: (leg["method"] != "Cash", -leg["amount"]))
+    return legs
+
+
+def checkout_cash_amounts(
+    payments: Sequence[dict],
+    total: Any,
+    cash_given: Any = None,
+) -> tuple[int, int]:
+    """Hitung ``cashGiven`` (uang diserahkan) dan ``change`` (kembalian).
+
+    Menjaga kompatibilitas mundur: pembayaran non-tunai tunggal menyimpan
+    ``cashGiven = total`` dan ``change = 0`` seperti perilaku lama.
+    """
+    try:
+        total_integer = int(_money(total).to_integral_value(rounding=ROUND_HALF_UP))
+    except (InvalidOperation, TypeError, ValueError) as error:
+        raise ValueError("Total transaksi tidak valid.") from error
+    try:
+        requested = int(_money(cash_given)) if cash_given not in (None, "") else 0
+    except (InvalidOperation, TypeError, ValueError):
+        requested = 0
+    cash_portion = sum(leg.get("amount", 0) for leg in payments if leg.get("method") == "Cash")
+    if cash_portion <= 0:
+        return total_integer, 0
+    tendered = max(requested, cash_portion)
+    return tendered, tendered - cash_portion
+
+
+def _payment_leg_lines(payments: Sequence[dict]) -> list[tuple[str, Decimal]]:
+    aggregated: dict[str, Decimal] = {}
+    for leg in payments:
+        amount = _money(leg.get("amount", 0))
+        if amount <= 0:
+            continue
+        account_code = get_account_by_payment_method(leg.get("method", ""))
+        aggregated[account_code] = aggregated.get(account_code, Decimal("0")) + amount
+    return [
+        (account_code, amount)
+        for account_code, amount in aggregated.items()
+        if amount > 0
+    ]
+
+
+def payment_journal_lines(payments: Sequence[dict]) -> list[JournalLine]:
+    """Baris jurnal pendapatan dari multi-pembayaran (satu debit per akun kas/bank)."""
+    lines: list[JournalLine] = []
+    for account_code, amount in _payment_leg_lines(payments):
+        account_name = "Kas Tunai" if account_code == "1-10001" else "Bank"
+        lines.append((account_name, "asset", amount, Decimal("0")))
+    return lines
+
+
+def payment_account_codes(payments: Sequence[dict]) -> list[Optional[str]]:
+    return [account_code for account_code, _amount in _payment_leg_lines(payments)]
+
+
+def checkout_journal_lines(
+    total: float,
+    method: str,
+    items: list[dict],
+    payments: Optional[Sequence[dict]] = None,
+) -> list[JournalLine]:
+    """Baris jurnal checkout lengkap (pendapatan multi-metode + HPP).
+
+    Dipakai oleh ``general_ledger`` (via ``post_finance_source``) sekaligus
+    ``jurnal_entries`` agar kedua catatan selalu identik.
+    """
+    payment_lines = payment_journal_lines(payments or [])
+    if not payment_lines:
+        payment_lines = [
+            line
+            for line in transaction_lines(total, method, [])
+            if line[1] == "asset" and line[2] > 0 and line[3] == 0
+        ]
+    amount, _fee = _transaction_amounts(total, 0)
+    lines: list[JournalLine] = []
+    if amount > 0:
+        lines.extend(payment_lines)
+        lines.append(("Pendapatan", "revenue", Decimal("0"), amount))
+    cost_of_goods = _money(sum(
+        Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
+        for item in items
+    ))
+    if cost_of_goods > 0:
+        lines.append(("Beban HPP", "expense", cost_of_goods, Decimal("0")))
+        lines.append(("Persediaan bahan baku", "asset", Decimal("0"), cost_of_goods))
+    return lines
+
+
+def checkout_journal_account_codes(
+    total: float,
+    method: str,
+    items: list[dict],
+    payments: Optional[Sequence[dict]] = None,
+) -> list[Optional[str]]:
+    payment_codes = payment_account_codes(payments or [])
+    if not payment_codes:
+        fallback_codes = transaction_account_codes(total, method, [])
+        payment_codes = [fallback_codes[0]] if fallback_codes[:1] in (["1-10001"], ["1-10002"]) else []
+    amount, _fee = _transaction_amounts(total, 0)
+    codes: list[Optional[str]] = []
+    if amount > 0:
+        codes.extend(payment_codes)
+        codes.append("4-40000")
+    if _money(sum(
+        Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
+        for item in items
+    )) > 0:
+        codes.extend(["5-50000", "1-10003"])
+    return codes
+
+
+def primary_checkout_method(payments: Sequence[dict], fallback: str) -> str:
+    """Metode dominan untuk kolom ``transactions.method`` (legacy/laporan)."""
+    if not payments:
+        return fallback
+    cash_only = all(leg.get("method") == "Cash" for leg in payments)
+    if cash_only:
+        return "Cash"
+    non_cash = [leg for leg in payments if leg.get("method") != "Cash"]
+    dominant = max(non_cash or payments, key=lambda leg: leg.get("amount", 0))
+    return dominant.get("method") or fallback
+
+
+_CHECKOUT_FALLBACK_CODES = {
+    "Kas Tunai": "1-10001",
+    "Bank": "1-10002",
+    "Pendapatan": "4-40000",
+    "Beban HPP": "5-50000",
+    "Persediaan bahan baku": "1-10003",
+}
+
+
+def legacy_checkout_journal_entries(
+    lines: Sequence[JournalLine],
+    account_codes: Optional[Sequence[Optional[str]]] = None,
+) -> list[tuple[str, str, float]]:
+    """Konversi baris jurnal checkout menjadi pasangan debit/kredit ``jurnal_entries``."""
+    entries: list[tuple[str, str, float]] = []
+    for index, (account_name, _account_type, debit, credit) in enumerate(lines):
+        code = None
+        if account_codes is not None and index < len(account_codes):
+            code = account_codes[index]
+        code = code or _CHECKOUT_FALLBACK_CODES.get(account_name)
+        if not code or debit == credit:
+            continue
+        entries.append((
+            code,
+            "DEBIT" if debit > credit else "KREDIT",
+            float(debit if debit > credit else credit),
+        ))
+    return entries
 
 
 def purchase_lines(total_cost: float) -> list[JournalLine]:
