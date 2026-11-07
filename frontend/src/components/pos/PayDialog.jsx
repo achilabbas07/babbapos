@@ -65,6 +65,8 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
   const cashNum = Number(cash) || 0;
   const valid = method !== "Cash" || cashNum >= total;
   const quick = [...new Set([total, Math.ceil(total / 10000) * 10000, Math.ceil(total / 50000) * 50000, Math.ceil(total / 100000) * 100000])].filter((v) => v > 0);
+  const activeMethod = METHODS.find(({ id }) => id === method) || METHODS[0];
+  const ActiveMethodIcon = activeMethod.icon;
 
   const appendDigits = (digits) => {
     setCash((prev) => `${prev}${digits}`.replace(/^0+(?=\d)/, "").slice(0, 12));
@@ -104,68 +106,93 @@ export const PayDialog = ({ open, onOpenChange, total: subtotal, onPay, busy, cu
   return (
     <>
       <Dialog open={open && !pinFor} onOpenChange={onOpenChange}>
-        <DialogContent data-testid="pay-dialog" className="max-h-[94vh] overflow-y-auto sm:max-w-md">
+        <DialogContent
+          data-testid="pay-dialog"
+          className="max-h-[92dvh] w-[calc(100vw-1.25rem)] max-w-[calc(100vw-1.25rem)] overflow-y-auto p-4 sm:p-5 md:max-w-3xl lg:max-w-5xl lg:p-6">
           <DialogHeader><DialogTitle>Pembayaran</DialogTitle></DialogHeader>
-          <div data-testid="pay-summary" className="space-y-1.5 rounded-xl bg-secondary p-4">
-            <Line label="Subtotal" value={rp(subtotal)} testid="pay-subtotal" />
-            {promo && <Line label={`Promo ${promo.code}`} value={`− ${rp(promo.discount)}`} tone="text-emerald-600" testid="pay-promo-discount" onRemove={() => setPromo(null)} />}
-            {points && <Line label={`Tukar ${points.pointsRequired} poin`} value={`− ${rp(points.discount)}`} tone="text-emerald-600" testid="pay-points-discount" onRemove={() => setPoints(null)} />}
-            <div className="flex items-baseline justify-between border-t border-border pt-2">
-              <span className="text-xs uppercase tracking-widest text-muted-foreground">Total bayar</span>
-              <span data-testid="pay-total" className="font-mono text-3xl font-bold text-primary">{rp(total)}</span>
+          <div className="grid gap-5 md:grid-cols-2 md:items-start md:gap-6">
+            {/* Kolom kiri: ringkasan tagihan, metode pembayaran, diskon */}
+            <div className="space-y-4">
+              <div data-testid="pay-summary" className="space-y-1.5 rounded-xl bg-secondary p-4">
+                <Line label="Subtotal" value={rp(subtotal)} testid="pay-subtotal" />
+                {promo && <Line label={`Promo ${promo.code}`} value={`− ${rp(promo.discount)}`} tone="text-emerald-600" testid="pay-promo-discount" onRemove={() => setPromo(null)} />}
+                {points && <Line label={`Tukar ${points.pointsRequired} poin`} value={`− ${rp(points.discount)}`} tone="text-emerald-600" testid="pay-points-discount" onRemove={() => setPoints(null)} />}
+                <div className="flex items-baseline justify-between border-t border-border pt-2">
+                  <span className="text-xs uppercase tracking-widest text-muted-foreground">Total bayar</span>
+                  <span data-testid="pay-total" className="font-mono text-3xl font-bold text-primary">{rp(total)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Metode pembayaran</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {METHODS.map(({ id, icon: Icon }) => (
+                    <button type="button" key={id} data-testid={`pay-method-${id.toLowerCase()}`} onClick={() => setMethod(id)}
+                      className={`flex min-h-[4.5rem] touch-manipulation flex-col items-center justify-center gap-1.5 rounded-xl border py-3 text-xs font-medium transition-colors ${method === id ? "border-primary bg-primary/15 text-primary" : "border-border text-muted-foreground"}`}>
+                      <Icon className="h-5 w-5" />{id}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <DiscountArea promoCode={promoCode} setPromoCode={setPromoCode} customerId={customerId} hasPromo={!!promo} hasPoints={!!points}
+                onPromo={() => setPinFor("promo")} onPoints={() => setPinFor("points")} />
+            </div>
+
+            {/* Kolom kanan: area input/keypad angka */}
+            <div className="space-y-3 md:border-l md:border-border md:pl-6">
+              {method === "Cash" ? (
+                <>
+                  <label htmlFor="pay-cash-input" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uang diterima</label>
+                  <div tabIndex={0} onKeyDown={handleCashKeyDown} className="rounded-xl outline-none focus-within:border-primary">
+                    <input id="pay-cash-input" data-testid="pay-cash-input" type="text" inputMode="none" readOnly value={cash}
+                      placeholder="Uang diterima"
+                      className="h-14 w-full cursor-pointer rounded-xl border border-border bg-transparent px-4 text-right font-mono text-2xl font-semibold outline-none" />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {quick.map((v, i) => (
+                      <button type="button" key={v} data-testid={`pay-quick-${i}`} onClick={() => setCash(String(v))} className="touch-manipulation rounded-lg border border-border px-3 py-2 font-mono text-xs hover:border-primary">
+                        {i === 0 ? "Uang pas" : rp(v)}
+                      </button>
+                    ))}
+                  </div>
+                  <div data-testid="pay-numpad" className="grid grid-cols-3 gap-2">
+                    {NUMPAD_KEYS.map((key) => (
+                      key === "back" ? (
+                        <button type="button" key={key} data-testid="pay-numpad-backspace" onClick={backspace}
+                          aria-label="Hapus"
+                          className="flex h-14 touch-manipulation items-center justify-center rounded-xl border border-border bg-white text-muted-foreground transition-colors active:bg-primary/10">
+                          <Delete className="h-5 w-5" />
+                        </button>
+                      ) : (
+                        <button type="button" key={key} data-testid={`pay-numpad-${key}`} onClick={() => appendDigits(key)}
+                          className="h-14 touch-manipulation rounded-xl border border-border bg-white font-mono text-xl font-semibold transition-colors active:bg-primary/10">
+                          {key}
+                        </button>
+                      )
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl bg-secondary/60 px-4 py-3 text-sm">
+                    <span className="text-muted-foreground">Kembalian</span>
+                    <span data-testid="pay-change" className={`font-mono text-lg font-semibold ${cashNum >= total ? "text-emerald-600" : "text-destructive"}`}>
+                      {cashNum >= total ? rp(cashNum - total) : "Uang kurang"}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex h-full min-h-[16rem] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-secondary/40 p-6 text-center">
+                  <ActiveMethodIcon className="h-10 w-10 text-primary" />
+                  <p className="text-sm text-muted-foreground">
+                    Bayar penuh dengan <span className="font-semibold text-foreground">{method}</span>
+                  </p>
+                  <p className="font-mono text-3xl font-bold text-primary">{rp(total)}</p>
+                </div>
+              )}
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-2">
-            {METHODS.map(({ id, icon: Icon }) => (
-              <button type="button" key={id} data-testid={`pay-method-${id.toLowerCase()}`} onClick={() => setMethod(id)}
-                className={`flex flex-col items-center gap-1.5 rounded-xl border py-3 text-xs font-medium transition-colors ${method === id ? "border-primary bg-primary/15 text-primary" : "border-border text-muted-foreground"}`}>
-                <Icon className="h-5 w-5" />{id}
-              </button>
-            ))}
-          </div>
-          {method === "Cash" && (
-            <div className="space-y-3">
-              <label htmlFor="pay-cash-input" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uang diterima</label>
-              <div tabIndex={0} onKeyDown={handleCashKeyDown} className="rounded-xl outline-none focus-within:border-primary">
-                <input id="pay-cash-input" data-testid="pay-cash-input" type="text" inputMode="none" readOnly value={cash}
-                  placeholder="Uang diterima"
-                  className="h-14 w-full cursor-pointer rounded-xl border border-border bg-transparent px-4 font-mono text-2xl font-semibold outline-none" />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {quick.map((v, i) => (
-                  <button type="button" key={v} data-testid={`pay-quick-${i}`} onClick={() => setCash(String(v))} className="touch-manipulation rounded-lg border border-border px-3 py-1.5 font-mono text-xs hover:border-primary">
-                    {i === 0 ? "Uang pas" : rp(v)}
-                  </button>
-                ))}
-              </div>
-              <div data-testid="pay-numpad" className="grid grid-cols-3 gap-2">
-                {NUMPAD_KEYS.map((key) => (
-                  key === "back" ? (
-                    <button type="button" key={key} data-testid="pay-numpad-backspace" onClick={backspace}
-                      aria-label="Hapus"
-                      className="flex h-14 touch-manipulation items-center justify-center rounded-xl border border-border bg-white text-muted-foreground transition-colors active:bg-primary/10">
-                      <Delete className="h-5 w-5" />
-                    </button>
-                  ) : (
-                    <button type="button" key={key} data-testid={`pay-numpad-${key}`} onClick={() => appendDigits(key)}
-                      className="h-14 touch-manipulation rounded-xl border border-border bg-white font-mono text-xl font-semibold transition-colors active:bg-primary/10">
-                      {key}
-                    </button>
-                  )
-                ))}
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Kembalian</span>
-                <span data-testid="pay-change" className={`font-mono font-semibold ${cashNum >= total ? "text-emerald-600" : "text-destructive"}`}>
-                  {cashNum >= total ? rp(cashNum - total) : "Uang kurang"}
-                </span>
-              </div>
-            </div>
-          )}
-          <DiscountArea promoCode={promoCode} setPromoCode={setPromoCode} customerId={customerId} hasPromo={!!promo} hasPoints={!!points}
-            onPromo={() => setPinFor("promo")} onPoints={() => setPinFor("points")} />
+
           <button type="button" data-testid="pay-confirm-button" disabled={!valid || busy} onClick={pay}
-            className="h-12 w-full touch-manipulation rounded-xl bg-primary font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40">
+            className="h-14 w-full touch-manipulation rounded-xl bg-primary text-base font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40">
             {busy ? "Memproses..." : "Selesaikan Pembayaran"}
           </button>
         </DialogContent>
