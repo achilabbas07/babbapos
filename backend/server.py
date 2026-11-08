@@ -691,11 +691,13 @@ async def create_inventory_opname(
                     system_qty = Decimal(str(item["stock"]))
                     difference = line.physical_qty - system_qty
                     cost_per_unit = Decimal(str(item["cost_per_unit"]))
-                    loss_value = (
+                    difference_value = (
                         abs(difference * cost_per_unit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        if difference < 0
+                        if difference != 0
                         else Decimal("0.00")
                     )
+                    loss_value = difference_value if difference < 0 else Decimal("0.00")
+                    gain_value = difference_value if difference > 0 else Decimal("0.00")
                     opname_rows.append({
                         "item_id": line.item_id,
                         "item_name": item["name"],
@@ -705,6 +707,7 @@ async def create_inventory_opname(
                         "difference": difference,
                         "cost_per_unit": cost_per_unit,
                         "loss_value": loss_value,
+                        "gain_value": gain_value,
                         "notes": line.notes,
                     })
 
@@ -722,8 +725,8 @@ async def create_inventory_opname(
                     """
                     insert into public.stock_adjustments
                       (session_id, item_id, item_name, item_unit, system_qty, physical_qty,
-                       difference, cost_per_unit, loss_value, notes, created_by, created_at)
-                    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                       difference, cost_per_unit, loss_value, gain_value, notes, created_by, created_at)
+                    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                     """,
                     [
                         (
@@ -736,6 +739,7 @@ async def create_inventory_opname(
                             row["difference"],
                             row["cost_per_unit"],
                             row["loss_value"],
+                            row["gain_value"],
                             row["notes"],
                             user.id,
                             created_at,
@@ -746,12 +750,30 @@ async def create_inventory_opname(
 
                 loss_rows = [row for row in opname_rows if row["loss_value"] > 0]
                 total_loss = sum((row["loss_value"] for row in loss_rows), Decimal("0.00"))
-                if total_loss > 0:
-                    stage = "membuat jurnal kerugian stok"
+                gain_rows = [row for row in opname_rows if row["gain_value"] > 0]
+                total_gain = sum((row["gain_value"] for row in gain_rows), Decimal("0.00"))
+                net_variance = total_loss - total_gain
+                if net_variance != 0:
+                    stage = "membuat jurnal selisih stok"
                     description = "; ".join(
                         f"{row['item_name']}: {row['notes'] or 'Selisih stok opname'}"
-                        for row in loss_rows
+                        for row in loss_rows + gain_rows
                     )
+                    if net_variance > 0:
+                        # Kerugian bersih: beban selisih stok bertambah, persediaan berkurang.
+                        lines = [
+                            (expense_account["account_name"], "expense", net_variance, Decimal("0.00")),
+                            (inventory_account["account_name"], "asset", Decimal("0.00"), net_variance),
+                        ]
+                        codes = [ACCOUNT_BEBAN_SELISIH_STOK_ID, ACCOUNT_PERSEDIAAN_BAHAN_ID]
+                    else:
+                        # Surplus bersih: persediaan bertambah, beban selisih stok berkurang.
+                        surplus = -net_variance
+                        lines = [
+                            (inventory_account["account_name"], "asset", surplus, Decimal("0.00")),
+                            (expense_account["account_name"], "expense", Decimal("0.00"), surplus),
+                        ]
+                        codes = [ACCOUNT_PERSEDIAAN_BAHAN_ID, ACCOUNT_BEBAN_SELISIH_STOK_ID]
                     await post_finance_source(
                         connection,
                         "stock_opname",
@@ -759,11 +781,8 @@ async def create_inventory_opname(
                         to_local_date(created_at),
                         description,
                         user.id,
-                        [
-                            (expense_account["account_name"], "expense", total_loss, Decimal("0.00")),
-                            (inventory_account["account_name"], "asset", Decimal("0.00"), total_loss),
-                        ],
-                        account_codes=[ACCOUNT_BEBAN_SELISIH_STOK_ID, ACCOUNT_PERSEDIAAN_BAHAN_ID],
+                        lines,
+                        account_codes=codes,
                     )
     except HTTPException:
         raise
@@ -786,6 +805,7 @@ async def create_inventory_opname(
         "created_by": user.id,
         "item_count": len(opname_rows),
         "loss_total": sum((row["loss_value"] for row in opname_rows), Decimal("0.00")),
+        "gain_total": sum((row["gain_value"] for row in opname_rows), Decimal("0.00")),
         "items": opname_rows,
     }
 
@@ -801,6 +821,7 @@ async def list_inventory_opname(_: User = Depends(ADMIN)):
           (array_agg(created_by order by created_at desc))[1] as created_by,
           count(*) as item_count,
           coalesce(sum(loss_value), 0) as loss_total,
+                    coalesce(sum(gain_value), 0) as gain_total,
           jsonb_agg(
             jsonb_build_object(
               'item_id', item_id,
@@ -811,6 +832,7 @@ async def list_inventory_opname(_: User = Depends(ADMIN)):
               'difference', difference,
               'cost_per_unit', cost_per_unit,
               'loss_value', loss_value,
+                            'gain_value', gain_value,
               'notes', notes
             ) order by item_name
           ) as items
@@ -827,6 +849,7 @@ async def list_inventory_opname(_: User = Depends(ADMIN)):
             "created_by": row["created_by"],
             "item_count": row["item_count"],
             "loss_total": row["loss_total"],
+            "gain_total": row["gain_total"],
             "items": row["items"],
         }
         for row in rows

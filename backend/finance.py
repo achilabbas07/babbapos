@@ -17,6 +17,22 @@ ACCOUNT_BEBAN_SELISIH_STOK_ID = "5-51099"
 ACCOUNT_BEBAN_OPERASIONAL_ID = "6-60000"
 ACCOUNT_HPP_ID = "5-50000"
 ACCOUNT_KAS_TUNAI_ID = "1-10001"
+ACCOUNT_KAS_BANK_ID = "1-10002"
+
+# Nama akun kas/bank wajib sama dengan nama di Chart of Accounts. Sebelumnya
+# beberapa pembentuk baris jurnal memakai nama literal "Bank"/"Kas" sehingga
+# general_ledger menyimpan nama akun yang tidak ada di COA.
+CASH_ACCOUNT_NAMES = {
+    ACCOUNT_KAS_TUNAI_ID: "Kas Tunai",
+    ACCOUNT_KAS_BANK_ID: "Kas Bank / QRIS",
+}
+
+
+def cash_account_name(account_code: Optional[str]) -> str:
+    """Nama akun kas/bank sesuai Chart of Accounts untuk sebuah kode akun."""
+    if account_code in CASH_ACCOUNT_NAMES:
+        return CASH_ACCOUNT_NAMES[account_code]
+    return account_code or "Kas Tunai"
 
 # Akun biaya penunjang produksi (air galon, bumbu, es kristal, tissu, cup, dll.)
 # dipindahkan dari seri 5- ke seri 8-. Semua kode berawalan "8-" adalah rincian
@@ -1150,7 +1166,7 @@ def transaction_lines(
     if amount > 0:
         settlement_amount = amount - fee
         if settlement_amount > 0:
-            payment_account_name = "Kas Tunai" if payment_account_code == "1-10001" else "Bank"
+            payment_account_name = cash_account_name(payment_account_code)
             lines.append((payment_account_name, "asset", settlement_amount, Decimal("0")))
         if fee > 0:
             lines.append(("Beban MDR", "expense", fee, Decimal("0")))
@@ -1293,7 +1309,7 @@ def payment_journal_lines(payments: Sequence[dict]) -> list[JournalLine]:
     """Baris jurnal pendapatan dari multi-pembayaran (satu debit per akun kas/bank)."""
     lines: list[JournalLine] = []
     for account_code, amount in _payment_leg_lines(payments):
-        account_name = "Kas Tunai" if account_code == "1-10001" else "Bank"
+        account_name = cash_account_name(account_code)
         lines.append((account_name, "asset", amount, Decimal("0")))
     return lines
 
@@ -1372,6 +1388,7 @@ def primary_checkout_method(payments: Sequence[dict], fallback: str) -> str:
 
 _CHECKOUT_FALLBACK_CODES = {
     "Kas Tunai": "1-10001",
+    "Kas Bank / QRIS": "1-10002",
     "Bank": "1-10002",
     "Pendapatan": "4-40000",
     "Beban HPP": "5-50000",
@@ -1406,7 +1423,7 @@ def purchase_lines(total_cost: float) -> list[JournalLine]:
         return []
     return [
         ("Persediaan bahan baku", "asset", amount, Decimal("0")),
-        ("Kas", "asset", Decimal("0"), amount),
+        (cash_account_name(ACCOUNT_KAS_TUNAI_ID), "asset", Decimal("0"), amount),
     ]
 
 
@@ -1421,10 +1438,7 @@ def purchase_journal_lines(
     if payment_method == "credit":
         credit_account, credit_type = "Utang Usaha", "liability"
     else:
-        credit_account = {
-            "1-10001": "Kas",
-            "1-10002": "Bank",
-        }.get(funding_account_code or "", funding_account_code)
+        credit_account = cash_account_name(funding_account_code)
         if not isinstance(credit_account, str) or not credit_account.strip():
             raise ValueError("Sumber dana pembelian tunai tidak valid.")
         credit_type = "asset"
@@ -1436,10 +1450,7 @@ def purchase_journal_lines(
 
 def debt_payment_lines(amount: Any, funding_account_code: str) -> list[JournalLine]:
     value = _money(amount)
-    funding_account = {
-        "1-10001": "Kas",
-        "1-10002": "Bank",
-    }.get(funding_account_code, funding_account_code)
+    funding_account = cash_account_name(funding_account_code)
     if value <= 0:
         return []
     if not isinstance(funding_account, str) or not funding_account.strip():
@@ -1514,7 +1525,7 @@ def expense_lines(category: str, amount: float) -> list[JournalLine]:
         return []
     return [
         (category.strip(), "expense", value, Decimal("0")),
-        ("Kas", "asset", Decimal("0"), value),
+        (cash_account_name(ACCOUNT_KAS_TUNAI_ID), "asset", Decimal("0"), value),
     ]
 
 
@@ -1808,6 +1819,7 @@ async def post_finance_source(
     entry_id = uuid4()
     account_names_by_code = {
         "1-10001": "Kas Tunai",
+        "1-10002": "Kas Bank / QRIS",
         "4-40000": "Pendapatan",
     }
     rows = []

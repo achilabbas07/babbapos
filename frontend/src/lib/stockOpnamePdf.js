@@ -29,27 +29,44 @@ export function downloadStockOpnamePDF(report) {
   pdf.setFontSize(10);
   pdf.text(`Tanggal laporan: ${dateLabel}`, pageWidth / 2, 24, { align: "center" });
 
+  const totalLoss = (report.items || []).reduce((sum, item) => sum + (Number(item.loss_value) || 0), 0);
+  const totalGain = (report.items || []).reduce((sum, item) => sum + (Number(item.gain_value) || 0), 0);
+  if (totalLoss > 0 || totalGain > 0) {
+    pdf.setFontSize(9);
+    pdf.text(
+      `Total kerugian: ${currencyFormat.format(totalLoss)}   |   Total surplus: ${currencyFormat.format(totalGain)}`,
+      pageWidth / 2,
+      29,
+      { align: "center" },
+    );
+  }
+
   autoTable(pdf, {
-    startY: 31,
-    head: [["Nama Barang", "Stok Sistem", "Stok Fisik", "Selisih", "Nilai Kerugian", "Keterangan"]],
+    startY: totalLoss > 0 || totalGain > 0 ? 34 : 31,
+    head: [[
+      "Nama Barang", "Stok Sistem", "Stok Fisik", "Selisih",
+      "Nilai Kerugian", "Nilai Surplus", "Keterangan",
+    ]],
     body: (report.items || []).map((item) => [
       item.item_name,
       formatQuantity(item.system_qty, item.unit),
       formatQuantity(item.physical_qty, item.unit),
       formatQuantity(item.difference, item.unit),
       Number(item.loss_value) > 0 ? currencyFormat.format(Number(item.loss_value)) : "-",
+      Number(item.gain_value) > 0 ? currencyFormat.format(Number(item.gain_value)) : "-",
       item.notes || "-",
     ]),
     theme: "grid",
     headStyles: { fillColor: [30, 64, 86], halign: "center" },
     styles: { font: "helvetica", fontSize: 8, cellPadding: 2.5, overflow: "linebreak" },
     columnStyles: {
-      0: { cellWidth: 42 },
-      1: { cellWidth: 30, halign: "right" },
-      2: { cellWidth: 30, halign: "right" },
-      3: { cellWidth: 30, halign: "right" },
-      4: { cellWidth: 34, halign: "right" },
-      5: { cellWidth: "auto" },
+      0: { cellWidth: 40 },
+      1: { cellWidth: 26, halign: "right" },
+      2: { cellWidth: 26, halign: "right" },
+      3: { cellWidth: 26, halign: "right" },
+      4: { cellWidth: 30, halign: "right" },
+      5: { cellWidth: 30, halign: "right" },
+      6: { cellWidth: "auto" },
     },
     margin: { left: 12, right: 12, bottom: 42 },
   });

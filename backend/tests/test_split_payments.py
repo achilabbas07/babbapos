@@ -93,7 +93,7 @@ def test_single_cash_checkout_lines_are_identical_to_legacy_behaviour():
 
 def test_single_non_cash_checkout_lines_use_the_bank_account():
     assert checkout_journal_lines(12500, "QRIS", [], None) == [
-        ("Bank", "asset", Decimal("12500.00"), Decimal("0")),
+        ("Kas Bank / QRIS", "asset", Decimal("12500.00"), Decimal("0")),
         ("Pendapatan", "revenue", Decimal("0"), Decimal("12500.00")),
     ]
     assert checkout_journal_account_codes(12500, "QRIS", [], None) == ["1-10002", "4-40000"]
@@ -110,7 +110,7 @@ def test_split_checkout_lines_record_each_payment_leg_and_stay_balanced():
 
     assert lines == [
         ("Kas Tunai", "asset", Decimal("30000"), Decimal("0")),
-        ("Bank", "asset", Decimal("70000"), Decimal("0")),
+        ("Kas Bank / QRIS", "asset", Decimal("70000"), Decimal("0")),
         ("Pendapatan", "revenue", Decimal("0"), Decimal("100000")),
         ("Beban HPP", "expense", Decimal("20000"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("20000")),
@@ -130,7 +130,7 @@ def test_split_with_two_non_cash_methods_aggregates_into_a_single_bank_leg():
     )
     lines = checkout_journal_lines(60000, "QRIS", [], payments)
     assert lines == [
-        ("Bank", "asset", Decimal("60000"), Decimal("0")),
+        ("Kas Bank / QRIS", "asset", Decimal("60000"), Decimal("0")),
         ("Pendapatan", "revenue", Decimal("0"), Decimal("60000")),
     ]
     assert checkout_journal_account_codes(60000, "QRIS", [], payments) == ["1-10002", "4-40000"]

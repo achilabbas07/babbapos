@@ -617,7 +617,7 @@ def test_payment_fee_is_posted_to_mdr_expense_account_and_balances_sale():
     codes = transaction_account_codes(1000, "QRIS", [], admin_fee=25)
 
     assert lines == [
-        ("Bank", "asset", Decimal("975.00"), Decimal("0")),
+        ("Kas Bank / QRIS", "asset", Decimal("975.00"), Decimal("0")),
         ("Beban MDR", "expense", Decimal("25.00"), Decimal("0")),
         ("Pendapatan", "revenue", Decimal("0"), Decimal("1000.00")),
     ]
@@ -683,7 +683,7 @@ def test_non_cash_sale_uses_bank_and_rounds_cost_to_cents():
     lines = transaction_lines(500, "QRIS", [{"hpp": 10.105, "qty": 1}])
 
     assert lines == [
-        ("Bank", "asset", Decimal("500.00"), Decimal("0")),
+        ("Kas Bank / QRIS", "asset", Decimal("500.00"), Decimal("0")),
         ("Pendapatan", "revenue", Decimal("0"), Decimal("500.00")),
         ("Beban HPP", "expense", Decimal("10.11"), Decimal("0")),
         ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("10.11")),
@@ -693,11 +693,11 @@ def test_non_cash_sale_uses_bank_and_rounds_cost_to_cents():
 def test_purchase_and_expense_post_balanced_lines():
     assert purchase_lines(1200) == [
         ("Persediaan bahan baku", "asset", Decimal("1200"), Decimal("0")),
-        ("Kas", "asset", Decimal("0"), Decimal("1200")),
+        ("Kas Tunai", "asset", Decimal("0"), Decimal("1200")),
     ]
     assert expense_lines("  Listrik  ", 350) == [
         ("Listrik", "expense", Decimal("350"), Decimal("0")),
-        ("Kas", "asset", Decimal("0"), Decimal("350")),
+        ("Kas Tunai", "asset", Decimal("0"), Decimal("350")),
     ]
 
 
@@ -739,7 +739,7 @@ def test_resolve_expense_account_code_prefers_category_id_then_name_then_fallbac
 def test_purchase_journal_uses_inventory_and_cash_or_ap_accounts():
     assert purchase_journal_lines(1200, "cash", "1-10002") == [
         ("Persediaan Barang", "asset", Decimal("1200.00"), Decimal("0")),
-        ("Bank", "asset", Decimal("0"), Decimal("1200.00")),
+        ("Kas Bank / QRIS", "asset", Decimal("0"), Decimal("1200.00")),
     ]
     assert purchase_journal_lines(1200, "credit") == [
         ("Persediaan Barang", "asset", Decimal("1200.00"), Decimal("0")),
@@ -750,7 +750,7 @@ def test_purchase_journal_uses_inventory_and_cash_or_ap_accounts():
 def test_debt_payment_journal_debits_ap_and_credits_selected_funding_account():
     assert debt_payment_lines(450, "1-10001") == [
         ("Utang Usaha", "liability", Decimal("450.00"), Decimal("0")),
-        ("Kas", "asset", Decimal("0"), Decimal("450.00")),
+        ("Kas Tunai", "asset", Decimal("0"), Decimal("450.00")),
     ]
 
 

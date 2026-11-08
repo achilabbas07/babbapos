@@ -78,6 +78,7 @@ export default function InventoryOpnameDialog({ open, onOpenChange, items, onSav
                     <TableHead className="text-right">Stok Fisik</TableHead>
                     <TableHead className="text-right">Selisih</TableHead>
                     <TableHead className="text-right">Nilai Kerugian</TableHead>
+                    <TableHead className="text-right">Nilai Surplus</TableHead>
                     <TableHead>Keterangan</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -89,11 +90,22 @@ export default function InventoryOpnameDialog({ open, onOpenChange, items, onSav
                       <TableCell className="text-right">{num(item.physical_qty)} {item.unit}</TableCell>
                       <TableCell className="text-right">{num(item.difference)} {item.unit}</TableCell>
                       <TableCell className="text-right">{Number(item.loss_value) > 0 ? rp(item.loss_value) : "-"}</TableCell>
+                      <TableCell className="text-right">{Number(item.gain_value) > 0 ? rp(item.gain_value) : "-"}</TableCell>
                       <TableCell>{item.notes || "-"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+            </div>
+            <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm">
+              <span>
+                Total kerugian:{" "}
+                <span className="font-semibold">{rp(result.loss_total || 0)}</span>
+              </span>
+              <span>
+                Total surplus:{" "}
+                <span className="font-semibold">{rp(result.gain_total || 0)}</span>
+              </span>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleDownloadPDF}>

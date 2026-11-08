@@ -116,6 +116,7 @@ export default function Inventory() {
                 <TableHead>Tanggal</TableHead>
                 <TableHead className="text-right">Jumlah Barang</TableHead>
                 <TableHead className="text-right">Nilai Kerugian</TableHead>
+                <TableHead className="text-right">Nilai Surplus</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -125,6 +126,7 @@ export default function Inventory() {
                   <TableCell>{new Date(report.created_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}</TableCell>
                   <TableCell className="text-right">{report.item_count}</TableCell>
                   <TableCell className="text-right">{rp(report.loss_total)}</TableCell>
+                  <TableCell className="text-right">{rp(report.gain_total || 0)}</TableCell>
                   <TableCell className="text-right">
                     <Button type="button" variant="outline" size="sm" onClick={() => handleDownloadPDF(report)}>
                       <Download className="h-4 w-4" />Unduh Laporan PDF
@@ -133,7 +135,7 @@ export default function Inventory() {
                 </TableRow>
               ))}
               {!opnameHistory.length && (
-                <TableRow><TableCell colSpan={4} className="py-8 text-center text-muted-foreground">Belum ada riwayat stok opname.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Belum ada riwayat stok opname.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
