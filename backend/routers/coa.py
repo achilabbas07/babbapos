@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from core import User, db, require_roles
+from finance import canonical_account_category
 
 AccountType = Literal["Asset", "Liability", "Equity", "Revenue", "Expense"]
 
@@ -147,7 +148,10 @@ def serialize_account(row: asyncpg.Record) -> dict:
         "id": str(_row_value(row, "id", "account_id") or account_code),
         "account_code": account_code,
         "account_name": _row_value(row, "account_name", "nama_akun", "name"),
-        "account_category": category,
+        # Nilai baku berbahasa Indonesia dipakai untuk seluruh tampilan & filter.
+        # Nilai mentah tetap dikirim agar data warisan masih bisa ditelusuri.
+        "account_category": canonical_account_category(category, account_code),
+        "account_category_raw": category,
         "account_type": account_type_from_category(category, account_code),
         "normal_balance": _row_value(row, "normal_balance", "saldo_normal"),
         "current_balance": _row_value(row, "current_balance"),
@@ -470,10 +474,11 @@ async def create_account(body: AccountIn, _: User = Depends(ADMIN)):
     if account_type is None:
         raise HTTPException(422, "Jenis akun tidak didukung.")
     normal_balance = NORMAL_BALANCES[account_type]
+    account_category = canonical_account_category(body.account_category, body.account_code)
     values = [
         (resolved["account_code"], body.account_code),
         (resolved["account_name"], body.account_name),
-        (resolved["account_category"], body.account_category),
+        (resolved["account_category"], account_category),
     ]
     if resolved["normal_balance"]:
         values.append((resolved["normal_balance"], normal_balance))
@@ -500,10 +505,11 @@ async def update_account(account_id: str, body: AccountIn, _: User = Depends(ADM
     if account_type is None:
         raise HTTPException(422, "Jenis akun tidak didukung.")
     normal_balance = NORMAL_BALANCES[account_type]
+    account_category = canonical_account_category(body.account_category, body.account_code)
     values = [
         (resolved["account_code"], body.account_code),
         (resolved["account_name"], body.account_name),
-        (resolved["account_category"], body.account_category),
+        (resolved["account_category"], account_category),
     ]
     if resolved["normal_balance"]:
         values.append((resolved["normal_balance"], normal_balance))

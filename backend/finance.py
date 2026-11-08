@@ -111,7 +111,7 @@ async def get_account_balances(pool: Any) -> list[dict[str, Any]]:
             accounts.append({
                 "kode_akun": code,
                 "nama_akun": name,
-                "kategori_akun": category,
+                "kategori_akun": canonical_account_category(category, code),
                 "current_balance": balance,
                 "saldo_terupdate": balance,
             })
@@ -193,6 +193,106 @@ def account_type_from_category(
         "6": "expense",
         "8": "expense",
     }.get((account_code or "").strip()[:1])
+
+
+# ---------------------------------------------------------------------------
+# Normalisasi kategori akun (chart_of_accounts.account_category)
+# ---------------------------------------------------------------------------
+# Kolom account_category dipakai sebagai FILTER di beberapa query laporan
+# (klasifikasi laba-rugi, neraca, deteksi kas/bank, sisi saldo normal), jadi
+# nilainya tidak boleh berupa string mentah yang berbeda-beda untuk arti yang
+# sama. Tabel di bawah memetakan semua varian yang pernah muncul (warisan
+# snake_case maupun label Indonesia) ke satu label baku berbahasa Indonesia.
+CANONICAL_ACCOUNT_CATEGORIES: dict[str, str] = {
+    # Aset
+    "asset": "Aset Lancar",
+    "assets": "Aset Lancar",
+    "aset": "Aset Lancar",
+    "aset lancar": "Aset Lancar",
+    "aktiva": "Aset Lancar",
+    "aktiva lancar": "Aset Lancar",
+    # Kas & bank
+    "kas": "Kas & Bank",
+    "kas & bank": "Kas & Bank",
+    "kas dan bank": "Kas & Bank",
+    "cash": "Kas & Bank",
+    "cash & bank": "Kas & Bank",
+    "cash and bank": "Kas & Bank",
+    "bank": "Kas & Bank",
+    # Liabilitas
+    "liability": "Liabilitas",
+    "liabilities": "Liabilitas",
+    "liabilitas": "Liabilitas",
+    "kewajiban": "Liabilitas",
+    "utang": "Liabilitas",
+    "hutang": "Liabilitas",
+    # Ekuitas
+    "equity": "Ekuitas",
+    "ekuitas": "Ekuitas",
+    "modal": "Ekuitas",
+    # Pendapatan
+    "revenue": "Pendapatan",
+    "pendapatan": "Pendapatan",
+    "income": "Pendapatan",
+    "pendapatan lainnya": "Pendapatan Lainnya",
+    "pendapatan lain-lain": "Pendapatan Lainnya",
+    "pendapatan lain - lain": "Pendapatan Lainnya",
+    # Beban pokok pendapatan (HPP)
+    "cost_of_goods_sold": "Beban Pokok Pendapatan",
+    "beban pokok pendapatan": "Beban Pokok Pendapatan",
+    "beban hpp": "Beban Pokok Pendapatan",
+    "hpp": "Beban Pokok Pendapatan",
+    "harga pokok penjualan": "Beban Pokok Pendapatan",
+    # Beban operasional
+    "operating_expense": "Beban Operasional",
+    "beban operasional": "Beban Operasional",
+    "biaya operasional": "Beban Operasional",
+    "expense": "Beban Operasional",
+    "expenses": "Beban Operasional",
+    "beban": "Beban Operasional",
+    "biaya": "Beban Operasional",
+    # Bahan penunjang (rincian HPP seri 8-)
+    "bahan penunjang": "Bahan Penunjang",
+}
+
+# Label baku cadangan bila kategori kosong/tidak dikenal, ditentukan dari
+# awalan kode akun agar hasilnya tetap konsisten.
+CANONICAL_CATEGORY_BY_CODE_PREFIX: dict[str, str] = {
+    "1": "Aset Lancar",
+    "2": "Liabilitas",
+    "3": "Ekuitas",
+    "4": "Pendapatan",
+    "5": "Beban Pokok Pendapatan",
+    "6": "Beban Operasional",
+    "8": "Bahan Penunjang",
+}
+
+
+def canonical_account_category(
+    account_category: Optional[str],
+    account_code: Optional[str] = None,
+) -> str:
+    """Kembalikan label kategori akun baku berbahasa Indonesia.
+
+    Menerima nilai mentah apa pun yang pernah tersimpan di
+    ``chart_of_accounts.account_category`` (mis. ``operating_expense``,
+    ``bahan penunjang``, ``Asset``, ``Beban HPP``) dan memetakannya ke satu
+    label baku. Nilai ``balance_sheet`` dan nilai tak dikenal dipetakan lewat
+    awalan kode akun.
+    """
+    normalized = " ".join(str(account_category or "").split()).casefold()
+    if normalized and normalized != "balance_sheet":
+        canonical = CANONICAL_ACCOUNT_CATEGORIES.get(normalized)
+        if canonical is not None:
+            return canonical
+        # Nilai gabungan seperti "Kas & Bank - Aset Lancar".
+        for key, value in CANONICAL_ACCOUNT_CATEGORIES.items():
+            if normalized.startswith(f"{key} "):
+                return value
+    return CANONICAL_CATEGORY_BY_CODE_PREFIX.get(
+        str(account_code or "").strip()[:1],
+        "Aset Lancar",
+    )
 
 
 def is_cash_bank_account(
@@ -435,6 +535,9 @@ async def get_chart_of_accounts(
         debit = mutation["debit"] if mutation else 0
         credit = mutation["credit"] if mutation else 0
         account.update({
+            "account_category": canonical_account_category(
+                account["account_category"], account["account_code"]
+            ),
             "account_type": account_type,
             "balance": debit - credit if normal_balance == "debit" else credit - debit,
             "has_mutations": bool(mutation and mutation["mutation_count"]),

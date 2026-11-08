@@ -75,6 +75,22 @@ def test_account_input_accepts_account_category_aliases_and_legacy_type():
     assert coa.account_type_from_category("cost_of_goods_sold") == "Expense"
 
 
+def test_canonical_account_category_maps_legacy_values_to_indonesian_labels():
+    assert coa.canonical_account_category("operating_expense", "6-60200") == "Beban Operasional"
+    assert coa.canonical_account_category("bahan penunjang", "8-51008") == "Bahan Penunjang"
+    assert coa.canonical_account_category("Asset", "9-10001") == "Aset Lancar"
+    assert coa.canonical_account_category("cost_of_goods_sold", "5-50000") == "Beban Pokok Pendapatan"
+    assert coa.canonical_account_category("Beban HPP", "5-50000") == "Beban Pokok Pendapatan"
+    assert coa.canonical_account_category("Kas & Bank", "1-10001") == "Kas & Bank"
+    assert coa.canonical_account_category("Pendapatan Lainnya", "7-70006") == "Pendapatan Lainnya"
+    # Nilai baku tidak berubah saat dinormalisasi ulang (idempoten).
+    assert coa.canonical_account_category("Beban Operasional", "6-60203") == "Beban Operasional"
+    # Nilai kosong / balance_sheet / tak dikenal diturunkan dari awalan kode.
+    assert coa.canonical_account_category(None, "2-20001") == "Liabilitas"
+    assert coa.canonical_account_category("balance_sheet", "3-10000") == "Ekuitas"
+    assert coa.canonical_account_category("Nilai Aneh", "8-51001") == "Bahan Penunjang"
+
+
 def test_create_account_persists_account_category_from_request(monkeypatch):
     class FakePool:
         async def fetchval(self, query, *args):
@@ -82,12 +98,14 @@ def test_create_account_persists_account_category_from_request(monkeypatch):
 
         async def fetchrow(self, query, *args):
             assert '"account_category"' in query
-            assert "operating_expense" in args
+            # Nilai mentah dinormalisasi ke label baku sebelum disimpan.
+            assert "Beban Operasional" in args
+            assert "operating_expense" not in args
             return {
                 "id": "expense-account",
                 "account_code": "6-60001",
                 "account_name": "Biaya Operasional",
-                "account_category": "operating_expense",
+                "account_category": "Beban Operasional",
                 "normal_balance": "debit",
             }
 
@@ -121,7 +139,8 @@ def test_create_account_persists_account_category_from_request(monkeypatch):
         )
     )
 
-    assert account["account_category"] == "operating_expense"
+    assert account["account_category"] == "Beban Operasional"
+    assert account["account_category_raw"] == "Beban Operasional"
     assert account["account_type"] == "Expense"
 
 
@@ -132,12 +151,12 @@ def test_update_account_persists_account_category_from_request(monkeypatch):
 
         async def fetchrow(self, query, *args):
             assert '"account_category" = $3' in query
-            assert args[2] == "cost_of_goods_sold"
+            assert args[2] == "Beban Pokok Pendapatan"
             return {
                 "id": "expense-account",
                 "account_code": "5-51099",
                 "account_name": "Beban Selisih Stok",
-                "account_category": "cost_of_goods_sold",
+                "account_category": "Beban Pokok Pendapatan",
                 "normal_balance": "debit",
             }
 
@@ -172,7 +191,7 @@ def test_update_account_persists_account_category_from_request(monkeypatch):
         )
     )
 
-    assert account["account_category"] == "cost_of_goods_sold"
+    assert account["account_category"] == "Beban Pokok Pendapatan"
     assert account["account_type"] == "Expense"
 
 

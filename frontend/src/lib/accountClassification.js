@@ -40,6 +40,64 @@ const CODE_TYPES = new Map([
   ["8", "expense"],
 ]);
 
+// Pemetaan nilai mentah `account_category` (warisan snake_case maupun label
+// Indonesia yang tidak seragam) ke satu label baku berbahasa Indonesia.
+// Backend memakai kolom ini sebagai filter laporan, jadi tampilan harus
+// konsisten tanpa mengubah arti akuntansinya.
+const CANONICAL_CATEGORY_LABELS = new Map([
+  ["asset", "Aset Lancar"],
+  ["assets", "Aset Lancar"],
+  ["aset", "Aset Lancar"],
+  ["aset lancar", "Aset Lancar"],
+  ["aktiva", "Aset Lancar"],
+  ["aktiva lancar", "Aset Lancar"],
+  ["kas", "Kas & Bank"],
+  ["kas & bank", "Kas & Bank"],
+  ["kas dan bank", "Kas & Bank"],
+  ["cash", "Kas & Bank"],
+  ["cash & bank", "Kas & Bank"],
+  ["cash and bank", "Kas & Bank"],
+  ["bank", "Kas & Bank"],
+  ["liability", "Liabilitas"],
+  ["liabilities", "Liabilitas"],
+  ["liabilitas", "Liabilitas"],
+  ["kewajiban", "Liabilitas"],
+  ["utang", "Liabilitas"],
+  ["hutang", "Liabilitas"],
+  ["equity", "Ekuitas"],
+  ["ekuitas", "Ekuitas"],
+  ["modal", "Ekuitas"],
+  ["revenue", "Pendapatan"],
+  ["pendapatan", "Pendapatan"],
+  ["income", "Pendapatan"],
+  ["pendapatan lainnya", "Pendapatan Lainnya"],
+  ["pendapatan lain-lain", "Pendapatan Lainnya"],
+  ["pendapatan lain - lain", "Pendapatan Lainnya"],
+  ["cost_of_goods_sold", "Beban Pokok Pendapatan"],
+  ["beban pokok pendapatan", "Beban Pokok Pendapatan"],
+  ["beban hpp", "Beban Pokok Pendapatan"],
+  ["hpp", "Beban Pokok Pendapatan"],
+  ["harga pokok penjualan", "Beban Pokok Pendapatan"],
+  ["operating_expense", "Beban Operasional"],
+  ["beban operasional", "Beban Operasional"],
+  ["biaya operasional", "Beban Operasional"],
+  ["expense", "Beban Operasional"],
+  ["expenses", "Beban Operasional"],
+  ["beban", "Beban Operasional"],
+  ["biaya", "Beban Operasional"],
+  ["bahan penunjang", "Bahan Penunjang"],
+]);
+
+const CANONICAL_BY_CODE_PREFIX = new Map([
+  ["1", "Aset Lancar"],
+  ["2", "Liabilitas"],
+  ["3", "Ekuitas"],
+  ["4", "Pendapatan"],
+  ["5", "Beban Pokok Pendapatan"],
+  ["6", "Beban Operasional"],
+  ["8", "Bahan Penunjang"],
+]);
+
 const normalize = (value) => String(value || "").trim().toLocaleLowerCase("id-ID");
 
 export const getAccountType = (account = {}) => {
@@ -100,18 +158,24 @@ export const getAccountCategoryFallback = (account = {}) => {
   return "";
 };
 
-export const getAccountCategoryLabel = (account = {}) => {
-  if (normalize(account.account_category) && getAccountType({ ...account, account_code: "" })) {
-    return account.account_category;
+/**
+ * Label kategori akun baku berbahasa Indonesia.
+ *
+ * Selalu mengembalikan label Indonesia — nilai mentah seperti
+ * `operating_expense`, `bahan penunjang`, atau `Asset` tidak pernah bocor ke UI.
+ */
+export const normalizeAccountCategory = (account = {}) => {
+  const category = normalize(account.account_category);
+  if (category && category !== "balance_sheet") {
+    if (CANONICAL_CATEGORY_LABELS.has(category)) {
+      return CANONICAL_CATEGORY_LABELS.get(category);
+    }
+    const prefixKey = [...CANONICAL_CATEGORY_LABELS.keys()]
+      .find((knownCategory) => category.startsWith(`${knownCategory} `));
+    if (prefixKey) return CANONICAL_CATEGORY_LABELS.get(prefixKey);
   }
-  return ({
-    "Kas & Bank": "Kas & Bank",
-    asset: "Aset",
-    liability: "Liabilitas",
-    equity: "Ekuitas",
-    revenue: "Pendapatan",
-    cost_of_goods_sold: "Harga Pokok Penjualan",
-    operating_expense: "Beban Operasional",
-    "bahan penunjang": "Bahan Penunjang",
-  })[getAccountCategoryFallback(account)] || "—";
+  const code = String(account.account_code || "").trim();
+  return CANONICAL_BY_CODE_PREFIX.get(code.charAt(0)) || "";
 };
+
+export const getAccountCategoryLabel = (account = {}) => normalizeAccountCategory(account) || "—";

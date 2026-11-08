@@ -35,14 +35,14 @@ def test_get_account_balances_returns_ordered_master_balances():
         {
             "kode_akun": "1-10001",
             "nama_akun": "Kas Tunai",
-            "kategori_akun": "Aset",
+            "kategori_akun": "Aset Lancar",
             "current_balance": Decimal("2269825.25"),
             "saldo_terupdate": Decimal("2269825.25"),
         },
         {
             "kode_akun": "2-10001",
             "nama_akun": "Hutang Usaha",
-            "kategori_akun": "Liability",
+            "kategori_akun": "Liabilitas",
             "current_balance": Decimal("250000.00"),
             "saldo_terupdate": Decimal("250000.00"),
         },

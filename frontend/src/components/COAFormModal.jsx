@@ -7,17 +7,22 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { errMsg } from "@/lib/api";
-import { getAccountCategoryFallback, getAccountType } from "@/lib/accountClassification";
+import {
+  getAccountCategoryFallback,
+  getAccountType,
+  normalizeAccountCategory,
+} from "@/lib/accountClassification";
 
 const ACCOUNT_CATEGORIES = [
-  { value: "asset", label: "Aset" },
+  { value: "Aset Lancar", label: "Aset Lancar" },
   { value: "Kas & Bank", label: "Kas & Bank" },
-  { value: "liability", label: "Liabilitas" },
-  { value: "equity", label: "Ekuitas" },
-  { value: "revenue", label: "Pendapatan" },
-  { value: "cost_of_goods_sold", label: "Harga Pokok Penjualan" },
-  { value: "bahan penunjang", label: "Bahan Penunjang" },
-  { value: "operating_expense", label: "Beban Operasional" },
+  { value: "Liabilitas", label: "Liabilitas" },
+  { value: "Ekuitas", label: "Ekuitas" },
+  { value: "Pendapatan", label: "Pendapatan" },
+  { value: "Pendapatan Lainnya", label: "Pendapatan Lainnya" },
+  { value: "Beban Pokok Pendapatan", label: "Beban Pokok Pendapatan" },
+  { value: "Bahan Penunjang", label: "Bahan Penunjang" },
+  { value: "Beban Operasional", label: "Beban Operasional" },
   { value: "balance_sheet", label: "Neraca" },
 ];
 const EMPTY_FORM = { account_code: "", account_name: "", account_category: "" };
@@ -39,14 +44,14 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
   const setField = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }));
   };
-  const accountCategory = getAccountType({
-    account_category: form.account_category,
-  })
-    ? form.account_category
-    : getAccountCategoryFallback({
-      account_code: form.account_code,
-      account_name: form.account_name,
-    });
+  const accountCategory = normalizeAccountCategory({
+    account_category: form.account_category
+      || getAccountCategoryFallback({
+        account_code: form.account_code,
+        account_name: form.account_name,
+      }),
+    account_code: form.account_code,
+  });
   const categoryOption = ACCOUNT_CATEGORIES.find(({ value }) => value === accountCategory);
   const customCategory = accountCategory && !categoryOption
     ? { value: accountCategory, label: accountCategory }
