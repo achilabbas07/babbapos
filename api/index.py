@@ -1,7 +1,7 @@
 from core import (  # noqa: I001
     ALL_ROLES, Customer, Expense, InventoryItem, OpenBill, Product, Purchase, Recipe, Table, Transaction, User,
-    client, create_token, db, hash_pin, next_id, now_iso, recalc_hpp, recalc_hpp_for_inventory, require_roles,
-    to_utc_iso, verify_pin, get_current_user,
+    client, create_token, db, hash_pin, local_date_str, next_id, now_iso, recalc_hpp, recalc_hpp_for_inventory,
+    require_roles, to_local_date, to_utc_iso, today_local, verify_pin, get_current_user,
 )
 from seed import seed_all
 from shifts import router as shifts_router, get_open_shift
@@ -822,7 +822,7 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         wid, wname = None, body.waiterName
 
     trx = Transaction(
-        id=await next_id(f"TRX-{datetime.now(timezone.utc):%Y%m%d}", 4), date=now_iso(), type=body.type,
+        id=await next_id(f"TRX-{local_date_str()}", 4), date=now_iso(), type=body.type,
         method=method, tableId=table_id, customerId=customer_id, total=total, items_json=items,
         userId=user.id, userName=user.name, cashGiven=cash, change=change, shiftId=shift["_id"] if shift else None,
         waiterName=wname, waiterId=wid, subtotal=subtotal, discount=subtotal - total, promoCode=promo["code"],
@@ -842,7 +842,7 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
                     conn,
                     "transaction",
                     trx.id,
-                    date.fromisoformat(trx.date[:10]),
+                    to_local_date(trx.date),
                     f"Penjualan {trx.id}",
                     user.id,
                     checkout_lines,
@@ -882,7 +882,7 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
         raise HTTPException(404, f"Bahan tidak ditemukan: {', '.join(missing)}")
     items = [{"inventoryId": i.inventoryId, "name": inv[i.inventoryId]["name"], "unit": inv[i.inventoryId]["unit"],
               "qty": i.qty, "cost_per_unit": i.cost_per_unit, "subtotal": i.qty * i.cost_per_unit} for i in body.items]
-    purchase = Purchase(id=await next_id(f"PO-{datetime.now(timezone.utc):%Y%m%d}"),
+    purchase = Purchase(id=await next_id(f"PO-{local_date_str()}"),
                         date=to_utc_iso(body.date) if body.date else now_iso(), supplier=body.supplier,
                         items_json=items, total_cost=sum(i["subtotal"] for i in items), userId=user.id, userName=user.name)
     await db.connect()
@@ -996,7 +996,7 @@ async def create_expense(body: ExpenseIn, user: User = Depends(ADMIN)):
                 conn,
                 "expense",
                 exp.id,
-                date.fromisoformat(exp.date[:10]),
+                to_local_date(exp.date),
                 exp.description.strip() or f"Pengeluaran {exp.category}",
                 user.id,
                 expense_lines(exp.category, exp.amount),
@@ -1031,7 +1031,9 @@ async def delete_expense(eid: str, _: User = Depends(ADMIN)):
 
 # ---------- Reports ----------
 @api.get("/reports/summary")
-async def report_summary(start: str, end: str, tz_offset: int = 0, _: User = Depends(ADMIN)):
+async def report_summary(start: str, end: str, tz_offset: int = -480, _: User = Depends(ADMIN)):
+    # tz_offset mengikuti konvensi JavaScript getTimezoneOffset() (menit, WITA = -480).
+    # Default -480 agar bucket harian memakai tanggal kalender Asia/Makassar.
     rng = {"$gte": to_utc_iso(start), "$lt": to_utc_iso(end)}
     txs = await db.transactions.find({"date": rng}).to_list(None)
     exps = await db.expenses.find({"date": rng}).to_list(None)
@@ -1152,7 +1154,7 @@ async def finance_profit_loss(
 ):
     period_start, period_end = _finance_period_bounds(start, end, month, year)
     if period_start is None or period_end is None:
-        today = date.today()
+        today = today_local()
         period_start, period_end = _finance_period_bounds(None, None, today.month, today.year)
     try:
         await db.connect()

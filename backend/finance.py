@@ -685,8 +685,8 @@ async def get_profit_and_loss_report(
                   ) = category.account_code
             limit 1
           ) as account on true
-          where expense.date >= $1::date
-            and expense.date < $2::date
+                    where (expense.date at time zone 'Asia/Makassar')::date >= $1::date
+                        and (expense.date at time zone 'Asia/Makassar')::date < $2::date
             and expense.amount > 0
           group by 1, 2, 3, 4
         )
@@ -713,8 +713,8 @@ async def get_profit_and_loss_report(
           0
         ) as sales_discount
         from public.transactions
-        where date >= $1::date
-          and date < $2::date
+                where (date at time zone 'Asia/Makassar')::date >= $1::date
+                    and (date at time zone 'Asia/Makassar')::date < $2::date
         """,
         start_date,
         end_date,
@@ -731,8 +731,8 @@ async def get_profit_and_loss_report(
           cross join lateral jsonb_array_elements(
             coalesce(trx.items_json, '[]'::jsonb)
           ) as item(value)
-          where trx.date >= $1::date
-            and trx.date < $2::date
+                    where (trx.date at time zone 'Asia/Makassar')::date >= $1::date
+                        and (trx.date at time zone 'Asia/Makassar')::date < $2::date
         ),
         variant_costs as (
           select
@@ -1939,8 +1939,10 @@ async def get_recent_finance_transactions(
         """
         select tanggal, keterangan, kode_akun, debit, kredit
         from public.jurnal_transaksi
-        where ($1::date is null or tanggal >= $1::date)
-          and ($2::date is null or tanggal < ($2::date + interval '1 day'))
+                where ($1::date is null
+                             or (tanggal::timestamptz at time zone 'Asia/Makassar')::date >= $1::date)
+                    and ($2::date is null
+                             or (tanggal::timestamptz at time zone 'Asia/Makassar')::date <= $2::date)
         order by tanggal desc, id desc
         limit 5
         """,

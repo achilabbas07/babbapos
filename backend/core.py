@@ -5,7 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os  # noqa: E402
-from datetime import datetime, timezone, timedelta  # noqa: E402
+from datetime import date, datetime, timezone, timedelta  # noqa: E402
 from typing import Optional, List  # noqa: E402
 
 import bcrypt  # noqa: E402
@@ -23,9 +23,51 @@ JWT_ALGORITHM = "HS256"
 TOKEN_HOURS = 12
 ALL_ROLES = ("admin", "kasir", "waiter")
 
+# Warkop Babba beroperasi di WITA (Asia/Makassar, UTC+8) tanpa DST, sehingga
+# offset tetap lebih aman dipakai daripada zoneinfo (tidak butuh paket tzdata
+# di Windows/Render). Semua tanggal kalender bisnis memakai zona ini.
+WITA = timezone(timedelta(hours=8))
+WITA_TZ_NAME = "Asia/Makassar"
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_local() -> datetime:
+    """Waktu sekarang dalam zona Asia/Makassar (WITA)."""
+    return datetime.now(WITA)
+
+
+def today_local() -> date:
+    """Tanggal kalender hari ini menurut WITA (bukan UTC)."""
+    return now_local().date()
+
+
+def local_date_str() -> str:
+    """Tanggal hari ini (WITA) dalam format YYYYMMDD untuk penomoran nota."""
+    return now_local().strftime("%Y%m%d")
+
+
+def to_local_date(value) -> date:
+    """Konversi ISO string / datetime ke tanggal kalender Asia/Makassar.
+
+    Dipakai saat menurunkan ``entry_date`` jurnal dari timestamp transaksi yang
+    tersimpan dalam UTC, agar transaksi dini hari (mis. 00:34 WITA) tidak jatuh
+    ke tanggal kalender hari sebelumnya.
+    """
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, date):
+        return value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, f"Format tanggal tidak valid: {value}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(WITA).date()
 
 
 def to_utc_iso(value: str) -> str:

@@ -33,8 +33,9 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
             assert "from public.expense_categories as expense_category" in normalized_query
             assert "from public.chart_of_accounts as chart_account" in normalized_query
             assert "sum(expense.amount)::numeric as balance" in normalized_query
-            assert "expense.date >= $1::date" in normalized_query
-            assert "expense.date < $2::date" in normalized_query
+            # Tanggal kalender bisnis memakai Asia/Makassar (WITA), bukan UTC.
+            assert "(expense.date at time zone 'asia/makassar')::date >= $1::date" in normalized_query
+            assert "(expense.date at time zone 'asia/makassar')::date < $2::date" in normalized_query
             assert "category.account_code" in normalized_query
             assert "source_type is distinct from 'expense'" in normalized_query
             assert "ledger.entry_date >= $1::date" in normalized_query
@@ -99,7 +100,10 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
                 assert "from public.transactions" in normalized_query
                 assert 'coalesce("promodiscount", 0)' in normalized_query
                 assert 'coalesce("pointsdiscount", 0)' in normalized_query
-                assert "where date >= $1::date and date < $2::date" in normalized_query
+                assert (
+                    "where (date at time zone 'asia/makassar')::date >= $1::date "
+                    "and (date at time zone 'asia/makassar')::date < $2::date"
+                ) in normalized_query
                 return {"sales_discount": Decimal("75.00")}
 
             assert "jsonb_array_elements" in normalized_query
@@ -107,7 +111,10 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
             assert "join public.inventory" in normalized_query
             assert "join public.products" in normalized_query
             assert "ingredient.qty_needed * inventory.cost_per_unit" in normalized_query
-            assert "trx.date >= $1::date and trx.date < $2::date" in normalized_query
+            assert (
+                "where (trx.date at time zone 'asia/makassar')::date >= $1::date "
+                "and (trx.date at time zone 'asia/makassar')::date < $2::date"
+            ) in normalized_query
             # Snapshot HPP diprioritaskan; HPP produk dan HPP varian tidak
             # boleh dijumlahkan bersamaan (dulu menyebabkan HPP membengkak).
             assert "nullif(sold.snapshot_hpp, 0)" in normalized_query

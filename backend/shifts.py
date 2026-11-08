@@ -1,11 +1,10 @@
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core import BaseDocument, User, db, next_id, now_iso, require_roles
+from core import BaseDocument, User, db, local_date_str, next_id, now_iso, require_roles
 from finance import post_cash_movement_journal
 
 
@@ -110,7 +109,7 @@ async def current_shift(user: User = Depends(STAFF)):
 async def open_shift(body: OpenShiftIn, user: User = Depends(STAFF)):
     if await get_open_shift(user.id):
         raise HTTPException(409, "Shift Anda masih terbuka")
-    shift = Shift(id=await next_id(f"SHIFT-{datetime.now(timezone.utc):%Y%m%d}"), userId=user.id, userName=user.name,
+    shift = Shift(id=await next_id(f"SHIFT-{local_date_str()}"), userId=user.id, userName=user.name,
                   openedAt=now_iso(), openingCash=body.openingCash)
     await db.shifts.insert_one(shift.to_mongo())
     return shift

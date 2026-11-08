@@ -965,8 +965,9 @@ def test_recent_finance_transactions_returns_five_latest_journal_rows():
     assert len(result) == 5
     assert result[0]["keterangan"] == "Jurnal 0"
     assert "from public.jurnal_transaksi" in connection.sql
-    assert "tanggal >= $1::date" in connection.sql
-    assert "tanggal < ($2::date + interval '1 day')" in connection.sql
+    # Rentang tanggal dikonversi ke kalender Asia/Makassar (WITA) lebih dulu.
+    assert "(tanggal::timestamptz at time zone 'Asia/Makassar')::date >= $1::date" in connection.sql
+    assert "(tanggal::timestamptz at time zone 'Asia/Makassar')::date <= $2::date" in connection.sql
     assert connection.args == (date(2026, 10, 1), date(2026, 10, 31))
     assert "order by tanggal desc, id desc" in connection.sql
     assert "limit 5" in connection.sql
