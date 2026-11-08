@@ -165,7 +165,7 @@ export default function ProfitAndLoss() {
               <p>{new Date().toLocaleDateString("id-ID", { dateStyle: "long" })}</p>
               <p className="mt-1 font-semibold">Admin Keuangan</p>
               <div className="mx-auto mt-20 w-48 border-t border-slate-700" />
-              <p className="mt-2">BabbaPOS</p>
+              <p className="mt-2">Warkop Babba</p>
             </div>
           </div>
         </div>
