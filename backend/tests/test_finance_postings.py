@@ -11,6 +11,7 @@ from finance import (
     get_account_by_payment_method,
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
+    get_financial_position_summary,
     get_cash_bank_accounts,
     get_cash_bank_balances,
     get_funding_account_balance,
@@ -1116,6 +1117,67 @@ def test_dashboard_neraca_kas_reads_summary_view():
         "total_liabilitas_ekuitas": Decimal("2494768.00"),
     }
     assert "from public.view_dashboard_neraca_kas" in connection.sql
+
+
+def test_financial_position_summary_uses_cumulative_ending_balances():
+    class FakePool:
+        def __init__(self):
+            self.sql = ""
+            self.args = ()
+
+        async def fetch(self, sql, *args):
+            self.sql = sql
+            self.args = args
+            return [
+                {"account_code": "1-10001", "account_name": "Kas Tunai", "account_type": "asset", "balance": Decimal("500000")},
+                {"account_code": "1-10002", "account_name": "Bank BCA", "account_type": "asset", "balance": Decimal("300000")},
+                {"account_code": "1-10003", "account_name": "Persediaan Bahan Baku", "account_type": "asset", "balance": Decimal("200000")},
+                {"account_code": "2-20000", "account_name": "Utang Usaha", "account_type": "liability", "balance": Decimal("150000")},
+                {"account_code": "3-30000", "account_name": "Modal Pemilik", "account_type": "equity", "balance": Decimal("700000")},
+                {"account_code": "4-40000", "account_name": "Pendapatan Penjualan", "account_type": "revenue", "balance": Decimal("400000")},
+                {"account_code": "6-60000", "account_name": "Beban Operasional", "account_type": "expense", "balance": Decimal("250000")},
+            ]
+
+    pool = FakePool()
+    result = asyncio.run(get_financial_position_summary(pool, date(2026, 10, 31)))
+
+    # Saldo akhir kumulatif, bukan mutasi rentang tanggal.
+    assert "ledger.transaction_date <= $1" in pool.sql
+    assert pool.args == (date(2026, 10, 31),)
+
+    assert result["cash_bank"] == Decimal("800000.00")
+    assert result["inventory"] == Decimal("200000.00")
+    assert result["total_assets"] == Decimal("1000000.00")
+    assert result["total_liabilities"] == Decimal("150000.00")
+    assert result["equity_accounts"] == Decimal("700000.00")
+    # Laba berjalan kumulatif = pendapatan - beban.
+    assert result["net_profit"] == Decimal("150000.00")
+    assert result["total_equity"] == Decimal("850000.00")
+    assert result["total_liabilities_equity"] == Decimal("1000000.00")
+    assert result["difference"] == Decimal("0.00")
+    assert result["as_of"] == "2026-10-31"
+
+
+def test_financial_position_summary_without_end_date_reads_all_ledger_rows():
+    class FakePool:
+        def __init__(self):
+            self.sql = ""
+            self.args = ()
+
+        async def fetch(self, sql, *args):
+            self.sql = sql
+            self.args = args
+            return []
+
+    pool = FakePool()
+    result = asyncio.run(get_financial_position_summary(pool))
+
+    assert pool.args == (None,)
+    assert result["as_of"] is None
+    assert result["total_assets"] == Decimal("0.00")
+    assert result["total_liabilities_equity"] == Decimal("0.00")
+    assert result["difference"] == Decimal("0.00")
+    assert result["accounts"] == []
 
 
 def test_recent_finance_transactions_returns_five_latest_journal_rows():

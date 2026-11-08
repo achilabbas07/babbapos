@@ -1960,6 +1960,175 @@ async def get_dashboard_neraca_kas(connection: Any) -> dict[str, Any]:
     return dict(row)
 
 
+_POSITION_ACCOUNT_TYPE_SQL = """
+                        case
+                            when lower(coalesce(account.account_category, '')) = 'balance_sheet'
+                                then case left(ledger.account_code, 1)
+                                    when '1' then 'asset'
+                                    when '2' then 'liability'
+                                    when '3' then 'equity'
+                                    when '4' then 'revenue'
+                                    when '5' then 'expense'
+                                    when '6' then 'expense'
+                                    when '8' then 'expense'
+                                    else ledger.account_type
+                                end
+                            when lower(coalesce(account.account_category, '')) like 'asset%'
+                                or lower(coalesce(account.account_category, '')) like 'aset%'
+                                or lower(coalesce(account.account_category, '')) like 'aktiva%'
+                                or lower(coalesce(account.account_category, '')) like 'kas%'
+                                or lower(coalesce(account.account_category, '')) like 'cash%'
+                                then 'asset'
+                            when lower(coalesce(account.account_category, '')) like 'liabilit%'
+                                or lower(coalesce(account.account_category, '')) like 'kewajiban%'
+                                or lower(coalesce(account.account_category, '')) like 'utang%'
+                                or lower(coalesce(account.account_category, '')) like 'hutang%'
+                                then 'liability'
+                            when lower(coalesce(account.account_category, '')) like 'equity%'
+                                or lower(coalesce(account.account_category, '')) like 'ekuitas%'
+                                or lower(coalesce(account.account_category, '')) like 'modal%'
+                                then 'equity'
+                            when lower(coalesce(account.account_category, '')) like 'revenue%'
+                                or lower(coalesce(account.account_category, '')) like 'pendapatan%'
+                                or lower(coalesce(account.account_category, '')) like 'income%'
+                                then 'revenue'
+                            when lower(coalesce(account.account_category, '')) like 'expense%'
+                                or lower(coalesce(account.account_category, '')) like 'beban%'
+                                or lower(coalesce(account.account_category, '')) like 'biaya%'
+                                or lower(coalesce(account.account_category, '')) in ('cost_of_goods_sold', 'operating_expense')
+                                then 'expense'
+                            when ledger.account_code like '1-%' then 'asset'
+                            when ledger.account_code like '2-%' then 'liability'
+                            when ledger.account_code like '3-%' then 'equity'
+                            when ledger.account_code like '4-%' then 'revenue'
+                            when ledger.account_code like '5-%'
+                                or ledger.account_code like '6-%'
+                                or ledger.account_code like '8-%' then 'expense'
+                            else ledger.account_type
+                        end
+"""
+
+
+async def get_financial_position_summary(
+        pool: Any,
+        as_of_date: Optional[date] = None,
+) -> dict[str, Any]:
+        """Ringkasan posisi keuangan (neraca) kumulatif sampai ``as_of_date``.
+
+        Berbeda dari ``get_chart_of_accounts`` yang menghitung *mutasi* pada rentang
+        tanggal, fungsi ini menarik *saldo akhir* (ending balance) dari seluruh
+        mutasi ``general_ledger`` sejak awal usaha sampai tanggal tersebut. Laba
+        berjalan (pendapatan - beban kumulatif) dimasukkan ke komponen ekuitas agar
+        Aset = Liabilitas + Ekuitas tetap seimbang.
+        """
+        rows = await pool.fetch(
+                f"""
+                with classified_ledger as (
+                    select
+                        ledger.account_code,
+                        ledger.account_name,
+                        coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0) as debit,
+                        coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0) as credit,
+                        {_POSITION_ACCOUNT_TYPE_SQL} as account_type
+                    from public.general_ledger as ledger
+                    left join lateral (
+                        select coalesce(
+                                         nullif(btrim(to_jsonb(account_row)->>'account_category'), ''),
+                                         nullif(btrim(to_jsonb(account_row)->>'kategori_akun'), ''),
+                                         nullif(btrim(to_jsonb(account_row)->>'category'), '')
+                                     ) as account_category
+                        from public.chart_of_accounts as account_row
+                        where coalesce(
+                                        nullif(btrim(to_jsonb(account_row)->>'account_code'), ''),
+                                        nullif(btrim(to_jsonb(account_row)->>'kode_akun'), ''),
+                                        nullif(btrim(to_jsonb(account_row)->>'code'), ''),
+                                        nullif(btrim(to_jsonb(account_row)->>'kode'), '')
+                                    ) = ledger.account_code
+                        limit 1
+                    ) as account on true
+                    where ($1::date is null or ledger.transaction_date <= $1)
+                )
+                select
+                    account_code,
+                    account_name,
+                    account_type,
+                    sum(
+                        case
+                            when account_type in ('asset', 'expense') then debit - credit
+                            else credit - debit
+                        end
+                    ) as balance
+                from classified_ledger
+                where account_type in ('asset', 'liability', 'equity', 'revenue', 'expense')
+                group by account_code, account_name, account_type
+                """,
+                as_of_date,
+        )
+
+        cash_bank = Decimal("0.00")
+        inventory = Decimal("0.00")
+        total_assets = Decimal("0.00")
+        total_liabilities = Decimal("0.00")
+        equity_accounts = Decimal("0.00")
+        total_revenue = Decimal("0.00")
+        total_expense = Decimal("0.00")
+        accounts: list[dict[str, Any]] = []
+
+        for row in rows:
+                account_type = row["account_type"]
+                balance = _money(row["balance"])
+                if account_type == "asset":
+                        total_assets += balance
+                        if is_cash_bank_account(None, row["account_code"], row["account_name"]):
+                                cash_bank += balance
+                        if re.search(r"persediaan|inventory", row["account_name"] or "", re.IGNORECASE):
+                                inventory += balance
+                        accounts.append({
+                                "account_code": row["account_code"],
+                                "account_name": row["account_name"],
+                                "account_type": account_type,
+                                "balance": balance,
+                        })
+                elif account_type == "liability":
+                        total_liabilities += balance
+                        accounts.append({
+                                "account_code": row["account_code"],
+                                "account_name": row["account_name"],
+                                "account_type": account_type,
+                                "balance": balance,
+                        })
+                elif account_type == "equity":
+                        equity_accounts += balance
+                        accounts.append({
+                                "account_code": row["account_code"],
+                                "account_name": row["account_name"],
+                                "account_type": account_type,
+                                "balance": balance,
+                        })
+                elif account_type == "revenue":
+                        total_revenue += balance
+                elif account_type == "expense":
+                    total_expense += balance
+
+        net_profit = _money(total_revenue - total_expense)
+        total_equity = _money(equity_accounts + net_profit)
+        total_liabilities_equity = _money(total_liabilities + total_equity)
+
+        return {
+                "as_of": as_of_date.isoformat() if as_of_date else None,
+                "cash_bank": _money(cash_bank),
+                "inventory": _money(inventory),
+                "total_assets": _money(total_assets),
+                "total_liabilities": _money(total_liabilities),
+                "equity_accounts": _money(equity_accounts),
+                "net_profit": net_profit,
+                "total_equity": total_equity,
+                "total_liabilities_equity": total_liabilities_equity,
+                "difference": _money(total_assets - total_liabilities_equity),
+                "accounts": accounts,
+        }
+
+
 async def get_recent_finance_transactions(
     connection: Any,
     start_date: Optional[date] = None,

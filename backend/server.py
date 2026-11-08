@@ -31,6 +31,7 @@ from finance import (
     get_cash_bank_balances,
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
+    get_financial_position_summary,
     get_funding_account_balance,
     get_laporan_arus_kas,
     get_profit_and_loss_report,
@@ -1854,6 +1855,28 @@ async def finance_dashboard_summary(response: Response, _: User = Depends(ADMIN)
     except Exception as error:
         logger.exception("Failed to load finance dashboard summary")
         raise HTTPException(500, "Gagal memuat ringkasan dashboard keuangan.") from error
+    return {"status": "success", "data": data}
+
+
+@app.get("/api/v1/finance/position-summary")
+async def finance_position_summary(
+    response: Response,
+    end_date: Optional[date] = None,
+    _: User = Depends(ADMIN),
+):
+    """Posisi keuangan (neraca) kumulatif sampai ``end_date``.
+
+    Saldo ditarik dari awal usaha (seluruh general_ledger) hingga tanggal akhir
+    filter, bukan mutasi per rentang tanggal. Laba berjalan kumulatif sudah
+    dimasukkan ke ekuitas sehingga Aset = Liabilitas + Ekuitas.
+    """
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    try:
+        await db.connect()
+        data = await get_financial_position_summary(db.pool, end_date)
+    except Exception as error:
+        logger.exception("Failed to load finance position summary")
+        raise HTTPException(500, "Gagal memuat ringkasan posisi keuangan.") from error
     return {"status": "success", "data": data}
 
 
