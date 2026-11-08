@@ -297,6 +297,12 @@ async def root():
     return {"message": "F&B POS API"}
 
 
+@api.get("/ping")
+async def ping():
+    """Health check ringan untuk Uptime Monitor (tanpa akses database)."""
+    return {"status": "ok", "message": "Server is active"}
+
+
 @api.get("/auth/users")
 async def login_users():
     docs = await db.users.find({}, {"name": 1, "role": 1}).sort([("role", 1), ("name", 1)]).to_list(None)
