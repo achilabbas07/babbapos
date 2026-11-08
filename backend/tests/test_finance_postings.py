@@ -245,6 +245,26 @@ def test_vercel_mirror_endpoints_match_server_implementation():
         )
 
 
+def test_check_pin_does_not_touch_dropped_login_attempts_table():
+    """Regresi: tabel `login_attempts` sudah dihapus, sehingga `check_pin`
+    tidak boleh lagi mengaksesnya (memicu KeyError 500 saat login).
+
+    Logika autentikasi tetap: cari kredensial di tabel `users` lalu verifikasi
+    PIN bcrypt dengan `verify_pin`.
+    """
+    import inspect
+
+    import server
+
+    source = inspect.getsource(server.check_pin)
+    assert "login_attempts" not in source
+    assert "db.users.find(" in source
+    assert "verify_pin(pin, doc[\"pin\"])" in source
+
+    mirror = _mirror_source()
+    assert "login_attempts" not in mirror
+
+
 def test_get_chart_of_accounts_keeps_unmutated_master_accounts_and_sorts_by_code():
     class FakePool:
         async def fetch(self, query, *args):

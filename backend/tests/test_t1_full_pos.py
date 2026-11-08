@@ -58,7 +58,6 @@ def setup():
     a.delete(f"{BASE}/customers/{S['cust']}")
     a.delete(f"{BASE}/users/{S['kid']}")
     a.delete(f"{BASE}/users/{S['wid']}")
-    MDB.login_attempts.delete_many({"identifier": {"$regex": "^10\\.88\\."}})
 
 
 def bill(s, table, items, name="TEST_Bill", **kw):

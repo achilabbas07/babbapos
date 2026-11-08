@@ -41,7 +41,6 @@ def setup():
     S["kasir"].post(f"{BASE}/shifts/close", json={"countedCash": 0})
     a.delete(f"{BASE}/users/{S['wid']}")
     a.delete(f"{BASE}/users/{S['kid']}")
-    MDB.login_attempts.delete_many({"identifier": {"$regex": "^10\\.88\\."}})
 
 
 def my_target(s):

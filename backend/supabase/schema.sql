@@ -344,7 +344,6 @@ create table if not exists app_profile (
   "printerKasir"  text not null default '',
   "cetakOtomatis" boolean not null default false
 );
-create table if not exists login_attempts (identifier text primary key, count integer not null default 0, locked_until timestamptz);
 
 alter table shifts         enable row level security;
 alter table cash_movements enable row level security;
@@ -355,4 +354,3 @@ alter table order_logs     enable row level security;
 alter table counters       enable row level security;
 alter table meta           enable row level security;
 alter table app_profile    enable row level security;
-alter table login_attempts enable row level security;

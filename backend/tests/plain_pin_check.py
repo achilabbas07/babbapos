@@ -26,7 +26,6 @@ async def main():
         print("LOGIN HASHED", r.status_code)
     finally:
         await c.execute("delete from users where id='USR-TEST-PLAIN'")
-        await c.execute("delete from login_attempts")
         await c.close()
         print("CLEANED")
 

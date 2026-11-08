@@ -368,10 +368,6 @@ async def mark_paid(table_id: str, trx: Transaction):
     await db.tables.update_one({"_id": table_id}, {"$set": {"status": "paid", "open_bill_id": None, "orderData": order_data}})
 
 
-def client_ident(request: Request) -> str:
-    return (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")).split(",")[0].strip()
-
-
 async def check_pin(
     request: Request,
     pin: str,
@@ -379,12 +375,6 @@ async def check_pin(
     user_id: Optional[str] = None,
     name: Optional[str] = None,
 ) -> dict:
-    ident = client_ident(request)
-    now = datetime.now(timezone.utc)
-    att = await db.login_attempts.find_one({"identifier": ident}) or {}
-    locked = att.get("locked_until")
-    if locked and datetime.fromisoformat(locked) > now:
-        raise HTTPException(429, "Terlalu banyak percobaan PIN salah. Coba lagi dalam 15 menit.")
     query = {"role": role} if role else {}
     if user_id:
         query["_id"] = user_id
@@ -392,11 +382,7 @@ async def check_pin(
         query["name"] = name
     async for doc in db.users.find(query):
         if verify_pin(pin, doc["pin"]):
-            await db.login_attempts.delete_one({"identifier": ident})
             return doc
-    count = 1 if locked else att.get("count", 0) + 1
-    update = {"count": count, "locked_until": (now + timedelta(minutes=15)).isoformat() if count >= 5 else None}
-    await db.login_attempts.update_one({"identifier": ident}, {"$set": update}, upsert=True)
     if name:
         detail = "Nama atau PIN salah"
     else:

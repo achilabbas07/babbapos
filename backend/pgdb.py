@@ -5,7 +5,7 @@ from decimal import Decimal
 import asyncpg
 from fastapi import HTTPException
 
-PK = {"login_attempts": "identifier"}
+PK = {}
 NO_PK = {"recipes"}
 OPS = {"$gte": ">=", "$gt": ">", "$lte": "<=", "$lt": "<"}
 

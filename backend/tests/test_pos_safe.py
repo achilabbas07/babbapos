@@ -86,7 +86,6 @@ def data(admin):
         MDB[coll].delete_many({"_id": {"$in": CREATED[coll]}})
     MDB.recipes.delete_many({"productId": {"$in": CREATED["products"]}})
     MDB.expenses.delete_many({"category": {"$regex": "^TEST_"}})
-    MDB.login_attempts.delete_many({"identifier": TEST_IP})
 
 
 # ---------- Auth / roles ----------

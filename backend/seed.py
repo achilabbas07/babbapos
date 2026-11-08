@@ -86,7 +86,6 @@ async def create_indexes():
     await db.open_bills.create_index("tableId")
     await db.purchases.create_index("date")
     await db.expenses.create_index("date")
-    await db.login_attempts.create_index("identifier", unique=True)
 
 
 async def seed_all():
