@@ -313,6 +313,36 @@ def _normal_balance_side(account: dict, account_type: Optional[str]) -> str:
     return "debit" if account_type in {"asset", "expense"} else "credit"
 
 
+async def get_funding_account_balance(connection: Any, account_code: str) -> Decimal:
+    """Saldo berjalan satu akun kas/bank dari ledger resmi (general_ledger).
+
+    `general_ledger` adalah ledger otoritatif dan menyimpan DUA pasang kolom
+    nominal (legacy `debit`/`credit` dan `debit_amount`/`credit_amount`), jadi
+    pembacaan wajib memakai pola coalesce ganda. Tabel legacy
+    `jurnal_transaksi` TIDAK boleh dipakai untuk validasi saldo kas karena
+    hanya menerima sisi keluar (pengeluaran/pembelian) sementara pendapatan POS
+    hanya ditulis ke `general_ledger`, sehingga saldo di sana bisa negatif
+    padahal kas fisik tersedia.
+    """
+    if not account_code:
+        return Decimal("0.00")
+    value = await connection.fetchval(
+        """
+        select coalesce(
+            sum(
+                coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)
+                - coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)
+            ),
+            0
+        )
+        from public.general_ledger as ledger
+        where ledger.account_code = $1
+        """,
+        account_code,
+    )
+    return _money(value)
+
+
 async def get_chart_of_accounts(
     pool: Any,
     start_date: Optional[date] = None,

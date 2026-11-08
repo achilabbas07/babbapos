@@ -17,20 +17,26 @@ from variants import (
     variant_hpp,
 )
 from finance import (
+    ACCOUNT_PERSEDIAAN_BAHAN_ID,
     checkout_cash_amounts,
     checkout_journal_account_codes,
     checkout_journal_lines,
+    debt_payment_lines,
     expense_account_codes,
     expense_lines,
+    get_cash_bank_accounts,
     get_chart_of_accounts,
+    get_funding_account_balance,
     get_laporan_arus_kas,
     get_profit_and_loss_report,
     get_recent_finance_transactions,
     normalize_checkout_payments,
     post_cash_expense_journal,
+    post_debt_payment_journal,
     post_finance_source,
-    post_purchase_payment_journal,
+    post_purchase_journal,
     primary_checkout_method,
+    purchase_journal_lines,
     resolve_expense_account_code,
     transaction_account_codes,
     transaction_lines,
@@ -40,11 +46,13 @@ import logging
 import asyncpg
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Literal, Optional
+from decimal import Decimal
+from typing import Any, List, Literal, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.middleware.cors import CORSMiddleware
 import os
 
@@ -181,9 +189,28 @@ class PurchaseItemIn(BaseModel):
 
 class PurchaseIn(BaseModel):
     date: Optional[str] = None
-    supplier: str = Field(min_length=1)
+    supplier_id: int = Field(gt=0)
     items: List[PurchaseItemIn] = Field(min_length=1)
-    sumber_dana_akun: Literal["1-10001", "1-10002"] = "1-10001"
+    metode_pembayaran: Literal["cash", "credit"] = "cash"
+    sumber_dana_akun: Optional[str] = Field(None, min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def require_funding_account_for_cash(self):
+        if self.metode_pembayaran == "cash" and self.sumber_dana_akun is None:
+            raise ValueError("Sumber dana wajib dipilih untuk pembelian tunai.")
+        return self
+
+
+class DebtPaymentIn(BaseModel):
+    purchase_id: str = Field(min_length=1)
+    amount: int = Field(gt=0)
+    sumber_dana_akun: str = Field(min_length=1, max_length=32)
+
+
+class SupplierPaymentIn(BaseModel):
+    purchase_id: str = Field(min_length=1)
+    sumber_dana_akun: str = Field(min_length=1, max_length=32)
+    jumlah_bayar: float = Field(gt=0)
 
 
 class ExpenseIn(BaseModel):
@@ -199,6 +226,19 @@ async def get_or_404(coll: str, doc_id: str, label: str) -> dict:
     if not doc:
         raise HTTPException(404, f"{label} {doc_id} tidak ditemukan")
     return doc
+
+
+async def require_cash_bank_funding_account(connection, account_code: str) -> dict[str, Any]:
+    """Pastikan kode akun benar-benar akun kas/bank yang terdaftar.
+
+    Hanya memeriksa VALIDITAS akun, bukan saldo. Saldo tidak pernah dipakai
+    sebagai gate karena kas fisik bisa tersedia walau saldo ledger belum
+    tercatat (lihat `get_funding_account_balance`).
+    """
+    accounts = await get_cash_bank_accounts(connection, account_code)
+    if len(accounts) != 1:
+        raise HTTPException(422, "Sumber dana harus berupa akun kas atau bank yang valid.")
+    return accounts[0]
 
 
 def unit_price(p: Product, order_type: str) -> float:
@@ -875,6 +915,13 @@ async def list_purchases(_: User = Depends(ADMIN)):
 
 @api.post("/purchases")
 async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
+    await db.connect()
+    supplier = await db.pool.fetchrow(
+        "select id, nama_supplier from public.master_suppliers where id = $1",
+        body.supplier_id,
+    )
+    if supplier is None:
+        raise HTTPException(404, "Supplier tidak ditemukan.")
     ids = list({i.inventoryId for i in body.items})
     inv = {d["_id"]: d async for d in db.inventory.find({"_id": {"$in": ids}})}
     missing = [i for i in ids if i not in inv]
@@ -882,22 +929,241 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
         raise HTTPException(404, f"Bahan tidak ditemukan: {', '.join(missing)}")
     items = [{"inventoryId": i.inventoryId, "name": inv[i.inventoryId]["name"], "unit": inv[i.inventoryId]["unit"],
               "qty": i.qty, "cost_per_unit": i.cost_per_unit, "subtotal": i.qty * i.cost_per_unit} for i in body.items]
+    total_cost = int(round(sum(i["subtotal"] for i in items)))
     purchase = Purchase(id=await next_id(f"PO-{local_date_str()}"),
-                        date=to_utc_iso(body.date) if body.date else now_iso(), supplier=body.supplier,
-                        items_json=items, total_cost=sum(i["subtotal"] for i in items), userId=user.id, userName=user.name)
-    await db.connect()
-    async with db.pool.acquire() as conn:
-        async with conn.transaction():
-            await db.purchases.insert_one(purchase.to_mongo(), connection=conn)
-            await post_purchase_payment_journal(
-                conn,
-                purchase.total_cost,
-                body.sumber_dana_akun,
-                f"Pembelian persediaan {purchase.id} - {purchase.supplier}",
-            )
+                        date=to_utc_iso(body.date) if body.date else now_iso(),
+                        supplier=supplier["nama_supplier"], supplier_id=supplier["id"],
+                        items_json=items, total_cost=total_cost,
+                        metode_pembayaran=body.metode_pembayaran,
+                        status_pembayaran="belum_lunas" if body.metode_pembayaran == "credit" else "lunas",
+                        sisa_utang=total_cost if body.metode_pembayaran == "credit" else 0,
+                        userId=user.id, userName=user.name)
+    try:
+        async with db.pool.acquire() as conn:
+            async with conn.transaction():
+                if body.metode_pembayaran == "cash":
+                    await require_cash_bank_funding_account(conn, body.sumber_dana_akun)
+                await db.purchases.insert_one(purchase.to_mongo(), connection=conn)
+                await post_finance_source(
+                    conn,
+                    "purchase",
+                    purchase.id,
+                    to_local_date(purchase.date),
+                    f"Pembelian persediaan {purchase.id}",
+                    user.id,
+                    purchase_journal_lines(
+                        purchase.total_cost,
+                        body.metode_pembayaran,
+                        body.sumber_dana_akun,
+                    ),
+                    account_codes=[
+                        ACCOUNT_PERSEDIAAN_BAHAN_ID,
+                        "2-20001" if body.metode_pembayaran == "credit" else body.sumber_dana_akun,
+                    ],
+                )
+                await post_purchase_journal(
+                    conn,
+                    purchase.total_cost,
+                    body.metode_pembayaran,
+                    body.sumber_dana_akun,
+                    f"Pembelian persediaan {purchase.id} - {purchase.supplier}",
+                )
+    except asyncpg.PostgresError:
+        logger.exception(
+            "Gagal menyimpan pembelian %s dengan metode %s",
+            purchase.id,
+            body.metode_pembayaran,
+        )
+        raise
     for inv_id in ids:
         await recalc_hpp_for_inventory(inv_id)
     return purchase
+
+
+@api.get("/v1/finance/suppliers")
+async def finance_suppliers(_: User = Depends(ADMIN)):
+    await db.connect()
+    rows = await db.pool.fetch(
+        "select id, nama_supplier from public.master_suppliers order by nama_supplier"
+    )
+    return [dict(row) for row in rows]
+
+
+@api.post("/v1/finance/debts/pay")
+async def pay_purchase_debt(body: DebtPaymentIn, user: User = Depends(ADMIN)):
+    await db.connect()
+    payment_id = str(uuid4())
+    paid_at = today_local()
+    description = f"Pelunasan utang pembelian {body.purchase_id}"
+
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            await require_cash_bank_funding_account(conn, body.sumber_dana_akun)
+            purchase = await conn.fetchrow(
+                """
+                select id, sisa_utang, status_pembayaran
+                from public.purchases
+                where id = $1
+                for update
+                """,
+                body.purchase_id,
+            )
+            if purchase is None:
+                raise HTTPException(404, "Nota pembelian tidak ditemukan.")
+            outstanding = int(purchase["sisa_utang"] or 0)
+            if outstanding <= 0 or purchase["status_pembayaran"] == "lunas":
+                raise HTTPException(409, "Nota pembelian sudah lunas.")
+            if body.amount > outstanding:
+                raise HTTPException(422, "Jumlah pembayaran melebihi sisa utang.")
+
+            # Informasi saldo saja (tidak memblokir). Lihat catatan pada
+            # pay_supplier: `jurnal_transaksi` bukan ledger resmi.
+            cash_balance = await get_funding_account_balance(
+                conn, body.sumber_dana_akun
+            )
+            saldo_setelah = cash_balance - Decimal(str(body.amount))
+
+            remaining = outstanding - body.amount
+            status = "lunas" if remaining <= 0 else "belum_lunas"
+            await conn.execute(
+                """
+                update public.purchases
+                set sisa_utang = $2, status_pembayaran = $3
+                where id = $1
+                """,
+                body.purchase_id,
+                remaining,
+                status,
+            )
+            await post_finance_source(
+                conn,
+                "purchase_debt_payment",
+                payment_id,
+                paid_at,
+                description,
+                user.id,
+                debt_payment_lines(body.amount, body.sumber_dana_akun),
+                account_codes=["2-20001", body.sumber_dana_akun],
+            )
+            await post_debt_payment_journal(
+                conn,
+                body.amount,
+                body.sumber_dana_akun,
+                description,
+            )
+
+    return {
+        "payment_id": payment_id,
+        "purchase_id": body.purchase_id,
+        "amount_paid": body.amount,
+        "sisa_utang": remaining,
+        "status_pembayaran": status,
+        "saldo_sumber_dana": float(cash_balance),
+        "saldo_setelah_pembayaran": float(saldo_setelah),
+        "saldo_minus": saldo_setelah < 0,
+    }
+
+
+@api.post("/v1/finance/pay-supplier")
+async def pay_supplier(body: SupplierPaymentIn, user: User = Depends(ADMIN)):
+    amount = Decimal(str(body.jumlah_bayar))
+    if amount != amount.to_integral_value():
+        raise HTTPException(422, "Jumlah pembayaran harus berupa Rupiah bulat.")
+    amount_int = int(amount)
+    await db.connect()
+
+    payment_id = uuid4()
+    paid_at = today_local()
+    description = f"Pembayaran utang supplier {body.purchase_id}"
+
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            await require_cash_bank_funding_account(conn, body.sumber_dana_akun)
+            purchase = await conn.fetchrow(
+                """
+                select id, sisa_utang, status_pembayaran
+                from public.purchases
+                where id = $1
+                for update
+                """,
+                body.purchase_id,
+            )
+            if purchase is None:
+                raise HTTPException(404, "Nota pembelian tidak ditemukan.")
+
+            outstanding = Decimal(str(purchase["sisa_utang"] or 0))
+            if outstanding <= 0 or purchase["status_pembayaran"] == "lunas":
+                raise HTTPException(409, "Nota pembelian sudah lunas.")
+            if amount > outstanding:
+                raise HTTPException(400, "Jumlah pembayaran melebihi sisa utang aktual.")
+
+            # Saldo sumber dana hanya dilaporkan sebagai informasi, TIDAK
+            # memblokir pembayaran. Validasi lama membaca `jurnal_transaksi`
+            # (tabel legacy yang hanya menerima sisi kas keluar) sehingga
+            # saldo akun kas selalu negatif dan pembayaran sah ikut ditolak
+            # dengan pesan saldo tidak mencukupi. Ledger resmi adalah
+            # `general_ledger`; kas fisik bisa saja tersedia walau saldo
+            # ledger belum tercatat, jadi pembayaran tetap diizinkan.
+            cash_balance = await get_funding_account_balance(
+                conn, body.sumber_dana_akun
+            )
+            saldo_setelah = cash_balance - amount
+
+            updated_purchase = await conn.fetchrow(
+                """
+                update public.purchases
+                set
+                  sisa_utang = sisa_utang - $2::numeric,
+                  status_pembayaran = case
+                    when (sisa_utang - $2::numeric) <= 0 then 'lunas'
+                    else 'belum_lunas'
+                  end
+                where id = $1
+                returning sisa_utang, status_pembayaran
+                """,
+                body.purchase_id,
+                amount,
+            )
+            remaining = int(updated_purchase["sisa_utang"])
+            status = updated_purchase["status_pembayaran"]
+            await conn.execute(
+                """
+                insert into public.supplier_payments
+                  (id, purchase_id, sumber_dana_akun, jumlah_bayar)
+                values ($1, $2, $3, $4)
+                """,
+                payment_id,
+                body.purchase_id,
+                body.sumber_dana_akun,
+                amount_int,
+            )
+            await post_finance_source(
+                conn,
+                "purchase_debt_payment",
+                str(payment_id),
+                paid_at,
+                description,
+                user.id,
+                debt_payment_lines(amount, body.sumber_dana_akun),
+                account_codes=["2-20001", body.sumber_dana_akun],
+            )
+            await post_debt_payment_journal(
+                conn,
+                amount,
+                body.sumber_dana_akun,
+                description,
+            )
+
+    return {
+        "payment_id": str(payment_id),
+        "purchase_id": body.purchase_id,
+        "jumlah_bayar": amount_int,
+        "sisa_utang": int(remaining),
+        "status_pembayaran": status,
+        "saldo_sumber_dana": float(cash_balance),
+        "saldo_setelah_pembayaran": float(saldo_setelah),
+        "saldo_minus": saldo_setelah < 0,
+    }
 
 
 # ---------- Expenses ----------

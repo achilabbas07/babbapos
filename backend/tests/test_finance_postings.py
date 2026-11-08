@@ -13,6 +13,7 @@ from finance import (
     get_chart_of_accounts,
     get_cash_bank_accounts,
     get_cash_bank_balances,
+    get_funding_account_balance,
     get_recent_finance_transactions,
     is_cash_bank_account,
     post_cash_expense_journal,
@@ -92,6 +93,156 @@ def test_get_cash_bank_balances_groups_by_account_code_and_category():
         "sumber_dana": "Kas Tunai",
         "saldo_berjalan": Decimal("800.00"),
     }]
+
+
+def test_get_funding_account_balance_reads_general_ledger_with_dual_amount_columns():
+    class FakeConnection:
+        def __init__(self):
+            self.queries = []
+
+        async def fetchval(self, query, account_code):
+            self.queries.append((query, account_code))
+            return Decimal("4436250.00")
+
+    connection = FakeConnection()
+    balance = asyncio.run(get_funding_account_balance(connection, "1-10001"))
+
+    assert balance == Decimal("4436250.00")
+    query, account_code = connection.queries[0]
+    assert account_code == "1-10001"
+    assert "from public.general_ledger as ledger" in query
+    assert "coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)" in query
+    assert "coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)" in query
+    assert "jurnal_transaksi" not in query
+
+
+def test_get_funding_account_balance_returns_zero_for_blank_account_code():
+    class ExplodingConnection:
+        async def fetchval(self, query, account_code):
+            raise AssertionError("query tidak boleh dijalankan untuk kode akun kosong")
+
+    assert asyncio.run(get_funding_account_balance(ExplodingConnection(), "")) == Decimal("0.00")
+
+
+def test_get_funding_account_balance_allows_negative_ledger_balance():
+    class FakeConnection:
+        async def fetchval(self, query, account_code):
+            return Decimal("-1697801.00")
+
+    balance = asyncio.run(get_funding_account_balance(FakeConnection(), "1-10001"))
+
+    assert balance == Decimal("-1697801.00")
+
+
+def test_pay_supplier_does_not_block_on_legacy_jurnal_transaksi_balance():
+    """Regresi: pembayaran utang supplier tidak boleh ditolak karena saldo
+    `jurnal_transaksi` negatif. Ledger resmi adalah `general_ledger`."""
+    import inspect
+
+    import server
+
+    source = inspect.getsource(server.pay_supplier)
+    assert "Saldo sumber dana tidak mencukupi" not in source
+    assert "lock table public.jurnal_transaksi" not in source
+    assert "from public.jurnal_transaksi" not in source
+    assert "get_funding_account_balance" in source
+    # Validasi kewajaran akun kas/bank tetap dipertahankan.
+    assert "require_cash_bank_funding_account" in source
+
+
+def test_pay_purchase_debt_reports_balance_without_blocking():
+    import inspect
+
+    import server
+
+    source = inspect.getsource(server.pay_purchase_debt)
+    assert "Saldo sumber dana tidak mencukupi" not in source
+    assert "from public.jurnal_transaksi" not in source
+    assert "get_funding_account_balance" in source
+
+
+def _mirror_source():
+    """Baca `api/index.py` (mirror Vercel) sebagai teks sumber."""
+    from pathlib import Path
+
+    mirror = Path(__file__).resolve().parents[2] / "api" / "index.py"
+    assert mirror.is_file(), f"Mirror Vercel tidak ditemukan: {mirror}"
+    return mirror.read_text(encoding="utf-8")
+
+
+def test_vercel_mirror_exposes_debt_payment_endpoints():
+    """Regresi: `api/index.py` harus memuat endpoint pelunasan utang supplier
+    yang sama dengan `backend/server.py`, bukan hanya versi parsial."""
+    source = _mirror_source()
+    assert '@api.post("/v1/finance/debts/pay")' in source
+    assert '@api.post("/v1/finance/pay-supplier")' in source
+    assert "async def pay_purchase_debt(" in source
+    assert "async def pay_supplier(" in source
+
+
+def test_vercel_mirror_has_no_hardcoded_balance_gate():
+    """Regresi: mirror tidak boleh mengunci transaksi karena saldo.
+
+    Saldo hanya dilaporkan sebagai informasi; kas fisik bisa tersedia walau
+    saldo ledger belum tercatat.
+    """
+    source = _mirror_source()
+    assert "Saldo sumber dana tidak mencukupi" not in source
+    assert "lock table public.jurnal_transaksi" not in source
+    assert "from public.jurnal_transaksi" not in source
+    # Saldo tetap dilaporkan pada response.
+    assert "saldo_sumber_dana" in source
+    assert "saldo_setelah_pembayaran" in source
+    assert "saldo_minus" in source
+    # Ledger resmi yang dipakai untuk membaca saldo.
+    assert "get_funding_account_balance" in source
+
+
+def test_vercel_mirror_purchase_model_supports_payment_method_and_funding_account():
+    """Regresi: `PurchaseIn` di mirror harus mendukung `metode_pembayaran`
+    dan `sumber_dana_akun` bebas (Kas & Bank), bukan literal dua akun."""
+    source = _mirror_source()
+    assert 'metode_pembayaran: Literal["cash", "credit"] = "cash"' in source
+    assert "sumber_dana_akun: Optional[str]" in source
+    assert 'Literal["1-10001", "1-10002"]' not in source
+    assert "require_funding_account_for_cash" in source
+
+
+def test_vercel_mirror_endpoints_match_server_implementation():
+    """Regresi: badan fungsi di mirror harus identik dengan `server.py` agar
+    perilaku Vercel dan server tidak pernah menyimpang."""
+    import ast
+    import inspect
+    from pathlib import Path
+
+    import server
+
+    mirror_path = Path(__file__).resolve().parents[2] / "api" / "index.py"
+    mirror_text = mirror_path.read_text(encoding="utf-8")
+    mirror_tree = ast.parse(mirror_text)
+    mirror_lines = mirror_text.splitlines()
+
+    def mirror_body(name):
+        for node in ast.walk(mirror_tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+                end = max(getattr(n, "end_lineno", node.lineno) for n in ast.walk(node))
+                return mirror_lines[node.lineno - 1:end]
+        raise AssertionError(f"Fungsi {name} tidak ditemukan di api/index.py")
+
+    def body_only(lines):
+        # Dekorator sengaja berbeda: server memakai `@app.post("/api/v1/...")`
+        # sedangkan mirror memakai `@api.post("/v1/...")` karena router sudah
+        # berprefix `/api`. Yang wajib identik adalah badan fungsinya.
+        for index, line in enumerate(lines):
+            if line.lstrip().startswith(("async def ", "def ")):
+                return lines[index:]
+        return lines
+
+    for name in ("pay_purchase_debt", "pay_supplier", "create_purchase"):
+        expected = body_only(inspect.getsource(getattr(server, name)).splitlines())
+        assert body_only(mirror_body(name)) == expected, (
+            f"{name} di api/index.py menyimpang dari backend/server.py"
+        )
 
 
 def test_get_chart_of_accounts_keeps_unmutated_master_accounts_and_sorts_by_code():

@@ -45,12 +45,18 @@ export function SupplierPaymentDialog({ open, onOpenChange, purchase, onSaved })
 
     setSaving(true);
     try {
-      await api.post("/v1/finance/pay-supplier", {
+      const { data } = await api.post("/v1/finance/pay-supplier", {
         purchase_id: purchase.id,
         sumber_dana_akun: fundingAccount,
         jumlah_bayar: paidAmount,
       });
       toast.success("Pembayaran utang supplier berhasil dicatat.");
+      if (data?.saldo_minus) {
+        toast.warning(
+          `Saldo tercatat sumber dana menjadi ${rp(data.saldo_setelah_pembayaran)}. ` +
+            "Pembayaran tetap dicatat; lengkapi saldo awal kas/bank agar laporan akurat.",
+        );
+      }
       await onSaved();
       onOpenChange(false);
     } catch (error) {

@@ -31,6 +31,7 @@ from finance import (
     get_cash_bank_balances,
     get_dashboard_neraca_kas,
     get_chart_of_accounts,
+    get_funding_account_balance,
     get_laporan_arus_kas,
     get_profit_and_loss_report,
     get_recent_finance_transactions,
@@ -1418,6 +1419,13 @@ async def pay_purchase_debt(body: DebtPaymentIn, user: User = Depends(ADMIN)):
             if body.amount > outstanding:
                 raise HTTPException(422, "Jumlah pembayaran melebihi sisa utang.")
 
+            # Informasi saldo saja (tidak memblokir). Lihat catatan pada
+            # pay_supplier: `jurnal_transaksi` bukan ledger resmi.
+            cash_balance = await get_funding_account_balance(
+                conn, body.sumber_dana_akun
+            )
+            saldo_setelah = cash_balance - Decimal(str(body.amount))
+
             remaining = outstanding - body.amount
             status = "lunas" if remaining <= 0 else "belum_lunas"
             await conn.execute(
@@ -1453,6 +1461,9 @@ async def pay_purchase_debt(body: DebtPaymentIn, user: User = Depends(ADMIN)):
         "amount_paid": body.amount,
         "sisa_utang": remaining,
         "status_pembayaran": status,
+        "saldo_sumber_dana": float(cash_balance),
+        "saldo_setelah_pembayaran": float(saldo_setelah),
+        "saldo_minus": saldo_setelah < 0,
     }
 
 
@@ -1489,19 +1500,17 @@ async def pay_supplier(body: SupplierPaymentIn, user: User = Depends(ADMIN)):
             if amount > outstanding:
                 raise HTTPException(400, "Jumlah pembayaran melebihi sisa utang aktual.")
 
-            await conn.execute(
-                "lock table public.jurnal_transaksi in share row exclusive mode"
+            # Saldo sumber dana hanya dilaporkan sebagai informasi, TIDAK
+            # memblokir pembayaran. Validasi lama membaca `jurnal_transaksi`
+            # (tabel legacy yang hanya menerima sisi kas keluar) sehingga
+            # saldo akun kas selalu negatif dan pembayaran sah ikut ditolak
+            # dengan pesan saldo tidak mencukupi. Ledger resmi adalah
+            # `general_ledger`; kas fisik bisa saja tersedia walau saldo
+            # ledger belum tercatat, jadi pembayaran tetap diizinkan.
+            cash_balance = await get_funding_account_balance(
+                conn, body.sumber_dana_akun
             )
-            cash_balance = await conn.fetchval(
-                """
-                select coalesce(sum(debit), 0) - coalesce(sum(kredit), 0)
-                from public.jurnal_transaksi
-                where kode_akun = $1
-                """,
-                body.sumber_dana_akun,
-            )
-            if Decimal(str(cash_balance or 0)) < amount:
-                raise HTTPException(400, "Saldo sumber dana tidak mencukupi.")
+            saldo_setelah = cash_balance - amount
 
             updated_purchase = await conn.fetchrow(
                 """
@@ -1554,6 +1563,9 @@ async def pay_supplier(body: SupplierPaymentIn, user: User = Depends(ADMIN)):
         "jumlah_bayar": amount_int,
         "sisa_utang": int(remaining),
         "status_pembayaran": status,
+        "saldo_sumber_dana": float(cash_balance),
+        "saldo_setelah_pembayaran": float(saldo_setelah),
+        "saldo_minus": saldo_setelah < 0,
     }
 
 
