@@ -70,12 +70,12 @@ describe("waiter shift report printer", () => {
     expect(lines.find(({ text }) => text.startsWith("Ditutup"))?.text.endsWith(expectedClosed)).toBe(true);
   });
 
-  it("encodes the report and feeds three lines before cutting", () => {
+  it("encodes the report and feeds two lines before cutting", () => {
     const bytes = Array.from(buildWaiterShiftReportBytes(shift));
     const cutIndex = bytes.findIndex((byte, index) => byte === 0x1d && bytes[index + 1] === 0x56);
 
     expect(String.fromCharCode(...bytes.slice(0, cutIndex))).toContain("SHIFT PELAYAN");
-    expect(bytes.slice(cutIndex - 6, cutIndex)).toEqual([0x0a, 0x0d, 0x0a, 0x0d, 0x0a, 0x0d]);
+    expect(bytes.slice(cutIndex - 4, cutIndex)).toEqual([0x0a, 0x0d, 0x0a, 0x0d]);
     expect(bytes.slice(cutIndex, cutIndex + 3)).toEqual([0x1d, 0x56, 0x00]);
   });
 

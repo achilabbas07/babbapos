@@ -84,9 +84,10 @@ describe("thermal print templates", () => {
       itemName,
     });
 
-    // Bayar = jumlah seluruh kaki (10.000 + 10.000 = 20.000), bukan porsi tunai saja.
-    expect(lines).toContain("Bayar: Rp20000");
-    expect(lines).toContain("Bayar Split");
+    // "Total" sudah final; rincian metode langsung mengikuti tanpa baris "Bayar Split"/"Bayar:".
+    expect(lines).toContain("Total: Rp20000");
+    expect(lines).not.toContain("Bayar Split");
+    expect(lines.some((line) => line.startsWith("Bayar:"))).toBe(false);
     expect(lines).toContain("• Cash: Rp10000");
     expect(lines).toContain("• QRIS: Rp10000");
     // Kembalian dihitung dari total bayar gabungan (tanpa `change` dari backend → 0).

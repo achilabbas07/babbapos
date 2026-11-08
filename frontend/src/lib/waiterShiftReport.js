@@ -181,6 +181,7 @@ export function buildWaiterShiftReportBytes(shift) {
     encoder.text(line.text).newline();
     if (line.bold) encoder.bold();
   }
-  encoder.align("left").newline().newline().newline().cut();
+  // Maksimal 2 baris kosong sebelum potong kertas agar tidak membuang kertas.
+  encoder.align("left").newline().newline().cut();
   return encoder.encode();
 }

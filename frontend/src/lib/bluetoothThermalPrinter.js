@@ -167,12 +167,15 @@ function paymentLines(data) {
     { type: "text", text: "--------------------------------" },
     { type: "text", text: formatLine(`Subtotal ${itemCount} Produk`, formatCurrency(subtotal)) },
     { type: "text", text: formatLine("Total", formatCurrency(total)), bold: true },
-    { type: "text", text: "--------------------------------" },
-    { type: "text", text: formatLine(`Bayar ${isSplit ? "Split" : paymentMethod}`, formatCurrency(isSplit ? paid : cash)) },
-    { type: "text", text: formatLine("Total Bayar", formatCurrency(paid)) },
+    // Split: baris "Total" di atas sudah final, jadi cukup rincian metode + kembalian
+    // (tanpa "Bayar Split"/"Total Bayar" yang nilainya sama persis dengan "Total").
     ...(isSplit
       ? payments.map((leg) => ({ type: "text", text: formatLine(`  ${leg.method}`, formatCurrency(leg.amount)) }))
-      : []),
+      : [
+          { type: "text", text: "--------------------------------" },
+          { type: "text", text: formatLine(`Bayar ${paymentMethod}`, formatCurrency(cash)) },
+          { type: "text", text: formatLine("Total Bayar", formatCurrency(paid)) },
+        ]),
     ...(isCash
       ? [{ type: "text", text: formatLine("Kembalian", formatCurrency(changeDue)) }]
       : []),
@@ -426,7 +429,7 @@ export async function buildEscPosReceipt(type, data) {
     if (line.bold) command(0x1b, 0x45, 0x00);
   }
   command(0x1b, 0x61, 0x00);
-  command(0x0a, 0x0a, 0x0a);
+  command(0x0a, 0x0a); // Maksimal 2 baris kosong sebelum potong kertas.
   command(0x1d, 0x56, 0x00); // Full cut.
   return Uint8Array.from(bytes);
 }

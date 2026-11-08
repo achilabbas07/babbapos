@@ -95,10 +95,13 @@ export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, c
     : cashTender
       ? Math.max(0, (Number(trx.cashGiven) || 0) - cashApplied)
       : 0;
-  append(lines, `Bayar ${isSplit ? "Split" : trx.method || "-"}`);
-  append(lines, `Bayar: ${currency(paidTotal)}`);
+  // Split: "Total" di atas sudah final, jadi langsung rincian metode (tanpa baris
+  // "Bayar Split"/"Bayar: ..." yang nilainya sama persis dengan "Total").
   if (isSplit) {
     for (const leg of payments) append(lines, `• ${leg.method}: ${currency(leg.amount)}`);
+  } else {
+    append(lines, `Bayar ${trx.method || "-"}`);
+    append(lines, `Bayar: ${currency(paidTotal)}`);
   }
   if (cashTender || trx.method === "Cash" || trx.method === "Tunai") {
     append(lines, `Kembalian: ${currency(changeDue)}`);

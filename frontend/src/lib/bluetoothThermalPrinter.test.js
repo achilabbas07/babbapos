@@ -192,7 +192,7 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(lines.some((line) => line.includes("Kembalian"))).toBe(false);
   });
 
-  it("prints the combined total plus every split leg and keeps the change row for mixed cash", () => {
+  it("prints the total once, then every split leg and the change row for mixed cash", () => {
     const lines = buildBluetoothReceiptLines("payment", {
       paymentMethod: "QRIS",
       payments: [
@@ -205,13 +205,13 @@ describe("Bluetooth ESC/POS receipts", () => {
       items: [],
     }).map(({ text }) => text);
 
-    // Total Bayar = penjumlahan seluruh kaki (30.000 + 70.000 = 100.000), bukan satu leg saja.
-    expect(lines.some((line) => line.includes("Bayar Split") && line.includes("Rp 100.000"))).toBe(true);
-    expect(lines.some((line) => line.includes("Total Bayar") && line.includes("Rp 100.000"))).toBe(true);
+    // Baris "Total" sudah final; tidak ada lagi "Bayar Split"/"Total Bayar" yang redundan.
+    expect(lines.some((line) => line.includes("Total") && line.includes("Rp 100.000"))).toBe(true);
+    expect(lines.some((line) => line.includes("Bayar Split"))).toBe(false);
+    expect(lines.some((line) => line.includes("Total Bayar"))).toBe(false);
     expect(lines.some((line) => line.trimStart().startsWith("Cash") && line.includes("Rp 30.000"))).toBe(true);
     expect(lines.some((line) => line.trimStart().startsWith("QRIS") && line.includes("Rp 70.000"))).toBe(true);
     expect(lines.some((line) => line.startsWith("Kembalian") && line.includes("Rp 20.000"))).toBe(true);
-    expect(lines.some((line) => line.includes("Bayar Split") && line.includes("Rp 30.000"))).toBe(false);
   });
 
   it("derives split change from the cash leg when backend change is missing", () => {
@@ -226,7 +226,8 @@ describe("Bluetooth ESC/POS receipts", () => {
       items: [],
     }).map(({ text }) => text);
 
-    expect(lines.some((line) => line.includes("Total Bayar") && line.includes("Rp 100.000"))).toBe(true);
+    expect(lines.some((line) => line.includes("Total") && line.includes("Rp 100.000"))).toBe(true);
+    expect(lines.some((line) => line.includes("Total Bayar"))).toBe(false);
     expect(lines.some((line) => line.startsWith("Kembalian") && line.includes("Rp 20.000"))).toBe(true);
   });
 
@@ -278,7 +279,8 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(Array.from(bytes.slice(0, 9))).toEqual([
       0x1b, 0x40, 0x1d, 0x4c, 0x00, 0x00, 0x1b, 0x61, 0x01,
     ]);
-    expect(Array.from(bytes.slice(-6))).toEqual([0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x00]);
+    // Maksimal 2 baris kosong sebelum perintah potong kertas.
+    expect(Array.from(bytes.slice(-5))).toEqual([0x0a, 0x0a, 0x1d, 0x56, 0x00]);
   });
 
   it("rejects unsupported receipt types", () => {

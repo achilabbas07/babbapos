@@ -16,8 +16,8 @@ export const sumLegs = (legs = []) => legs.reduce((sum, leg) => sum + amountOf(l
  * Total uang yang dibayarkan pada sebuah transaksi.
  *
  * Untuk split payment, jumlahkan seluruh kaki `payments[].amount` (mis.
- * Cash Rp10.000 + QRIS Rp10.000 = Rp20.000) supaya baris "Bayar"/"Total Bayar"
- * dan kembalian tidak pernah memakai nominal satu kaki saja. Bila tidak ada
+ * Cash Rp10.000 + QRIS Rp10.000 = Rp20.000) supaya nominal pembayaran dan
+ * kembalian tidak pernah memakai satu kaki saja. Bila tidak ada
  * rincian `payments`, pakai nominal tunggal `fallback` (legacy: totalPaid →
  * cashGiven → total).
  */
