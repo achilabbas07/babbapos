@@ -5,6 +5,7 @@ import { api, errMsg, fmtDate, rp, todayStr, dateToIso } from "@/lib/api";
 import { PageHeader, StatCard, Empty } from "@/components/PageHeader";
 import { FormDialog } from "@/components/FormDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -19,7 +20,13 @@ export default function Expenses() {
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(false);
   const [cats, setCats] = useState([]);
-  const load = useCallback(() => api.get("/expenses").then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e))), []);
+  const [range, setRange] = useState({ from: "", to: "" });
+  const load = useCallback(() => {
+    const params = {};
+    if (range.from) params.start = range.from;
+    if (range.to) params.end = range.to;
+    return api.get("/expenses", { params }).then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e)));
+  }, [range]);
   const loadCats = useCallback(() => api.get("/expense-categories").then((r) => setCats(r.data)).catch((e) => toast.error(errMsg(e))), []);
   useEffect(() => {
     load();
@@ -43,6 +50,7 @@ export default function Expenses() {
         <StatCard label="Total tercatat" value={rp(total)} testid="expenses-total" />
         <StatCard label="Jumlah catatan" value={list.length} />
       </div>
+      <DateRangeFilter from={range.from} to={range.to} onChange={setRange} testidPrefix="expenses-date-filter" />
       {list.length === 0 ? <Empty testid="expenses-empty" text="Belum ada pengeluaran." /> : (
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
           <Table>

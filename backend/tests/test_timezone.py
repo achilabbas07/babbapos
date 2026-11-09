@@ -110,3 +110,43 @@ def test_shift_id_uses_local_date(monkeypatch):
     import shifts
 
     assert shifts.local_date_str is core.local_date_str
+
+
+def test_date_range_query_is_empty_without_bounds():
+    """Tanpa parameter tanggal, filter harus kosong agar perilaku lama tetap."""
+    assert core.date_range_query(None, None) == {}
+    assert core.date_range_query("", "") == {}
+
+
+def test_date_range_query_uses_wita_day_boundaries():
+    """Rentang tanggal inklusif: awal hari WITA s.d. awal hari berikutnya."""
+    query = core.date_range_query("2026-11-01", "2026-11-10")
+    assert query == {
+        "date": {
+            "$gte": "2026-10-31T16:00:00+00:00",
+            "$lt": "2026-11-10T16:00:00+00:00",
+        }
+    }
+
+
+def test_date_range_query_supports_open_ended_bounds():
+    assert core.date_range_query("2026-11-01", None) == {
+        "date": {"$gte": "2026-10-31T16:00:00+00:00"}
+    }
+    assert core.date_range_query(None, "2026-11-10") == {
+        "date": {"$lt": "2026-11-10T16:00:00+00:00"}
+    }
+
+
+def test_date_range_query_custom_field_and_invalid_order():
+    assert core.date_range_query("2026-11-01", "2026-11-02", field="openedAt") == {
+        "openedAt": {
+            "$gte": "2026-10-31T16:00:00+00:00",
+            "$lt": "2026-11-02T16:00:00+00:00",
+        }
+    }
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException):
+        core.date_range_query("2026-11-10", "2026-11-01")

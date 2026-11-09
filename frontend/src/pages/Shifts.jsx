@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Printer } from "lucide-react";
 import { api, errMsg, fmtDate, rp } from "@/lib/api";
 import { ShiftPrintDialog } from "@/components/ShiftPrintDialog";
 import { PageHeader, Empty } from "@/components/PageHeader";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const diffTone = (d) => (d == null ? "" : d === 0 ? "text-emerald-600" : d > 0 ? "text-blue-600" : "text-destructive");
@@ -11,13 +12,21 @@ const diffTone = (d) => (d == null ? "" : d === 0 ? "text-emerald-600" : d > 0 ?
 export default function Shifts() {
   const [list, setList] = useState([]);
   const [printing, setPrinting] = useState(null);
+  const [range, setRange] = useState({ from: "", to: "" });
+  const load = useCallback(() => {
+    const params = {};
+    if (range.from) params.start = range.from;
+    if (range.to) params.end = range.to;
+    return api.get("/shifts", { params }).then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e)));
+  }, [range]);
   useEffect(() => {
-    api.get("/shifts").then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e)));
-  }, []);
+    load();
+  }, [load]);
 
   return (
     <div>
       <PageHeader title="Riwayat Shift Kasir" subtitle="Seharusnya = kas awal + penjualan tunai + kas masuk − kas keluar. Selisih = uang fisik − seharusnya." />
+      <DateRangeFilter from={range.from} to={range.to} onChange={setRange} testidPrefix="shifts-date-filter" />
       {list.length === 0 ? <Empty testid="shifts-empty" text="Belum ada shift." /> : (
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
           <Table>

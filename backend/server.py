@@ -1,6 +1,6 @@
 from core import (  # noqa: I001
     ALL_ROLES, Customer, Expense, InventoryItem, OpenBill, Product, Purchase, Recipe, Table, Transaction, User,
-    client, create_token, db, hash_pin, local_date_str, next_id, now_iso, recalc_hpp, recalc_hpp_for_inventory,
+    client, create_token, date_range_query, db, hash_pin, local_date_str, next_id, now_iso, recalc_hpp, recalc_hpp_for_inventory,
     require_roles, to_local_date, to_utc_iso, today_local, verify_pin, get_current_user,
 )
 from seed import seed_all
@@ -1347,8 +1347,10 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
 
 # ---------- Purchases ----------
 @api.get("/purchases")
-async def list_purchases(_: User = Depends(ADMIN)):
-    return [Purchase.from_mongo(d) for d in await db.purchases.find().sort("date", -1).to_list(1000)]
+async def list_purchases(start: Optional[str] = None, end: Optional[str] = None,
+                         _: User = Depends(ADMIN)):
+    query = date_range_query(start, end)
+    return [Purchase.from_mongo(d) for d in await db.purchases.find(query).sort("date", -1).to_list(1000)]
 
 
 @api.post("/purchases")
@@ -1711,8 +1713,10 @@ async def update_app_profile_printers(body: AppProfilePrintersIn, _: User = Depe
 
 
 @api.get("/expenses")
-async def list_expenses(_: User = Depends(ADMIN)):
-    return [Expense.from_mongo(d) for d in await db.expenses.find().sort("date", -1).to_list(1000)]
+async def list_expenses(start: Optional[str] = None, end: Optional[str] = None,
+                        _: User = Depends(ADMIN)):
+    query = date_range_query(start, end)
+    return [Expense.from_mongo(d) for d in await db.expenses.find(query).sort("date", -1).to_list(1000)]
 
 
 @api.get("/expense-categories")

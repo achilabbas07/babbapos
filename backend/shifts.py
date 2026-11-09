@@ -5,7 +5,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core import BaseDocument, User, db, local_date_str, next_id, now_iso, require_roles
+from core import BaseDocument, User, date_range_query, db, local_date_str, next_id, now_iso, require_roles
 from finance import post_cash_movement_journal
 
 
@@ -175,9 +175,11 @@ async def close_shift(body: CloseShiftIn, user: User = Depends(STAFF)):
 
 
 @router.get("/shifts")
-async def list_shifts(_: User = Depends(ADMIN)):
+async def list_shifts(start: Optional[str] = None, end: Optional[str] = None,
+                      _: User = Depends(ADMIN)):
+    query = date_range_query(start, end, field="openedAt")
     out = []
-    for d in await db.shifts.find().sort("openedAt", -1).to_list(200):
+    for d in await db.shifts.find(query).sort("openedAt", -1).to_list(200):
         if d["status"] == "open":
             s = await summarize(d["_id"])
             d = {**d, **s, "expectedCash": expected_cash(d["openingCash"], s)}

@@ -5,7 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os  # noqa: E402
-from datetime import date, datetime, timezone, timedelta  # noqa: E402
+from datetime import date, datetime, time, timezone, timedelta  # noqa: E402
 from typing import Optional, List  # noqa: E402
 
 import bcrypt  # noqa: E402
@@ -78,6 +78,63 @@ def to_utc_iso(value: str) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def local_day_start_utc(value: str) -> str:
+    """Awal hari kalender WITA (00:00) sebagai ISO UTC.
+
+    Dipakai untuk memfilter kolom ``timestamptz`` (mis. ``purchases.date``,
+    ``expenses.date``, ``shifts.openedAt``) memakai tanggal kalender bisnis
+    Asia/Makassar, bukan UTC. Menerima ``YYYY-MM-DD`` atau ISO datetime.
+    """
+    if not value:
+        raise HTTPException(400, "Tanggal tidak boleh kosong")
+    try:
+        if len(value) == 10:
+            day = date.fromisoformat(value)
+        else:
+            day = to_local_date(value)
+    except ValueError:
+        raise HTTPException(400, f"Format tanggal tidak valid: {value}")
+    return datetime.combine(day, time.min, tzinfo=WITA).astimezone(timezone.utc).isoformat()
+
+
+def local_day_end_utc(value: str) -> str:
+    """Awal hari berikutnya (WITA) sebagai ISO UTC — batas atas eksklusif."""
+    if not value:
+        raise HTTPException(400, "Tanggal tidak boleh kosong")
+    try:
+        if len(value) == 10:
+            day = date.fromisoformat(value)
+        else:
+            day = to_local_date(value)
+    except ValueError:
+        raise HTTPException(400, f"Format tanggal tidak valid: {value}")
+    return datetime.combine(day + timedelta(days=1), time.min, tzinfo=WITA).astimezone(timezone.utc).isoformat()
+
+
+def date_range_query(start: Optional[str], end: Optional[str], field: str = "date") -> dict:
+    """Bangun filter rentang tanggal (inklusif) untuk kolom ``timestamptz``.
+
+    ``start``/``end`` adalah tanggal kalender WITA (``YYYY-MM-DD``). Bila
+    keduanya kosong, hasilnya ``{}`` sehingga perilaku endpoint tidak berubah.
+    """
+    if not start and not end:
+        return {}
+    if start and end:
+        try:
+            start_day = date.fromisoformat(start[:10])
+            end_day = date.fromisoformat(end[:10])
+        except ValueError:
+            raise HTTPException(400, "Format tanggal tidak valid")
+        if start_day > end_day:
+            raise HTTPException(400, "Tanggal mulai tidak boleh melebihi tanggal akhir")
+    rng = {}
+    if start:
+        rng["$gte"] = local_day_start_utc(start)
+    if end:
+        rng["$lt"] = local_day_end_utc(end)
+    return {field: rng}
 
 
 def hash_pin(pin: str) -> str:

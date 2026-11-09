@@ -5,6 +5,7 @@ import { api, errMsg, fmtDate, num, rp } from "@/lib/api";
 import { PageHeader, Empty } from "@/components/PageHeader";
 import { PurchaseDialog } from "@/components/PurchaseDialog";
 import { SupplierPaymentDialog } from "@/components/SupplierPaymentDialog";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { Button } from "@/components/ui/button";
 
 export default function Purchases() {
@@ -12,16 +13,20 @@ export default function Purchases() {
   const [inventory, setInventory] = useState([]);
   const [open, setOpen] = useState(false);
   const [paymentPurchase, setPaymentPurchase] = useState(null);
+  const [range, setRange] = useState({ from: "", to: "" });
 
   const load = useCallback(async () => {
     try {
-      const [p, i] = await Promise.all([api.get("/purchases"), api.get("/inventory")]);
+      const params = {};
+      if (range.from) params.start = range.from;
+      if (range.to) params.end = range.to;
+      const [p, i] = await Promise.all([api.get("/purchases", { params }), api.get("/inventory")]);
       setList(p.data);
       setInventory(i.data);
     } catch (e) {
       toast.error(errMsg(e));
     }
-  }, []);
+  }, [range]);
   useEffect(() => {
     load();
   }, [load]);
@@ -31,6 +36,7 @@ export default function Purchases() {
       <PageHeader title="Pembelian" subtitle="Restock bahan dari supplier — stok inventory bertambah otomatis.">
         <Button data-testid="add-purchase-button" onClick={() => setOpen(true)}><Plus className="mr-1 h-4 w-4" />Pembelian Baru</Button>
       </PageHeader>
+      <DateRangeFilter from={range.from} to={range.to} onChange={setRange} testidPrefix="purchases-date-filter" />
       {list.length === 0 ? <Empty testid="purchases-empty" text="Belum ada pembelian." /> : (
         <div className="space-y-3">
           {list.map((p) => (
