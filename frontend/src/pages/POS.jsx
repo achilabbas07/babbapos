@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { api, errMsg, fmtDate, itemKey, itemName } from "@/lib/api";
+import { api, errMsg, errorCode, fmtDate, itemKey, itemName } from "@/lib/api";
 import { ProductGrid } from "@/components/pos/ProductGrid";
 import { CartPanel } from "@/components/pos/CartPanel";
 import { PayDialog } from "@/components/pos/PayDialog";
@@ -35,6 +35,7 @@ const cartItemKey = (item) => `${itemKey(item)}:${item.id || ""}`;
 
 export default function POS() {
   const { user } = useAuth();
+  const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [stock, setStock] = useState({});
@@ -148,6 +149,12 @@ export default function POS() {
     try {
       await fn();
     } catch (e) {
+      if (user.role === "admin" && errorCode(e) === "SHIFT_NOT_OPEN") {
+        setPayOpen(false);
+        toast.error(errMsg(e));
+        nav("/cash");
+        return;
+      }
       toast.error(errMsg(e));
     } finally {
       setBusy(false);

@@ -54,8 +54,18 @@ export function errMsg(e) {
   }
   if (typeof detail === "string") return `${detail}${stage}`;
   if (Array.isArray(detail)) return `${detail.map((d) => (d && typeof d.msg === "string" ? d.msg : JSON.stringify(d))).join(" ")}${stage}`;
+  if (typeof detail.message === "string") return `${detail.message}${stage}`;
   if (typeof detail.msg === "string") return `${detail.msg}${stage}`;
   return `${String(detail)}${stage}`;
+}
+
+export function errorCode(e) {
+  const data = e?.response?.data;
+  const detail = data?.error ?? data?.detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    return detail.code || data?.code || "";
+  }
+  return data?.code || "";
 }
 
 const rpFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });

@@ -1,4 +1,4 @@
-import { errMsg, getBackendConfigError, rp } from "./api";
+import { errMsg, errorCode, getBackendConfigError, rp } from "./api";
 
 describe("errMsg", () => {
   it("uses backend error messages from 500 responses", () => {
@@ -14,6 +14,37 @@ describe("errMsg", () => {
   it("explains how to recover from a server network error", () => {
     expect(errMsg({ message: "Network Error" }))
       .toContain("Periksa koneksi internet dan coba lagi");
+  });
+
+  it("reads the message from a structured detail object", () => {
+    expect(errMsg({
+      response: {
+        data: {
+          detail: {
+            code: "SHIFT_NOT_OPEN",
+            message: "Admin harus membuka shift dan mengisi kas awal sebelum bertransaksi.",
+          },
+        },
+      },
+    })).toBe("Admin harus membuka shift dan mengisi kas awal sebelum bertransaksi.");
+  });
+});
+
+describe("errorCode", () => {
+  it("extracts the code from a structured detail object", () => {
+    expect(errorCode({
+      response: { data: { detail: { code: "SHIFT_NOT_OPEN", message: "x" } } },
+    })).toBe("SHIFT_NOT_OPEN");
+  });
+
+  it("returns an empty string for plain string details", () => {
+    expect(errorCode({
+      response: { data: { detail: "Buka shift kasir terlebih dahulu" } },
+    })).toBe("");
+  });
+
+  it("returns an empty string when there is no response", () => {
+    expect(errorCode({ message: "Network Error" })).toBe("");
   });
 });
 

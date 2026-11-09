@@ -823,6 +823,17 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
     shift = await get_open_shift(user.id)
     if user.role == "kasir" and not shift:
         raise HTTPException(400, "Buka shift kasir terlebih dahulu")
+    if user.role == "admin" and not shift:
+        raise HTTPException(
+            400,
+            {
+                "code": "SHIFT_NOT_OPEN",
+                "message": (
+                    "Admin harus membuka shift dan mengisi kas awal "
+                    "sebelum bertransaksi."
+                ),
+            },
+        )
     items, subtotal = await build_items(body.items, body.type)
     remaining = remaining_items(bill.items_json, items) if body.partial else []
     promo = {"code": None, "discount": 0}

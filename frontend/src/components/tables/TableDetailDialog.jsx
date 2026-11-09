@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { PlusCircle, CreditCard, Split, Merge, MoveRight, Printer, ChefHat, Ban, Eraser, CalendarClock, Clock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
-import { api, errMsg, fmtDate, fmtTime, itemKey, itemName, rp } from "@/lib/api";
+import { api, errMsg, errorCode, fmtDate, fmtTime, itemKey, itemName, rp } from "@/lib/api";
 import { STATUS } from "@/components/tables/FloorCanvas";
 import { PayDialog } from "@/components/pos/PayDialog";
 import { SplitBillDialog } from "@/components/tables/SplitBillDialog";
@@ -107,6 +107,13 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
         }
       }
     } catch (e) {
+      if (isAdmin && errorCode(e) === "SHIFT_NOT_OPEN") {
+        setPay(null);
+        setMode(null);
+        toast.error(errMsg(e));
+        nav("/cash");
+        return;
+      }
       toast.error(errMsg(e));
     } finally {
       paymentInFlight.current = false;
