@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Literal, Optional
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -62,6 +63,7 @@ class MovementIn(BaseModel):
     amount: Decimal = Field(gt=0)
     note: str = Field(min_length=1)
     expense_category_id: Optional[int] = None
+    shift_id: Optional[str] = None
 
 
 class CloseShiftIn(BaseModel):
@@ -125,6 +127,8 @@ async def current_movements(user: User = Depends(STAFF)):
 @router.post("/shifts/cash-movements")
 async def add_movement(body: MovementIn, user: User = Depends(STAFF)):
     shift = await require_open_shift(user)
+    if body.shift_id and body.shift_id != shift["_id"]:
+        raise HTTPException(409, "Shift aktif sudah berganti. Muat ulang halaman.")
     cat_id = None
     category = None
     if body.type == "out":
@@ -150,6 +154,10 @@ async def add_movement(body: MovementIn, user: User = Depends(STAFF)):
                     )
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
+        except asyncpg.PostgresError as error:
+            raise HTTPException(
+                400, f"Gagal mencatat kas keluar: {error}"
+            ) from error
     else:
         await db.cash_movements.insert_one(mov.to_mongo())
     return mov

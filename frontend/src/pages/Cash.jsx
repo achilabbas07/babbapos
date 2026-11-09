@@ -60,11 +60,17 @@ export default function Cash() {
 
   const cin = moves.filter((m) => m.type === "in").reduce((s, m) => s + m.amount, 0);
   const cout = moves.filter((m) => m.type === "out").reduce((s, m) => s + m.amount, 0);
-  const outFields = [{ name: "expense_category_id", label: "Kategori Pengeluaran", type: "select", placeholder: "Pilih kategori", options: categories.map((c) => ({ value: c.id, label: c.name })) }, ...FIELDS];
+  const outFields = [{ name: "expense_category_id", label: "Kategori Pengeluaran", type: "select", placeholder: "Pilih kategori", allowNone: false, options: categories.map((c) => ({ value: c.id, label: c.name })) }, ...FIELDS];
   const save = async (f) => {
-    if (dialog === "out" && !f.expense_category_id) throw new Error("Kategori pengeluaran wajib dipilih");
-    const body = { type: dialog, amount: Number(f.amount) || 0, note: f.note || "" };
-    if (dialog === "out") body.expense_category_id = Number(f.expense_category_id);
+    const amount = Number(f.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Jumlah harus berupa angka lebih dari 0");
+    if (!shift?.id) throw new Error("Shift aktif tidak ditemukan. Muat ulang halaman.");
+    const body = { type: dialog, amount, note: (f.note || "").trim(), shift_id: shift.id };
+    if (dialog === "out") {
+      const categoryId = Number(f.expense_category_id);
+      if (!f.expense_category_id || !Number.isInteger(categoryId)) throw new Error("Kategori pengeluaran wajib dipilih");
+      body.expense_category_id = categoryId;
+    }
     await api.post("/shifts/cash-movements", body);
     toast.success(dialog === "in" ? "Kas masuk tercatat" : "Kas keluar tercatat");
     load();
@@ -102,7 +108,7 @@ export default function Cash() {
           ))}
         </div>
       )}
-      <FormDialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} title={dialog === "in" ? "Kas Masuk" : "Kas Keluar"} fields={dialog === "out" ? outFields : FIELDS} initial={dialog ? {} : null} onSubmit={save} testid="cash-form" />
+      <FormDialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} title={dialog === "in" ? "Kas Masuk" : "Kas Keluar"} description={dialog === "out" ? "Catat pengeluaran tunai dari kas shift yang sedang terbuka." : "Catat penambahan uang tunai ke kas shift yang sedang terbuka."} fields={dialog === "out" ? outFields : FIELDS} initial={dialog ? {} : null} onSubmit={save} testid="cash-form" />
       <CloseShiftDialog open={closing} onOpenChange={setClosing} onClosed={refresh} />
     </div>
   );

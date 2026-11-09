@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ const Field = ({ f, value, onChange, testid }) => {
   if (f.type === "select") {
     const empty = value === null || value === undefined || value === "";
     return (
-      <Select value={empty ? (f.allowNone ? "none" : undefined) : String(value)} onValueChange={(v) => onChange(v === "none" ? null : v)}>
+      <Select value={empty ? (f.allowNone ? "none" : "") : String(value)} onValueChange={(v) => onChange(v === "none" ? null : v)}>
         <SelectTrigger data-testid={testid}><SelectValue placeholder={f.placeholder || "Pilih"} /></SelectTrigger>
         <SelectContent>
           {f.allowNone && <SelectItem value="none">{f.noneLabel || "— Tidak ada —"}</SelectItem>}
@@ -39,7 +39,7 @@ const Field = ({ f, value, onChange, testid }) => {
   );
 };
 
-export const FormDialog = ({ open, onOpenChange, title, fields, initial, onSubmit, testid }) => {
+export const FormDialog = ({ open, onOpenChange, title, description, fields, initial, onSubmit, testid }) => {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
 
@@ -65,7 +65,10 @@ export const FormDialog = ({ open, onOpenChange, title, fields, initial, onSubmi
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid={`${testid}-dialog`} className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription className={description ? undefined : "sr-only"}>{description || title}</DialogDescription>
+        </DialogHeader>
         <form onSubmit={submit} className="grid gap-4">
           {fields.map((f) => (
             <div key={f.name} className="grid gap-1.5">
