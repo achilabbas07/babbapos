@@ -32,3 +32,55 @@ export const FINANCE_NAV = [
   { to: "/admin/arus-kas", label: "Laporan Arus Kas", icon: BarChart3, roles: ADMIN },
   { to: "/admin/laba-rugi", label: "Laporan Laba Rugi", icon: BarChart3, roles: ADMIN },
 ];
+
+// Lookup so the grouped sidebar reuses the exact same objects (path, label, icon, roles)
+// that App.js uses to generate routes. Nothing is duplicated or re-declared.
+const NAV_BY_PATH = Object.fromEntries(
+  [...NAV, ...FINANCE_NAV].map((item) => [item.to, item]),
+);
+
+const pick = (...paths) => paths.map((path) => NAV_BY_PATH[path]).filter(Boolean);
+
+// Placeholder menu: intentionally has no `to`, so it never becomes a <Route> or a link.
+export const ANALYTICS_PLACEHOLDER = {
+  to: null,
+  label: "Laporan & Analytics",
+  icon: BarChart3,
+  roles: ADMIN,
+  placeholder: true,
+};
+
+export const NAV_GROUPS = [
+  {
+    id: "operasional",
+    label: "Operasional Warkop",
+    alwaysOpen: true,
+    items: pick("/pos", "/tables", "/open-bills", "/targets", "/cash", "/customers"),
+  },
+  {
+    id: "inventaris",
+    label: "Inventaris & Persediaan",
+    items: pick("/products", "/inventory", "/purchases"),
+  },
+  {
+    id: "keuangan",
+    label: "Keuangan & Akuntansi",
+    items: pick(
+      "/expenses",
+      "/reports",
+      "/admin/jurnal",
+      "/coa",
+      "/admin/dashboard-keuangan",
+      "/admin/arus-kas",
+      "/admin/laba-rugi",
+    ),
+  },
+  {
+    id: "manajemen",
+    label: "Manajemen & Laporan",
+    items: [
+      ANALYTICS_PLACEHOLDER,
+      ...pick("/transactions", "/shifts", "/promos", "/users", "/profile"),
+    ],
+  },
+];
