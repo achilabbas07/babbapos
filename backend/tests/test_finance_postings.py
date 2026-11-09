@@ -239,7 +239,7 @@ def test_vercel_mirror_endpoints_match_server_implementation():
                 return lines[index:]
         return lines
 
-    for name in ("pay_purchase_debt", "pay_supplier", "create_purchase"):
+    for name in ("pay_purchase_debt", "pay_supplier", "create_purchase", "create_supplier"):
         expected = body_only(inspect.getsource(getattr(server, name)).splitlines())
         assert body_only(mirror_body(name)) == expected, (
             f"{name} di api/index.py menyimpang dari backend/server.py"

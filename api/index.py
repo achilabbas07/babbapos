@@ -214,6 +214,20 @@ class SupplierPaymentIn(BaseModel):
     jumlah_bayar: float = Field(gt=0)
 
 
+class SupplierIn(BaseModel):
+    nama_supplier: str = Field(min_length=1, max_length=200)
+    kontak_person: Optional[str] = Field(None, max_length=200)
+    nomor_telp: Optional[str] = Field(None, max_length=50)
+    alamat: Optional[str] = None
+
+    @field_validator("nama_supplier", mode="before")
+    @classmethod
+    def strip_nama_supplier(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
 class ExpenseIn(BaseModel):
     date: Optional[str] = None
     category_id: int
@@ -936,7 +950,7 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
                     "purchase",
                     purchase.id,
                     to_local_date(purchase.date),
-                    f"Pembelian persediaan {purchase.id}",
+                    f"Pembelian persediaan {purchase.id} - {purchase.supplier} (supplier_id={purchase.supplier_id})",
                     user.id,
                     purchase_journal_lines(
                         purchase.total_cost,
@@ -953,7 +967,7 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
                     purchase.total_cost,
                     body.metode_pembayaran,
                     body.sumber_dana_akun,
-                    f"Pembelian persediaan {purchase.id} - {purchase.supplier}",
+                    f"Pembelian persediaan {purchase.id} - {purchase.supplier} (supplier_id={purchase.supplier_id})",
                 )
     except asyncpg.PostgresError:
         logger.exception(
@@ -971,9 +985,47 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
 async def finance_suppliers(_: User = Depends(ADMIN)):
     await db.connect()
     rows = await db.pool.fetch(
-        "select id, nama_supplier from public.master_suppliers order by nama_supplier"
+        """
+        select id, nama_supplier, kontak_person, nomor_telp, alamat
+        from public.master_suppliers
+        order by nama_supplier
+        """
     )
     return [dict(row) for row in rows]
+
+
+@api.post("/v1/finance/suppliers", status_code=201)
+async def create_supplier(body: SupplierIn, _: User = Depends(ADMIN)):
+    await db.connect()
+    duplicate = await db.pool.fetchval(
+        """
+        select 1
+        from public.master_suppliers
+        where lower(btrim(nama_supplier)) = lower(btrim($1))
+        limit 1
+        """,
+        body.nama_supplier,
+    )
+    if duplicate is not None:
+        raise HTTPException(409, "Supplier dengan nama tersebut sudah terdaftar.")
+    try:
+        row = await db.pool.fetchrow(
+            """
+            insert into public.master_suppliers
+              (nama_supplier, kontak_person, nomor_telp, alamat)
+            values ($1, $2, $3, $4)
+            returning id, nama_supplier, kontak_person, nomor_telp, alamat
+            """,
+            body.nama_supplier,
+            body.kontak_person,
+            body.nomor_telp,
+            body.alamat,
+        )
+    except asyncpg.UniqueViolationError as err:
+        raise HTTPException(
+            409, "Supplier dengan nama tersebut sudah terdaftar."
+        ) from err
+    return dict(row)
 
 
 @api.post("/v1/finance/debts/pay")

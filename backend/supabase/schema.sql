@@ -127,8 +127,24 @@ create index if not exists transactions_customer_idx on transactions("customerId
 
 create table if not exists master_suppliers (
   id            bigserial primary key,
-  nama_supplier  varchar not null
+  nama_supplier  varchar not null,
+  kontak_person  varchar,
+  nomor_telp     varchar,
+  alamat         text
 );
+do $migration$
+begin
+  if not exists (
+    select 1
+    from master_suppliers
+    group by lower(btrim(nama_supplier))
+    having count(*) > 1
+  ) then
+    create unique index if not exists master_suppliers_nama_supplier_key
+      on master_suppliers (lower(btrim(nama_supplier)));
+  end if;
+end
+$migration$;
 
 create table if not exists purchases (
   id                  text primary key,
