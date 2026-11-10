@@ -1,7 +1,7 @@
 import { groupOrderItemsForDisplay } from "./openBillDisplay";
 import { resolvePaidTotal } from "./splitPayment";
 import { buildWaiterShiftReportBytes } from "./waiterShiftReport";
-import { getPrinterId, resolveDeviceId } from "./printerSettings";
+import { getPrinterId, resolveDeviceId, setPrinterId } from "./printerSettings";
 
 export const RPP02_SERVICE_UUID = "000018f0-0000-1000-8000-00805f9b34fb";
 export const RPP02_CHARACTERISTIC_UUID = "00002af1-0000-1000-8000-00805f9b34fb";
@@ -487,18 +487,28 @@ async function connectDevice(device, serviceUuid, characteristicUuid) {
 export async function connectBluetoothPrinter({
   serviceUuid = RPP02_SERVICE_UUID,
   characteristicUuid = RPP02_CHARACTERISTIC_UUID,
+  printerType,
 } = {}) {
-  const devicePromise = selectBluetoothPrinter(serviceUuid);
-  const connectionPromise = devicePromise.then((device) =>
-    connectDevice(device, serviceUuid, characteristicUuid),
-  );
-  const { device } = await connectionPromise;
+  const bluetooth = globalThis.navigator?.bluetooth;
+  if (!bluetooth?.requestDevice) {
+    throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
+  }
+  // Satu-satunya jalur yang memunculkan dialog pemilihan perangkat; dipakai
+  // saat pairing awal dari tombol pengaturan.
+  const device = cachedDevice || (await bluetooth.requestDevice({
+    acceptAllDevices: true,
+    optionalServices: [serviceUuid],
+  }));
+  cachedDevice = device;
+  // Simpan identitas perangkat ke pemetaan printer agar cetak otomatis
+  // berikutnya bisa memakai getDevices() tanpa dialog pemilihan lagi.
+  if (printerType) setPrinterId(printerType, resolveDeviceId(device));
+  await connectDevice(device, serviceUuid, characteristicUuid);
   return device;
 }
 
-// Resolve printerType/serviceUuid. Ketika printerType diberikan (mis. 'kitchen'
-// atau 'cashier'), service UUID diambil dari perangkat yang pernah dipasangkan
-// via navigator.bluetooth.getDevices() agar koneksi kembali tanpa prompt ulang.
+// Apakah jenis printer (mis. 'kitchen' atau 'cashier') sudah dipetakan ke
+// sebuah perangkat melalui Pengaturan Printer.
 export function hasConfiguredPrinter(printerType) {
   if (!printerType) return false;
   try {
@@ -508,99 +518,42 @@ export function hasConfiguredPrinter(printerType) {
   }
 }
 
-async function resolveTarget({ printerType, serviceUuid, bluetooth }) {
-  if (!printerType) {
-    return { serviceUuid: serviceUuid || RPP02_SERVICE_UUID };
-  }
-
+// Cari BluetoothDevice yang identitasnya tersimpan di localStorage melalui
+// navigator.bluetooth.getDevices(). Dipakai untuk mencetak ulang tanpa
+// memunculkan dialog pemilihan perangkat lagi.
+export async function findMappedBluetoothDevice(printerType) {
+  const bluetooth = globalThis.navigator?.bluetooth;
+  if (!bluetooth?.getDevices) return null;
   const printerId = getPrinterId(printerType);
-  if (!printerId) return { serviceUuid: serviceUuid || RPP02_SERVICE_UUID, paired: null };
-
-  const getDevices = bluetooth?.getDevices?.bind(bluetooth);
-  const devices = typeof getDevices === "function" ? await getDevices() : [];
-  const paired = (devices || []).find((candidate) => resolveDeviceId(candidate) === printerId) || null;
-
-  return {
-    serviceUuid: serviceUuid || paired?.uuids?.[0] || RPP02_SERVICE_UUID,
-    paired,
-  };
+  if (!printerId) return null;
+  const devices = (await bluetooth.getDevices()) || [];
+  return devices.find((candidate) => resolveDeviceId(candidate) === printerId) || null;
 }
 
 async function runPrintJob(type, data, options) {
   const bluetooth = globalThis.navigator?.bluetooth;
-  if (!bluetooth?.requestDevice) {
+  if (!bluetooth?.getDevices) {
     throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
   }
 
-  return hasConfiguredPrinter(options.printerType)
-    ? runMappedPrintJob(type, data, options)
-    : runDefaultPrintJob(type, data, options);
-}
-
-// Jalur lama (tanpa printerType) dipertahankan persis seperti semula agar
-// perilaku pairing/reconnect yang sudah teruji tidak berubah.
-async function runDefaultPrintJob(
-  type,
-  data,
-  {
-    device: selectedDevice,
-    requireConnectedDevice = false,
-    serviceUuid = RPP02_SERVICE_UUID,
-    characteristicUuid = RPP02_CHARACTERISTIC_UUID,
-  },
-) {
-  if (requireConnectedDevice && !selectedDevice && !cachedDevice) {
-    throw new Error("Printer Bluetooth belum terhubung. Hubungkan printer lalu coba cetak ulang.");
-  }
-  const devicePromise = selectedDevice
-    ? Promise.resolve(selectedDevice)
-    : requireConnectedDevice
-      ? Promise.resolve(cachedDevice)
-      : selectBluetoothPrinter(serviceUuid);
-  const connectionPromise = devicePromise.then((device) => {
-    if (requireConnectedDevice && !device?.gatt?.connected) {
-      throw new Error("Printer Bluetooth terputus. Hubungkan kembali printer lalu coba cetak ulang.");
-    }
-    cachedDevice = device;
-    return connectDevice(device, serviceUuid, characteristicUuid);
-  });
-  const bytes = await buildEscPosReceipt(type, data);
-  const { characteristic } = await connectionPromise;
-  await writeReceipt(characteristic, bytes);
-}
-
-// Jalur printer ganda: perangkat diambil dari pemetaan Pengaturan Printer,
-// koneksi GATT dibuka lalu ditutup untuk tiap dokumen.
-async function runMappedPrintJob(
-  type,
-  data,
-  {
-    device: selectedDevice,
-    requireConnectedDevice = false,
-    serviceUuid,
-    characteristicUuid = RPP02_CHARACTERISTIC_UUID,
-    printerType,
-  },
-) {
-  const bluetooth = globalThis.navigator?.bluetooth;
-  const { serviceUuid: targetServiceUuid, paired } = await resolveTarget({ printerType, serviceUuid, bluetooth });
-
-  if (requireConnectedDevice && !paired && !selectedDevice) {
-    throw new Error("Printer Bluetooth belum terhubung. Hubungkan printer lalu coba cetak ulang.");
+  const printerType = options.printerType || "cashier";
+  const label = printerType === "kitchen" ? "Dapur" : "Kasir";
+  if (!hasConfiguredPrinter(printerType)) {
+    throw new Error(`Printer ${label} belum diatur. Buka Pengaturan Printer lalu daftarkan perangkatnya.`);
   }
 
-  // Jika perangkat hasil pemetaan tidak ditemukan pada getDevices(), minta
-  // pengguna memilih ulang printer (tanpa memakai cache agar tidak salah arah).
-  const device =
-    selectedDevice ||
-    paired ||
-    (await bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [targetServiceUuid] }));
-  const bytes = await buildEscPosReceipt(type, data);
+  const device = options.device || (await findMappedBluetoothDevice(printerType));
+  if (!device) {
+    throw new Error(`Printer ${label} tidak ditemukan. Hubungkan ulang melalui Pengaturan Printer lalu coba lagi.`);
+  }
+
+  const serviceUuid = options.serviceUuid || device.uuids?.[0] || RPP02_SERVICE_UUID;
+  const characteristicUuid = options.characteristicUuid || RPP02_CHARACTERISTIC_UUID;
   const wasConnected = Boolean(device?.gatt?.connected);
   cachedDevice = device;
-  const connectionPromise = connectDevice(device, targetServiceUuid, characteristicUuid);
+  const bytes = await buildEscPosReceipt(type, data);
   try {
-    const { characteristic } = await connectionPromise;
+    const { characteristic } = await connectDevice(device, serviceUuid, characteristicUuid);
     await writeReceipt(characteristic, bytes);
   } finally {
     // Putuskan koneksi yang dibuka job ini agar port Bluetooth tidak bentrok
@@ -613,10 +566,11 @@ async function runMappedPrintJob(
   }
 }
 
-const KITCHEN_DOC_TYPES = new Set(["kitchen"]);
+const KITCHEN_DOC_TYPES = new Set(["kitchen", "waiterShift"]);
 
 // Tentukan printer tujuan dari jenis dokumen: tiket dapur -> printer Dapur,
-// dokumen lain (bill/payment/shift) -> printer Kasir.
+// dokumen lain (bill/payment/shift kasir) -> printer Kasir. Laporan shift
+// waiter ikut printer Dapur karena waiter memasangkan printer Dapur.
 export function printerTypeForDocType(type) {
   return KITCHEN_DOC_TYPES.has(type) ? "kitchen" : "cashier";
 }
@@ -649,18 +603,4 @@ function runQueuedPrint(type, data, options) {
     () => {},
   );
   return job;
-}
-
-export async function selectBluetoothPrinter(serviceUuid = RPP02_SERVICE_UUID) {
-  const bluetooth = globalThis.navigator?.bluetooth;
-  if (!bluetooth?.requestDevice) {
-    throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
-  }
-  if (cachedDevice) return cachedDevice;
-
-  cachedDevice = await bluetooth.requestDevice({
-    acceptAllDevices: true,
-    optionalServices: [serviceUuid],
-  });
-  return cachedDevice;
 }

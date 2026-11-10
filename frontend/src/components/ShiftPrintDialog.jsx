@@ -3,7 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { fmtDate, rp } from "@/lib/api";
-import { printBluetoothReceipt } from "@/lib/bluetoothThermalPrinter";
+import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 import { PrintHeader } from "@/components/ReceiptDialog";
 
 const Row = ({ label, value, bold }) => (
@@ -23,7 +23,11 @@ const ShiftPrintContent = ({ shift, onClose }) => {
   const reprint = async () => {
     setPrinting(true);
     try {
-      await printBluetoothReceipt("shift", { ...shift, isReprint: true });
+      await printBluetoothReceipt(
+        "shift",
+        { ...shift, isReprint: true },
+        { printerType: printerTypeForDocType("shift") },
+      );
       toast.success("Laporan shift berhasil dicetak ulang.");
     } catch (error) {
       toast.error(error?.message || "Laporan shift gagal dicetak.");

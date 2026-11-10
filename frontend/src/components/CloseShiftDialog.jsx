@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { api, errMsg, rp } from "@/lib/api";
-import { printBluetoothReceipt } from "@/lib/bluetoothThermalPrinter";
+import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 
 const Row = ({ label, value, strong, tone = "", testid }) => (
   <div className={`flex justify-between py-1.5 text-sm ${strong ? "font-semibold" : ""}`}>
@@ -54,7 +54,7 @@ export const CloseShiftDialog = ({ open, onOpenChange, onClosed }) => {
       const { data } = await api.post("/shifts/close", { countedCash: Number(counted) || 0, note });
       setResult(data);
       try {
-        await printBluetoothReceipt("shift", data, { requireConnectedDevice: true });
+        await printBluetoothReceipt("shift", data, { printerType: printerTypeForDocType("shift") });
         toast.success("Shift ditutup dan laporan berhasil dicetak.");
       } catch (printError) {
         toast.error(`Shift ditutup, tetapi laporan gagal dicetak: ${printError.message}`);

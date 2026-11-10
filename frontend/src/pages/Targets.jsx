@@ -59,7 +59,7 @@ const WaiterView = () => {
   const connectAndRetryPrint = async () => {
     setConnectingPrinter(true);
     try {
-      await connectBluetoothPrinter();
+      await connectBluetoothPrinter({ printerType: "kitchen" });
       await retryPrint();
     } catch (error) {
       toast.error(error?.message || "Printer Bluetooth gagal dihubungkan.");

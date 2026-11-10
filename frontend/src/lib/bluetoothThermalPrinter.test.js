@@ -383,18 +383,23 @@ describe("Bluetooth ESC/POS receipts", () => {
     }
   });
 
-  it("reuses the Bluetooth device and reconnects without another pairing prompt", async () => {
+  it("reconnects to the stored kitchen printer without another pairing prompt", async () => {
     const writes = [];
     const characteristic = {
       properties: { writeWithoutResponse: true },
       writeValueWithoutResponse: jest.fn(async (chunk) => writes.push(chunk)),
     };
     const device = {
+      id: "KITCHEN-DEVICE",
+      name: "KITCHEN-DEVICE",
       gatt: {
         connected: false,
         connect: jest.fn(async function connect() {
           this.connected = true;
           return this;
+        }),
+        disconnect: jest.fn(function disconnect() {
+          this.connected = false;
         }),
         getPrimaryService: jest.fn(async () => ({
           getCharacteristic: jest.fn(async (uuid) => {
@@ -404,38 +409,69 @@ describe("Bluetooth ESC/POS receipts", () => {
         })),
       },
     };
-    const bluetooth = { requestDevice: jest.fn(async () => device) };
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => [device]),
+    };
     Object.defineProperty(navigator, "bluetooth", {
       configurable: true,
       value: bluetooth,
     });
+    setKitchenPrinterId("KITCHEN-DEVICE");
 
-    const printPromise = printBluetoothReceipt("kitchen", {
-      tableName: "A-02",
-      time: "29/10/2026",
-      items: [{ qty: 1, name: "Nasi Goreng" }],
-    });
-    expect(bluetooth.requestDevice).toHaveBeenCalledTimes(1);
-    await printPromise;
+    await printBluetoothReceipt(
+      "kitchen",
+      {
+        tableName: "A-02",
+        time: "29/10/2026",
+        items: [{ qty: 1, name: "Nasi Goreng" }],
+      },
+      { printerType: "kitchen" },
+    );
 
-    expect(bluetooth.requestDevice).toHaveBeenCalledWith({
-      acceptAllDevices: true,
-      optionalServices: [RPP02_SERVICE_UUID],
-    });
+    // Cetak otomatis selalu memakai getDevices(); picker tidak pernah dibuka.
+    expect(bluetooth.requestDevice).not.toHaveBeenCalled();
     expect(device.gatt.getPrimaryService).toHaveBeenCalledWith(RPP02_SERVICE_UUID);
     expect(writes.length).toBeGreaterThan(1);
     expect(writes.every((chunk) => chunk.byteLength <= 20)).toBe(true);
 
-    await printBluetoothReceipt("kitchen", { items: [] });
-    expect(bluetooth.requestDevice).toHaveBeenCalledTimes(1);
-    expect(device.gatt.connect).toHaveBeenCalledTimes(1);
-
-    device.gatt.connected = false;
-    await printBluetoothReceipt("kitchen", { items: [] });
-    expect(bluetooth.requestDevice).toHaveBeenCalledTimes(1);
+    await printBluetoothReceipt("kitchen", { items: [] }, { printerType: "kitchen" });
+    expect(bluetooth.requestDevice).not.toHaveBeenCalled();
     expect(device.gatt.connect).toHaveBeenCalledTimes(2);
-    await printBluetoothReceipt("shift", { items: [], id: "SHIFT-001" }, { requireConnectedDevice: true });
-    expect(bluetooth.requestDevice).toHaveBeenCalledTimes(1);
+
+    clearKitchenPrinterId();
+    delete navigator.bluetooth;
+  });
+
+  it("asks the user to configure the printer instead of opening the picker", async () => {
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => []),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    clearKitchenPrinterId();
+    clearCashierPrinterId();
+
+    await expect(
+      printBluetoothReceipt("kitchen", { items: [] }, { printerType: "kitchen" }),
+    ).rejects.toThrow("Printer Dapur belum diatur");
+    expect(bluetooth.requestDevice).not.toHaveBeenCalled();
+    delete navigator.bluetooth;
+  });
+
+  it("asks the user to reconnect when the stored printer is missing", async () => {
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => []),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    setKitchenPrinterId("KITCHEN-DEVICE");
+
+    await expect(
+      printBluetoothReceipt("kitchen", { items: [] }, { printerType: "kitchen" }),
+    ).rejects.toThrow("Printer Dapur tidak ditemukan");
+    expect(bluetooth.requestDevice).not.toHaveBeenCalled();
+    clearKitchenPrinterId();
     delete navigator.bluetooth;
   });
 
@@ -464,10 +500,10 @@ describe("Bluetooth ESC/POS receipts", () => {
 
   it("maps document types to their target printer kind", () => {
     expect(printerTypeForDocType("kitchen")).toBe("kitchen");
+    expect(printerTypeForDocType("waiterShift")).toBe("kitchen");
     expect(printerTypeForDocType("bill")).toBe("cashier");
     expect(printerTypeForDocType("payment")).toBe("cashier");
     expect(printerTypeForDocType("shift")).toBe("cashier");
-    expect(printerTypeForDocType("waiterShift")).toBe("cashier");
   });
 
   it("reports whether a printer kind is configured", () => {

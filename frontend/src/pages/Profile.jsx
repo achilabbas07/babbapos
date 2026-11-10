@@ -54,7 +54,8 @@ export default function Profile() {
   const connectPrinter = async (fieldName, label) => {
     setConnectingPrinter(fieldName);
     try {
-      const device = await connectBluetoothPrinter();
+      const printerType = fieldName === "printerDapur" ? "kitchen" : "cashier";
+      const device = await connectBluetoothPrinter({ printerType });
       if (!device.name) {
         toast.error(`Nama perangkat ${label} tidak tersedia.`);
         return;

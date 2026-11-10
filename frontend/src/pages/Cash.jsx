@@ -25,7 +25,8 @@ export default function Cash() {
   const connectPrinter = async (field, label) => {
     setConnectingPrinter(field);
     try {
-      const device = await connectBluetoothPrinter();
+      const printerType = field === "printerDapur" ? "kitchen" : "cashier";
+      const device = await connectBluetoothPrinter({ printerType });
       if (!device.name) throw new Error("Nama perangkat Bluetooth tidak tersedia.");
       await api.put("/app-profile/printers", { [field]: device.name });
       toast.success(`${label} terhubung dan tersimpan: ${device.name}`);

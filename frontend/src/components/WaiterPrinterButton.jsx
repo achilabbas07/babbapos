@@ -12,7 +12,7 @@ export const WaiterPrinterButton = () => {
   const connectPrinter = async () => {
     setConnecting(true);
     try {
-      const device = await connectBluetoothPrinter();
+      const device = await connectBluetoothPrinter({ printerType: "kitchen" });
       if (!device.name) {
         throw new Error("Nama perangkat Bluetooth tidak tersedia.");
       }

@@ -10,7 +10,7 @@ import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
 import { VariantDialog } from "@/components/pos/VariantDialog";
 import { supabase } from "@/supabaseClient";
-import { printBluetoothReceipt, selectBluetoothPrinter } from "@/lib/bluetoothThermalPrinter";
+import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 
 const emptyOrder = (user) => ({
   billId: null, queueNumber: null, type: "Dine In", tableId: "none", customerId: "none", customerName: "", waiterName: user.role === "waiter" ? user.name : "", waiterId: user.role === "waiter" ? user.id : null,
@@ -163,45 +163,36 @@ export default function POS() {
 
   const saveBill = () => run(async () => {
     const body = payload();
-    const pendingItems = cart.filter((item) => !item.is_printed);
-    let printerDevice = null;
-    let printerError = null;
-    if (pendingItems.length) {
-      try {
-        printerDevice = await selectBluetoothPrinter();
-      } catch (error) {
-        printerError = error;
-      }
-    }
     if (!order.billId) body.queueNumber = await getNextQueueNumber();
     const { data } = order.billId ? await api.put(`/open-bills/${order.billId}`, body) : await api.post("/open-bills", body);
     toast.success(`Open bill ${data.id} tersimpan`);
     const unprintedItems = (data.items_json || []).filter((item) => !item.is_printed);
     if (unprintedItems.length) {
       try {
-        if (!printerDevice) {
-          throw printerError || new Error("Pilih printer Bluetooth untuk mencetak tiket dapur.");
-        }
         const itemIds = unprintedItems.map((item) => item.id);
         if (itemIds.some((id) => typeof id !== "string" || !id)) {
           throw new Error("ID item belum tersedia untuk menandai status cetak.");
         }
-        await printBluetoothReceipt("kitchen", {
-          id: data.id,
-          isAddOn: (data.items_json || []).some((item) => item.is_printed),
-          isDuplicate: false,
-          tableName: tables.find((table) => table.id === data.tableId)?.name || data.type || "-",
-          orderTime: fmtDate(data.timestamp),
-          time: fmtDate(data.timestamp),
-          queueNumber: data.queueNumber == null ? null : String(data.queueNumber),
-          customerName: data.customerName,
-          waiter: data.waiterName || data.userName || "-",
-          items: unprintedItems.map((item) => ({
-            ...item,
-            name: itemName(item),
-            note: item.notes || item.note,
-          })),
-        }, { device: printerDevice });
+        await printBluetoothReceipt(
+          "kitchen",
+          {
+            id: data.id,
+            isAddOn: (data.items_json || []).some((item) => item.is_printed),
+            isDuplicate: false,
+            tableName: tables.find((table) => table.id === data.tableId)?.name || data.type || "-",
+            orderTime: fmtDate(data.timestamp),
+            time: fmtDate(data.timestamp),
+            queueNumber: data.queueNumber == null ? null : String(data.queueNumber),
+            customerName: data.customerName,
+            waiter: data.waiterName || data.userName || "-",
+            items: unprintedItems.map((item) => ({
+              ...item,
+              name: itemName(item),
+              note: item.notes || item.note,
+            })),
+          },
+          { printerType: printerTypeForDocType("kitchen") },
+        );
         if (!supabase) {
           throw new Error("Supabase belum dikonfigurasi untuk menyimpan status cetak dapur.");
         }

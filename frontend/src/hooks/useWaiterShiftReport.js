@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errMsg } from "@/lib/api";
-import { printBluetoothReceipt } from "@/lib/bluetoothThermalPrinter";
+import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 
 export function useWaiterShiftReport(shiftId) {
   const [report, setReport] = useState(null);
@@ -52,7 +52,11 @@ export function useWaiterShiftReport(shiftId) {
     setPrintError("");
     setPrinted(false);
     try {
-      await printBluetoothReceipt("waiterShift", data, { requireConnectedDevice: true });
+      await printBluetoothReceipt(
+        "waiterShift",
+        data,
+        { printerType: printerTypeForDocType("waiterShift") },
+      );
       setPrinted(true);
     } catch (error) {
       setPrintError(error?.message || "Laporan shift gagal dicetak melalui Bluetooth.");
