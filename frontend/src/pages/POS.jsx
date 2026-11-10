@@ -11,6 +11,7 @@ import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
 import { VariantDialog } from "@/components/pos/VariantDialog";
 import { supabase } from "@/supabaseClient";
 import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
+import { buildKitchenPrintData, unprintedKitchenItems } from "@/lib/kitchenTicket";
 
 const emptyOrder = (user) => ({
   billId: null, queueNumber: null, type: "Dine In", tableId: "none", customerId: "none", customerName: "", waiterName: user.role === "waiter" ? user.name : "", waiterId: user.role === "waiter" ? user.id : null,
@@ -161,53 +162,41 @@ export default function POS() {
     }
   };
 
+  // Kirim item baru ke printer dapur secara otomatis. Dipakai baik saat menyimpan
+  // open bill maupun saat pembayaran langsung (tanpa open bill), sehingga dapur
+  // tidak pernah terlewat hanya karena pelanggan membayar lunas di awal.
+  const autoPrintKitchenTicket = async (source, { tableName } = {}) => {
+    const isAddOn = (source?.items_json || []).some((item) => item.is_printed);
+    const ticket = buildKitchenPrintData(source, { isAddOn, tableName, time: fmtDate(source?.timestamp || source?.date) });
+    if (!ticket) return;
+    const itemIds = unprintedKitchenItems(source.items_json).map((item) => item.id);
+    try {
+      if (itemIds.some((id) => typeof id !== "string" || !id)) {
+        throw new Error("ID item belum tersedia untuk menandai status cetak.");
+      }
+      await printBluetoothReceipt("kitchen", ticket, { printerType: printerTypeForDocType("kitchen") });
+      if (!supabase) {
+        throw new Error("Supabase belum dikonfigurasi untuk menyimpan status cetak dapur.");
+      }
+      const { error } = await supabase.rpc("mark_json_items_as_printed", {
+        p_bill_id: source.id,
+        p_item_ids: itemIds,
+      });
+      if (error) {
+        throw new Error(`Tiket tercetak, tetapi status cetak gagal disimpan: ${error.message}`);
+      }
+      toast.success("Pesanan dapur tercetak otomatis.");
+    } catch (error) {
+      toast.error(`Pesanan tersimpan, tetapi tiket dapur gagal dicetak: ${error?.message || "Terjadi kesalahan."}`);
+    }
+  };
+
   const saveBill = () => run(async () => {
     const body = payload();
     if (!order.billId) body.queueNumber = await getNextQueueNumber();
     const { data } = order.billId ? await api.put(`/open-bills/${order.billId}`, body) : await api.post("/open-bills", body);
     toast.success(`Open bill ${data.id} tersimpan`);
-    const unprintedItems = (data.items_json || []).filter((item) => !item.is_printed);
-    if (unprintedItems.length) {
-      try {
-        const itemIds = unprintedItems.map((item) => item.id);
-        if (itemIds.some((id) => typeof id !== "string" || !id)) {
-          throw new Error("ID item belum tersedia untuk menandai status cetak.");
-        }
-        await printBluetoothReceipt(
-          "kitchen",
-          {
-            id: data.id,
-            isAddOn: (data.items_json || []).some((item) => item.is_printed),
-            isDuplicate: false,
-            tableName: tables.find((table) => table.id === data.tableId)?.name || data.type || "-",
-            orderTime: fmtDate(data.timestamp),
-            time: fmtDate(data.timestamp),
-            queueNumber: data.queueNumber == null ? null : String(data.queueNumber),
-            customerName: data.customerName,
-            waiter: data.waiterName || data.userName || "-",
-            items: unprintedItems.map((item) => ({
-              ...item,
-              name: itemName(item),
-              note: item.notes || item.note,
-            })),
-          },
-          { printerType: printerTypeForDocType("kitchen") },
-        );
-        if (!supabase) {
-          throw new Error("Supabase belum dikonfigurasi untuk menyimpan status cetak dapur.");
-        }
-        const { error } = await supabase.rpc("mark_json_items_as_printed", {
-          p_bill_id: data.id,
-          p_item_ids: itemIds,
-        });
-        if (error) {
-          throw new Error(`Tiket tercetak, tetapi status cetak gagal disimpan: ${error.message}`);
-        }
-        toast.success("Pesanan dapur tercetak otomatis.");
-      } catch (error) {
-        toast.error(`Open bill tersimpan, tetapi tiket dapur gagal dicetak: ${error?.message || "Terjadi kesalahan."}`);
-      }
-    }
+    await autoPrintKitchenTicket(data, { tableName: tables.find((table) => table.id === data.tableId)?.name });
     reset();
     loadRefs();
   });
@@ -218,6 +207,11 @@ export default function POS() {
     setPayOpen(false);
     setReceipt(data);
     toast.success(`Transaksi ${data.id} berhasil`);
+    // Pembayaran langsung (Walk In/Ojol, atau Dine In tanpa open bill) tetap
+    // mengirim pesanan ke dapur karena tidak melewati tombol Open Bill.
+    if (!order.billId) {
+      await autoPrintKitchenTicket(data, { tableName: tables.find((table) => table.id === data.tableId)?.name || data.tableName });
+    }
     reset();
     loadRefs();
   });
