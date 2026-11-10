@@ -13,6 +13,11 @@ const BLE_PRINTER_GAP_MS = 300;
 // diulang beberapa kali dengan jeda singkat sebelum error dilempar ke pengguna.
 const BLE_PRINT_RETRY_LIMIT = 3;
 const BLE_PRINT_RETRY_DELAY_MS = 500;
+// Web Bluetooth bisa menggantung tanpa pernah resolve/reject (mis. koneksi
+// terputus di tengah pengiriman data). Batas waktu keras ini memastikan setiap
+// percobaan cetak SELALU selesai sehingga promise cetak tidak pernah
+// menggantung selamanya dan tombol "Mencetak..." tidak tersangkut permanen.
+const BLE_PRINT_ATTEMPT_TIMEOUT_MS = 8000;
 const LINE_WIDTH = 32;
 const BLE_WRITE_CHUNK_SIZE = 20;
 let cachedDevice = null;
@@ -20,6 +25,27 @@ let printTail = Promise.resolve();
 let queuedPrints = 0;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Balapan sebuah promise terhadap batas waktu. Bila operasi Bluetooth
+// menggantung, janji ini menolak dengan pesan yang jelas sehingga pemanggil
+// (dan tombol cetak) tidak menunggu tanpa akhir. Timer selalu dibersihkan agar
+// tidak ada handle menggantung meski operasi selesai lebih cepat.
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Anggaran waktu satu job cetak: 1x pencarian perangkat + Nx percobaan kirim,
+// ditambah jeda antar percobaan, jeda antar dokumen, dan sedikit kelonggaran.
+function printJobBudgetMs(options = {}) {
+  return (options.attemptTimeoutMs || BLE_PRINT_ATTEMPT_TIMEOUT_MS) * (BLE_PRINT_RETRY_LIMIT + 1)
+    + BLE_PRINT_RETRY_DELAY_MS * BLE_PRINT_RETRY_LIMIT
+    + BLE_PRINTER_GAP_MS
+    + 5000;
+}
 
 function encodeText(value) {
   const encoded = encodeURIComponent(value);
@@ -506,12 +532,18 @@ async function resetGattConnection(device) {
 // Ulangi satu job cetak lengkap (connect + write) selama masih ada percobaan
 // tersisa. Setiap attempt membangun ulang koneksi dari nol sehingga printer
 // yang baru bangun dari sleep punya kesempatan tersambung kembali.
-async function runPrintAttempts(attempt) {
+async function runPrintAttempts(attempt, { attemptTimeoutMs = BLE_PRINT_ATTEMPT_TIMEOUT_MS } = {}) {
   let lastError;
   let device;
   for (let attemptIndex = 0; attemptIndex < BLE_PRINT_RETRY_LIMIT; attemptIndex += 1) {
     try {
-      device = await attempt();
+      // Batasi tiap percobaan: bila koneksi/penulisan menggantung, percobaan
+      // dianggap gagal dan akan dicoba ulang, bukan menunggu tanpa akhir.
+      device = await withTimeout(
+        Promise.resolve().then(() => attempt()),
+        attemptTimeoutMs,
+        "Koneksi printer Bluetooth tidak merespons (timeout).",
+      );
       return;
     } catch (error) {
       lastError = error;
@@ -583,7 +615,13 @@ async function runPrintJob(type, data, options) {
     throw new Error(`Printer ${label} belum diatur. Buka Pengaturan Printer lalu daftarkan perangkatnya.`);
   }
 
-  const device = options.device || (await findMappedBluetoothDevice(printerType));
+  // Pencarian perangkat juga dibatasi waktu: getDevices() dapat menggantung bila
+  // adapter Bluetooth bermasalah, dan itu akan menyangkutkan promise cetak.
+  const device = options.device || (await withTimeout(
+    findMappedBluetoothDevice(printerType),
+    options.deviceTimeoutMs || BLE_PRINT_ATTEMPT_TIMEOUT_MS,
+    `Printer ${label} tidak merespons saat dicari (timeout).`,
+  ));
   if (!device) {
     throw new Error(`Printer ${label} tidak ditemukan. Hubungkan ulang melalui Pengaturan Printer lalu coba lagi.`);
   }
@@ -600,7 +638,7 @@ async function runPrintJob(type, data, options) {
       const { characteristic } = await connectDevice(device, serviceUuid, characteristicUuid);
       await writeReceipt(characteristic, bytes);
       return device;
-    });
+    }, { attemptTimeoutMs: options.attemptTimeoutMs });
   } finally {
     // Putuskan koneksi yang dibuka job ini agar port Bluetooth tidak bentrok
     // dengan printer lain (utama saat mencetak Dapur lalu Kasir berurutan).
@@ -640,7 +678,15 @@ export function printBluetoothReceipt(type, data, options = {}) {
 
 function runQueuedPrint(type, data, options) {
   const job = (async () => {
-    await runPrintJob(type, data, options);
+    // Batas waktu keseluruhan job: jaring pengaman terakhir. Sekalipun sebuah
+    // operasi Bluetooth tetap menggantung, job ini menolak dengan pesan yang
+    // jelas sehingga tombol cetak kembali normal dan antrean cetak berikutnya
+    // tidak ikut tersangkut.
+    await withTimeout(
+      runPrintJob(type, data, options),
+      printJobBudgetMs(options),
+      "Pencetakan Bluetooth melebihi batas waktu. Periksa printer lalu coba lagi.",
+    );
     await sleep(BLE_PRINTER_GAP_MS);
   })();
   // Hindari unhandled rejection; error tetap disampaikan lewat `job`.

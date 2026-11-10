@@ -655,4 +655,70 @@ describe("Bluetooth ESC/POS receipts", () => {
     clearKitchenPrinterId();
     delete navigator.bluetooth;
   });
+
+  it("times out a hanging printer and keeps the print queue usable", async () => {
+    // Printer yang menggantung: gatt.connect() tidak pernah resolve, meniru
+    // koneksi Bluetooth yang macet/terputus di tengah pengiriman data.
+    const hangingDevice = {
+      id: "KITCHEN-DEVICE",
+      name: "KITCHEN-DEVICE",
+      gatt: {
+        connected: false,
+        connect: jest.fn(() => new Promise(() => {})),
+        disconnect: jest.fn(),
+        getPrimaryService: jest.fn(),
+      },
+    };
+    const writes = [];
+    const workingDevice = {
+      id: "KITCHEN-DEVICE",
+      name: "KITCHEN-DEVICE",
+      gatt: {
+        connected: false,
+        connect: jest.fn(async function connect() {
+          this.connected = true;
+          return this;
+        }),
+        disconnect: jest.fn(function disconnect() {
+          this.connected = false;
+        }),
+        getPrimaryService: jest.fn(async () => ({
+          getCharacteristic: jest.fn(async () => ({
+            properties: { writeWithoutResponse: true },
+            writeValueWithoutResponse: jest.fn(async (chunk) => writes.push(chunk)),
+          })),
+        })),
+      },
+    };
+    let useHanging = true;
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => [useHanging ? hangingDevice : workingDevice]),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    setKitchenPrinterId("KITCHEN-DEVICE");
+
+    // Cetak ke printer macet harus GAGAL dengan pesan timeout, bukan menggantung
+    // selamanya (yang akan membuat tombol "Mencetak..." tersangkut permanen).
+    await expect(
+      printBluetoothReceipt("kitchen", { items: [] }, {
+        printerType: "kitchen",
+        attemptTimeoutMs: 20,
+        deviceTimeoutMs: 20,
+      }),
+    ).rejects.toThrow(/batas waktu|tidak merespons/i);
+
+    // Antrean cetak tetap bisa dipakai: cetak berikutnya memakai printer yang
+    // sehat dan harus berhasil (job macet tidak menyangkutkan job berikutnya).
+    useHanging = false;
+    await printBluetoothReceipt("kitchen", { items: [] }, {
+      printerType: "kitchen",
+      attemptTimeoutMs: 20,
+      deviceTimeoutMs: 20,
+    });
+    expect(writes.length).toBeGreaterThan(0);
+
+    clearKitchenPrinterId();
+    delete navigator.bluetooth;
+  });
 });
