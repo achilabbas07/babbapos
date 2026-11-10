@@ -11,7 +11,7 @@ const DEFAULT_POSITION = { x: 0, y: 0 };
 export const STATUS = {
   available: { label: "Kosong", dot: "bg-emerald-500", text: "text-emerald-700" },
   occupied: { label: "Terisi", dot: "bg-rose-500", text: "text-rose-600" },
-  paid: { label: "Lunas (Kosongkan)", dot: "bg-blue-500", text: "text-blue-600" },
+  paid: { label: "Lunas (Kosongkan)", dot: "bg-emerald-600", text: "text-emerald-700" },
   reserved: { label: "Reservasi", dot: "bg-amber-500", text: "text-amber-600" },
 };
 
@@ -62,22 +62,41 @@ const Tile = ({ t, editing }) => {
     );
   }
 
-  return (
-    <div className={`relative w-full px-2 ${fixture ? "text-slate-500" : isPaid ? "bg-blue-100 rounded-2xl shadow-[inset_0_0_10px_rgba(100,150,255,0.2)]" : s.text}`}>
-      {isPaid && (
-        <div className="absolute -top-2 -left-2 z-10 flex items-center rounded-lg bg-blue-600 px-2 py-0.5 text-xs font-bold text-white shadow">
-          <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+  // Meja LUNAS: aksen hijau (emerald) dengan badge status yang rapi. Tidak ada
+  // kotak berlapis (nested container) di dalam kartu utama -> bersih & minimalis.
+  if (isPaid) {
+    return (
+      <div className="relative flex h-full w-full min-w-0 flex-col px-2 py-2">
+        <span className="pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-emerald-400/70" aria-hidden="true" />
+        <span
+          data-testid={`table-tile-paid-badge-${t.id}`}
+          className="absolute -left-2 -top-2 z-10 flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white shadow-sm"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+          </svg>
           LUNAS
+        </span>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center">
+          <Icon className="h-8 w-8 text-emerald-600" strokeWidth={2.2} />
+          <p className="mt-1 w-full min-w-0 max-w-full truncate text-base font-bold text-slate-700">{t.name}</p>
         </div>
-      )}
+        {od && (
+          <div className="mt-auto w-full min-w-0 border-t border-emerald-200 pt-1">
+            <p className="w-full min-w-0 max-w-full truncate text-xs font-semibold text-slate-600">
+              {od.customerName?.trim() || "UMUM"}
+            </p>
+            <p className="w-full text-right text-sm font-bold text-emerald-700">{shortRp(od.total || 0)}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`w-full px-2 ${fixture ? "text-slate-500" : s.text}`}>
       <Icon className="mx-auto h-10 w-10" strokeWidth={2.2} />
       <p className="mt-1 truncate text-base font-bold">{t.name}</p>
-      {isPaid && od && (
-        <div className="mt-auto pt-1 text-xs text-blue-800">
-          <p className="truncate">{od.customerName?.trim() || "UMUM"}</p>
-          <p className="truncate font-bold">{shortRp(od.total || 0)}</p>
-        </div>
-      )}
     </div>
   );
 };
