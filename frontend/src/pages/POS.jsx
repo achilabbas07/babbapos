@@ -12,6 +12,7 @@ import { VariantDialog } from "@/components/pos/VariantDialog";
 import { supabase } from "@/supabaseClient";
 import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 import { buildKitchenPrintData, unprintedKitchenItems } from "@/lib/kitchenTicket";
+import { roleRequiresWaiter, waiterValidationMessage } from "@/lib/orderValidation";
 
 const emptyOrder = (user) => ({
   billId: null, queueNumber: null, type: "Dine In", tableId: "none", customerId: "none", customerName: "", waiterName: user.role === "waiter" ? user.name : "", waiterId: user.role === "waiter" ? user.id : null,
@@ -192,6 +193,11 @@ export default function POS() {
   };
 
   const saveBill = () => run(async () => {
+    const blocked = waiterValidationMessage(user.role, order);
+    if (blocked) {
+      toast.error(blocked);
+      return;
+    }
     const body = payload();
     if (!order.billId) body.queueNumber = await getNextQueueNumber();
     const { data } = order.billId ? await api.put(`/open-bills/${order.billId}`, body) : await api.post("/open-bills", body);
@@ -202,6 +208,12 @@ export default function POS() {
   });
 
   const pay = (method, cashGiven, extra = {}) => run(async () => {
+    const blocked = waiterValidationMessage(user.role, order);
+    if (blocked) {
+      setPayOpen(false);
+      toast.error(blocked);
+      return;
+    }
     const queueNumber = order.billId ? order.queueNumber : await getNextQueueNumber();
     const { data } = await api.post("/transactions", { ...payload(), queueNumber, method, cashGiven, openBillId: order.billId, ...extra });
     setPayOpen(false);
@@ -231,7 +243,7 @@ export default function POS() {
         basePrice={variantFor ? (ojol && variantFor.price_ojol > 0 ? variantFor.price_ojol : variantFor.price) : 0}
         onPick={(v) => { addLine(variantFor, v); setVariantFor(null); }} />
       <CartPanel
-        order={order} setOrder={setOrder} tables={tables} customers={customers} waiters={waiters} cart={cart} setCart={setCart} priceOf={priceOf} total={total}
+        order={order} setOrder={setOrder} tables={tables} customers={customers} waiters={waiters} waiterRequired={roleRequiresWaiter(user.role)} cart={cart} setCart={setCart} priceOf={priceOf} total={total}
         canPay={user.role !== "waiter"} busy={busy} onQty={changeQty} onRemove={removeItem} isLocked={isLocked} onSaveBill={saveBill} onPay={() => setPayOpen(true)} onReset={reset}
       />
       <PayDialog open={payOpen} onOpenChange={setPayOpen} total={total} onPay={pay} busy={busy} customerId={order.customerId !== "none" ? order.customerId : null} />
