@@ -721,4 +721,71 @@ describe("Bluetooth ESC/POS receipts", () => {
     clearKitchenPrinterId();
     delete navigator.bluetooth;
   });
+
+  it("caps auto-reconnect at three bounded attempts and never loops forever", async () => {
+    // Printer yang selalu gagal tersambung: auto-reconnect harus berhenti setelah
+    // batas maksimal percobaan (3x), bukan mengulang tanpa henti yang membuat UI macet.
+    const failingDevice = {
+      id: "KITCHEN-DEVICE",
+      name: "KITCHEN-DEVICE",
+      gatt: {
+        connected: false,
+        connect: jest.fn(async () => {
+          throw new Error("GATT connection failed");
+        }),
+        disconnect: jest.fn(),
+        getPrimaryService: jest.fn(),
+      },
+    };
+    let useFailing = true;
+    const writes = [];
+    const healthyDevice = {
+      id: "KITCHEN-DEVICE",
+      name: "KITCHEN-DEVICE",
+      gatt: {
+        connected: false,
+        connect: jest.fn(async function connect() {
+          this.connected = true;
+          return this;
+        }),
+        disconnect: jest.fn(function disconnect() {
+          this.connected = false;
+        }),
+        getPrimaryService: jest.fn(async () => ({
+          getCharacteristic: jest.fn(async () => ({
+            properties: { writeWithoutResponse: true },
+            writeValueWithoutResponse: jest.fn(async (chunk) => writes.push(chunk)),
+          })),
+        })),
+      },
+    };
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => [useFailing ? failingDevice : healthyDevice]),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    setKitchenPrinterId("KITCHEN-DEVICE");
+
+    await expect(
+      printBluetoothReceipt("kitchen", { items: [] }, {
+        printerType: "kitchen",
+        attemptTimeoutMs: 20,
+        deviceTimeoutMs: 20,
+      }),
+    ).rejects.toThrow("GATT connection failed");
+    // Persis BLE_PRINT_RETRY_LIMIT (3) percobaan — tidak ada infinite loop.
+    expect(failingDevice.gatt.connect).toHaveBeenCalledTimes(3);
+
+    // Antrean cetak tetap sehat: job berikutnya sukses ke printer yang normal.
+    useFailing = false;
+    await printBluetoothReceipt("kitchen", { items: [] }, {
+      printerType: "kitchen",
+      attemptTimeoutMs: 20,
+      deviceTimeoutMs: 20,
+    });
+    expect(writes.length).toBeGreaterThan(0);
+
+    clearKitchenPrinterId();
+    delete navigator.bluetooth;
+  });
 });
