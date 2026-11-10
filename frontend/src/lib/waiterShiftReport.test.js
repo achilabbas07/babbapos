@@ -1,6 +1,7 @@
 import {
   buildWaiterShiftReportBytes,
   buildWaiterShiftReportLines,
+  WAITER_SHIFT_FEED_LINES,
 } from "./waiterShiftReport";
 
 if (typeof globalThis.structuredClone !== "function") {
@@ -70,12 +71,17 @@ describe("waiter shift report printer", () => {
     expect(lines.find(({ text }) => text.startsWith("Ditutup"))?.text.endsWith(expectedClosed)).toBe(true);
   });
 
-  it("encodes the report and feeds two lines before cutting", () => {
+  it("feeds enough blank lines before cutting so the footer is not truncated", () => {
     const bytes = Array.from(buildWaiterShiftReportBytes(shift));
     const cutIndex = bytes.findIndex((byte, index) => byte === 0x1d && bytes[index + 1] === 0x56);
 
     expect(String.fromCharCode(...bytes.slice(0, cutIndex))).toContain("SHIFT PELAYAN");
-    expect(bytes.slice(cutIndex - 4, cutIndex)).toEqual([0x0a, 0x0d, 0x0a, 0x0d]);
+    // Minimal 4 baris kosong (0x0a 0x0d) sebelum perintah potong.
+    expect(WAITER_SHIFT_FEED_LINES).toBeGreaterThanOrEqual(4);
+    const feedBytes = bytes.slice(cutIndex - WAITER_SHIFT_FEED_LINES * 2, cutIndex);
+    expect(feedBytes).toEqual(
+      Array.from({ length: WAITER_SHIFT_FEED_LINES }).flatMap(() => [0x0a, 0x0d]),
+    );
     expect(bytes.slice(cutIndex, cutIndex + 3)).toEqual([0x1d, 0x56, 0x00]);
   });
 

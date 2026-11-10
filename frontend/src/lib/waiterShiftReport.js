@@ -1,6 +1,11 @@
 import ReceiptPrinterEncoder from "@point-of-sale/receipt-printer-encoder";
 
 const LINE_WIDTH = 32;
+// Printer thermal 58mm memotong kertas beberapa milimeter DI BAWAH mata cetak.
+// Laporan tutup shift pelayan diakhiri tanda tangan Pelayan/Supervisor, jadi
+// baris terbawah butuh feed kosong ekstra sebelum cut agar tidak terpotong.
+// Nilai ini HANYA dipakai untuk dokumen waiterShift.
+export const WAITER_SHIFT_FEED_LINES = 5;
 const MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
 const fit = (value, width) => Array.from(String(value ?? "")).slice(0, width).join("");
@@ -181,7 +186,10 @@ export function buildWaiterShiftReportBytes(shift) {
     encoder.text(line.text).newline();
     if (line.bold) encoder.bold();
   }
-  // Maksimal 2 baris kosong sebelum potong kertas agar tidak membuang kertas.
-  encoder.align("left").newline().newline().cut();
+  // Beri jarak kosong yang cukup sebelum potong kertas agar baris terbawah
+  // (tanda tangan Pelayan/Supervisor) tidak terpotong oleh cutter 58mm.
+  encoder.align("left");
+  for (let index = 0; index < WAITER_SHIFT_FEED_LINES; index += 1) encoder.newline();
+  encoder.cut();
   return encoder.encode();
 }
