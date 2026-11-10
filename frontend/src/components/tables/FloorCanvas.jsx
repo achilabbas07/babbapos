@@ -40,6 +40,8 @@ const Tile = ({ t, editing }) => {
   const Icon = fixture ? Store : Armchair;
   const od = t.orderData;
   const busy = !editing && t.status === "occupied" && od;
+  const isPaid = t.status === "paid";
+
   if (busy) {
     return (
       <div className={`flex h-full w-full min-w-0 flex-col px-2 py-2 ${s.text}`}>
@@ -61,9 +63,21 @@ const Tile = ({ t, editing }) => {
   }
 
   return (
-    <div className={`w-full px-2 ${fixture ? "text-slate-500" : s.text}`}>
+    <div className={`relative w-full px-2 ${fixture ? "text-slate-500" : isPaid ? "bg-blue-100 rounded-2xl shadow-[inset_0_0_10px_rgba(100,150,255,0.2)]" : s.text}`}>
+      {isPaid && (
+        <div className="absolute -top-2 -left-2 z-10 flex items-center rounded-lg bg-blue-600 px-2 py-0.5 text-xs font-bold text-white shadow">
+          <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+          LUNAS
+        </div>
+      )}
       <Icon className="mx-auto h-10 w-10" strokeWidth={2.2} />
       <p className="mt-1 truncate text-base font-bold">{t.name}</p>
+      {isPaid && od && (
+        <div className="mt-auto pt-1 text-xs text-blue-800">
+          <p className="truncate">{od.customerName?.trim() || "UMUM"}</p>
+          <p className="truncate font-bold">{shortRp(od.total || 0)}</p>
+        </div>
+      )}
     </div>
   );
 };
