@@ -622,6 +622,9 @@ async def get_profit_and_loss_report(
           ) as summary_rows
           where account_type not in ('operating_expense', 'balance_sheet')
                         and coalesce(account_code, '') not like '8-%'
+                        -- Akun transit/penampungan aset (mis. 1-10004 "Rek. Belanja")
+                        -- dikecualikan agar tidak ikut sebagai Beban Operasional.
+                        and coalesce(account_code, '') not like '1-%'
                         and lower(coalesce(account_category, '')) not like 'bahan penunjang%'
 
           union all
@@ -728,6 +731,9 @@ async def get_profit_and_loss_report(
                             )
                         )
             and ledger.source_type is distinct from 'expense'
+                        -- Aset transit/penampungan (mis. 1-10004 "Rek. Belanja") bukan
+                        -- beban operasional; jangan sampai terbaca ke Laba Rugi.
+                        and coalesce(ledger.account_code, '') not like '1-%'
                         and not exists (
                             select 1
                             from public.expenses as expense_mirror
@@ -837,6 +843,9 @@ async def get_profit_and_loss_report(
                     where (expense.date at time zone 'Asia/Makassar')::date >= $1::date
                         and (expense.date at time zone 'Asia/Makassar')::date < $2::date
             and expense.amount > 0
+                        -- Aset transit/penampungan (mis. 1-10004 "Rek. Belanja")
+                        -- bukan beban operasional; jangan muncul di Laba Rugi.
+                        and coalesce(nullif(btrim(account.account_code), ''), nullif(btrim(category.account_code), ''), '') not like '1-%'
           group by 1, 2, 3, 4
         )
         select
@@ -846,6 +855,9 @@ async def get_profit_and_loss_report(
           max(account_type) as account_type,
           sum(balance) as balance
         from report_rows
+                -- Jaring pengaman terakhir: akun aset transit/penampungan (prefix 1-,
+                -- mis. 1-10004 "Rek. Belanja") tidak boleh masuk ke baris Laba Rugi.
+                where coalesce(account_code, '') not like '1-%'
         group by account_code, account_name, account_category
         order by account_type, account_code, account_name
         """,
@@ -971,6 +983,10 @@ async def get_profit_and_loss_report(
                 continue
             hpp_detail_index[detail_key] = len(hpp_detail_rows)
             hpp_detail_rows.append(report_row)
+            continue
+        # Aset transit/penampungan (prefix 1-, mis. 1-10004 "Rek. Belanja")
+        # TIDAK pernah menjadi Beban Operasional Laba Rugi, apa pun sumbernya.
+        if account_type == "expense" and str(report_row.get("account_code") or "").strip().startswith("1-"):
             continue
         report_row["account_type"] = account_type
         report_row["balance"] = balance
