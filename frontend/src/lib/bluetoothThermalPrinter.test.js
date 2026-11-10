@@ -611,4 +611,48 @@ describe("Bluetooth ESC/POS receipts", () => {
     clearCashierPrinterId();
     delete navigator.bluetooth;
   });
+
+  it("retries the GATT connection when an idle printer drops the first attempt", async () => {
+    const writes = [];
+    let connectAttempts = 0;
+    const device = {
+      id: "KITCHEN-DEVICE",
+      name: "KITCHEN-DEVICE",
+      gatt: {
+        connected: false,
+        connect: jest.fn(async function connect() {
+          connectAttempts += 1;
+          // Simulasi printer idle/sleep: percobaan pertama gagal, berikutnya sukses.
+          if (connectAttempts === 1) throw new Error("GATT connection failed");
+          this.connected = true;
+          return this;
+        }),
+        disconnect: jest.fn(function disconnect() {
+          this.connected = false;
+        }),
+        getPrimaryService: jest.fn(async () => ({
+          getCharacteristic: jest.fn(async () => ({
+            properties: { writeWithoutResponse: true },
+            writeValueWithoutResponse: jest.fn(async (chunk) => writes.push(chunk)),
+          })),
+        })),
+      },
+    };
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => [device]),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    setKitchenPrinterId("KITCHEN-DEVICE");
+
+    await printBluetoothReceipt("kitchen", { items: [] }, { printerType: "kitchen" });
+
+    // Satu percobaan gagal, percobaan ulang berhasil dan data tetap terkirim.
+    expect(device.gatt.connect).toHaveBeenCalledTimes(2);
+    expect(writes.length).toBeGreaterThan(0);
+    expect(bluetooth.requestDevice).not.toHaveBeenCalled();
+
+    clearKitchenPrinterId();
+    delete navigator.bluetooth;
+  });
 });

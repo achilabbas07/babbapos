@@ -8,6 +8,11 @@ export const RPP02_CHARACTERISTIC_UUID = "00002af1-0000-1000-8000-00805f9b34fb";
 export const RECEIPT_FOOTER = "Terima Kasih Atas Kunjungan Anda";
 // Jeda singkat antar dokumen agar tablet Bluetooth tidak error saat berganti koneksi.
 const BLE_PRINTER_GAP_MS = 300;
+// Ketahanan koneksi Bluetooth: bila printer sempat idle/mode sleep lalu GATT
+// gagal tersambung atau terputus saat tombol cetak ditekan, percobaan cetak
+// diulang beberapa kali dengan jeda singkat sebelum error dilempar ke pengguna.
+const BLE_PRINT_RETRY_LIMIT = 3;
+const BLE_PRINT_RETRY_DELAY_MS = 500;
 const LINE_WIDTH = 32;
 const BLE_WRITE_CHUNK_SIZE = 20;
 let cachedDevice = null;
@@ -478,10 +483,46 @@ async function writeReceipt(characteristic, bytes) {
 
 async function connectDevice(device, serviceUuid, characteristicUuid) {
   if (!device?.gatt) throw new Error("Perangkat yang dipilih tidak menyediakan koneksi GATT.");
+  // Bersihkan sisa sesi sebelumnya: putuskan koneksi basi (printer idle/sleep)
+  // sebelum menyambung ulang agar port GATT tidak memakai state lama.
+  await resetGattConnection(device);
   const server = device.gatt.connected ? device.gatt : await device.gatt.connect();
   const service = await server.getPrimaryService(serviceUuid);
   const characteristic = await findWritableCharacteristic(service, characteristicUuid);
   return { device, characteristic };
+}
+
+// Tutup koneksi GATT yang tersisa dari job sebelumnya (best-effort). Disconnect
+// kilat membuat percobaan sambung ulang selalu berangkat dari kondisi bersih.
+async function resetGattConnection(device) {
+  if (!device?.gatt?.connected) return;
+  try {
+    device.gatt.disconnect();
+  } catch (error) {
+    console.warn("Gagal membersihkan koneksi printer Bluetooth.", error);
+  }
+}
+
+// Ulangi satu job cetak lengkap (connect + write) selama masih ada percobaan
+// tersisa. Setiap attempt membangun ulang koneksi dari nol sehingga printer
+// yang baru bangun dari sleep punya kesempatan tersambung kembali.
+async function runPrintAttempts(attempt) {
+  let lastError;
+  let device;
+  for (let attemptIndex = 0; attemptIndex < BLE_PRINT_RETRY_LIMIT; attemptIndex += 1) {
+    try {
+      device = await attempt();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attemptIndex < BLE_PRINT_RETRY_LIMIT - 1) {
+        // Bersihkan sisa sesi gagal sebelum percobaan berikutnya.
+        await resetGattConnection(device);
+        await sleep(BLE_PRINT_RETRY_DELAY_MS);
+      }
+    }
+  }
+  throw lastError;
 }
 
 export async function connectBluetoothPrinter({
@@ -553,8 +594,13 @@ async function runPrintJob(type, data, options) {
   cachedDevice = device;
   const bytes = await buildEscPosReceipt(type, data);
   try {
-    const { characteristic } = await connectDevice(device, serviceUuid, characteristicUuid);
-    await writeReceipt(characteristic, bytes);
+    // Auto-reconnect: bila printer idle/sleep dan GATT gagal atau terputus saat
+    // tombol cetak ditekan, sambung ulang (koneksi bersih) sampai beberapa kali.
+    await runPrintAttempts(async () => {
+      const { characteristic } = await connectDevice(device, serviceUuid, characteristicUuid);
+      await writeReceipt(characteristic, bytes);
+      return device;
+    });
   } finally {
     // Putuskan koneksi yang dibuka job ini agar port Bluetooth tidak bentrok
     // dengan printer lain (utama saat mencetak Dapur lalu Kasir berurutan).
