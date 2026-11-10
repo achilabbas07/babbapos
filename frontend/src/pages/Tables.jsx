@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
 import { FloorCanvas, STATUS, autoLayout } from "@/components/tables/FloorCanvas";
 import { TableDetailDialog } from "@/components/tables/TableDetailDialog";
+import { TABLES_FALLBACK_POLL_MS, createTablesReloadScheduler, subscribeToTablesRealtime } from "@/lib/realtimeTables";
 
 const FIELDS = [
   { name: "name", label: "Nama", required: true, placeholder: "A-01" },
@@ -35,6 +36,28 @@ export default function Tables() {
     load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  // Sinkronisasi real-time denah meja: perangkat lain langsung melihat perubahan
+  // status meja (occupied/available/paid/reserved) tanpa refresh manual.
+  // Bila realtime Supabase tidak tersedia, fallback ke pemuatan berkala ringan.
+  useEffect(() => {
+    const controller = new AbortController();
+    const scheduler = createTablesReloadScheduler(controller, load);
+    let fallbackId = null;
+    const unsubscribe = subscribeToTablesRealtime(() => scheduler.schedule(), {
+      onStatus: (status) => {
+        if (status === "subscribed" || fallbackId) return;
+        fallbackId = setInterval(() => scheduler.schedule(), TABLES_FALLBACK_POLL_MS);
+      },
+    });
+    return () => {
+      unsubscribe();
+      scheduler.cancel();
+      if (fallbackId) clearInterval(fallbackId);
+      controller.abort();
+    };
+  }, [load]);
+
   useEffect(() => {
     if (!editing) setPositions(autoLayout(tables));
   }, [tables, editing]);
