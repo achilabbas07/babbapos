@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { fmtDate, itemName, rp } from "@/lib/api";
-import { printBluetoothReceipt } from "@/lib/bluetoothThermalPrinter";
+import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 import { useProfile } from "@/context/ProfileContext";
 import { BrandLogo } from "@/components/BrandLogo";
 import { buildPaidReceiptLines, incrementPrintCount, printCountKey, readPrintCount, wrapPrintText } from "@/lib/thermalPrint";
@@ -68,37 +68,41 @@ export const ReceiptDialog = ({ trx, onClose }) => {
   const handlePrint = async () => {
     setPrinting(true);
     try {
-      await printBluetoothReceipt("payment", {
-        id: trx.id,
-        isDuplicate: printCount > 0 || Number(trx.print_count) > 0,
-        time: dateText,
-        orderTime: dateText,
-        paidAt: fmtDate(trx.paidAt || trx.date),
-        paymentMethod: trx.method,
-        payments: trx.payments,
-        queueNumber: trx.queueNumber == null ? null : String(trx.queueNumber),
-        waiter: trx.waiterName || trx.userName || trx.userId || "-",
-        cashier: trx.userName || trx.userId || "-",
-        customerName: trx.customerName,
-        tableName: trx.tableName,
-        items: (trx.items_json || []).map((item) => ({
-          ...item,
-          name: itemName(item),
-        })),
-        subtotal: trx.subtotal,
-        total: trx.total,
-        cashGiven: trx.cashGiven,
-        totalPaid: trx.totalPaid,
-        change: trx.change,
-        platform: trx.platform,
-        profile: {
-          nama_usaha: profile.app_name,
-          alamat: profile.address,
-          kota: profile.city,
-          telepon: profile.phone,
-          logo_url: profile.logo_url,
+      await printBluetoothReceipt(
+        "payment",
+        {
+          id: trx.id,
+          isDuplicate: printCount > 0 || Number(trx.print_count) > 0,
+          time: dateText,
+          orderTime: dateText,
+          paidAt: fmtDate(trx.paidAt || trx.date),
+          paymentMethod: trx.method,
+          payments: trx.payments,
+          queueNumber: trx.queueNumber == null ? null : String(trx.queueNumber),
+          waiter: trx.waiterName || trx.userName || trx.userId || "-",
+          cashier: trx.userName || trx.userId || "-",
+          customerName: trx.customerName,
+          tableName: trx.tableName,
+          items: (trx.items_json || []).map((item) => ({
+            ...item,
+            name: itemName(item),
+          })),
+          subtotal: trx.subtotal,
+          total: trx.total,
+          cashGiven: trx.cashGiven,
+          totalPaid: trx.totalPaid,
+          change: trx.change,
+          platform: trx.platform,
+          profile: {
+            nama_usaha: profile.app_name,
+            alamat: profile.address,
+            kota: profile.city,
+            telepon: profile.phone,
+            logo_url: profile.logo_url,
+          },
         },
-      });
+        { printerType: printerTypeForDocType("payment") },
+      );
       const count = incrementPrintCount(printKey);
       flushSync(() => setPrintRevision(count));
     } catch (error) {

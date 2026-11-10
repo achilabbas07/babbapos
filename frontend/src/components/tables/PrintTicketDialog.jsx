@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { fmtDate, itemName, rp } from "@/lib/api";
-import { printBluetoothReceipt } from "@/lib/bluetoothThermalPrinter";
+import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useProfile } from "@/context/ProfileContext";
 import { supabase } from "@/supabaseClient";
@@ -67,22 +67,26 @@ export const PrintTicketDialog = ({ bill, tableName, mode, onClose }) => {
         if (!reprint && !supabase) {
           throw new Error("Supabase belum dikonfigurasi untuk menyimpan status cetak dapur.");
         }
-        await printBluetoothReceipt("kitchen", {
-          id: bill.id,
-          isAddOn: (bill.items_json || []).some((item) => item.is_printed),
-          isDuplicate: reprint,
-          tableName: tableName || bill.type || "-",
-          orderTime: dateText,
-          time: dateText,
-          queueNumber: bill.queueNumber == null ? null : String(bill.queueNumber),
-          waiter: bill.waiterName || bill.userName || "-",
-          customerName: bill.customerName,
-          items: itemsToPrint.map((item) => ({
-            ...item,
-            name: itemName(item),
-            note: item.notes || item.note,
-          })),
-        });
+        await printBluetoothReceipt(
+          "kitchen",
+          {
+            id: bill.id,
+            isAddOn: (bill.items_json || []).some((item) => item.is_printed),
+            isDuplicate: reprint,
+            tableName: tableName || bill.type || "-",
+            orderTime: dateText,
+            time: dateText,
+            queueNumber: bill.queueNumber == null ? null : String(bill.queueNumber),
+            waiter: bill.waiterName || bill.userName || "-",
+            customerName: bill.customerName,
+            items: itemsToPrint.map((item) => ({
+              ...item,
+              name: itemName(item),
+              note: item.notes || item.note,
+            })),
+          },
+          { printerType: printerTypeForDocType("kitchen") },
+        );
         if (reprint) {
           incrementPrintCount(printKey);
           return;
@@ -98,19 +102,23 @@ export const PrintTicketDialog = ({ bill, tableName, mode, onClose }) => {
           throw new Error(`Pesanan sudah tercetak, tetapi status cetak gagal disimpan: ${error.message}`);
         }
       } else {
-        await printBluetoothReceipt("bill", {
-          id: bill.id,
-          isDuplicate: printCount > 0 || Number(bill.print_count) > 0,
-          tableName: tableName || bill.type || "-",
-          time: dateText,
-          waiter: bill.waiterName || bill.userName || "-",
-          customerName: bill.customerName,
-          items: (bill.items_json || []).map((item) => ({
-            ...item,
-            name: itemName(item),
-          })),
-          total: bill.total,
-        });
+        await printBluetoothReceipt(
+          "bill",
+          {
+            id: bill.id,
+            isDuplicate: printCount > 0 || Number(bill.print_count) > 0,
+            tableName: tableName || bill.type || "-",
+            time: dateText,
+            waiter: bill.waiterName || bill.userName || "-",
+            customerName: bill.customerName,
+            items: (bill.items_json || []).map((item) => ({
+              ...item,
+              name: itemName(item),
+            })),
+            total: bill.total,
+          },
+          { printerType: printerTypeForDocType("bill") },
+        );
         const count = incrementPrintCount(printKey);
         flushSync(() => setPrintRevision(count));
       }

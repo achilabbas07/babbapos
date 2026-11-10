@@ -4,12 +4,15 @@ import {
   buildEscPosReceipt,
   convertImageToESCPOS,
   formatLine,
+  hasConfiguredPrinter,
   printBluetoothReceipt,
   printJustify,
+  printerTypeForDocType,
   RPP02_CHARACTERISTIC_UUID,
   RPP02_SERVICE_UUID,
   wordWrapCenter,
 } from "./bluetoothThermalPrinter";
+import { clearCashierPrinterId, clearKitchenPrinterId, setCashierPrinterId, setKitchenPrinterId } from "./printerSettings";
 
 describe("Bluetooth ESC/POS receipts", () => {
   it("builds the close-shift report and adds the reprint marker beside its ID", () => {
@@ -457,5 +460,119 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(Array.from(bytes)).toContain(0x1b);
     expect(String.fromCharCode(...bytes)).toContain("CETAK ULANG");
     expect(Array.from(bytes)).toContain(0x45);
+  });
+
+  it("maps document types to their target printer kind", () => {
+    expect(printerTypeForDocType("kitchen")).toBe("kitchen");
+    expect(printerTypeForDocType("bill")).toBe("cashier");
+    expect(printerTypeForDocType("payment")).toBe("cashier");
+    expect(printerTypeForDocType("shift")).toBe("cashier");
+    expect(printerTypeForDocType("waiterShift")).toBe("cashier");
+  });
+
+  it("reports whether a printer kind is configured", () => {
+    clearKitchenPrinterId();
+    clearCashierPrinterId();
+    expect(hasConfiguredPrinter("kitchen")).toBe(false);
+    expect(hasConfiguredPrinter(undefined)).toBe(false);
+
+    setKitchenPrinterId("KITCHEN-DEVICE");
+    expect(hasConfiguredPrinter("kitchen")).toBe(true);
+    expect(hasConfiguredPrinter("cashier")).toBe(false);
+    clearKitchenPrinterId();
+  });
+
+  it("prints to the mapped device for a printer kind and disconnects afterwards", async () => {
+    const buildDevice = (id) => {
+      const writes = [];
+      const device = {
+        id,
+        name: id,
+        gatt: {
+          connected: false,
+          connect: jest.fn(async function connect() {
+            this.connected = true;
+            return this;
+          }),
+          disconnect: jest.fn(function disconnect() {
+            this.connected = false;
+          }),
+          getPrimaryService: jest.fn(async () => ({
+            getCharacteristic: jest.fn(async () => ({
+              properties: { writeWithoutResponse: true },
+              writeValueWithoutResponse: jest.fn(async (chunk) => writes.push(chunk)),
+            })),
+          })),
+        },
+      };
+      return { device, writes };
+    };
+
+    const kitchen = buildDevice("KITCHEN-DEVICE");
+    const cashier = buildDevice("CASHIER-DEVICE");
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => [kitchen.device, cashier.device]),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    setKitchenPrinterId("KITCHEN-DEVICE");
+
+    await printBluetoothReceipt("kitchen", { items: [] }, { printerType: "kitchen" });
+
+    expect(kitchen.device.gatt.connect).toHaveBeenCalledTimes(1);
+    expect(kitchen.writes.length).toBeGreaterThan(0);
+    expect(bluetooth.requestDevice).not.toHaveBeenCalled();
+    expect(kitchen.device.gatt.disconnect).toHaveBeenCalledTimes(1);
+
+    clearKitchenPrinterId();
+    delete navigator.bluetooth;
+  });
+
+  it("serializes sequential prints to two printers with a short gap", async () => {
+    const order = [];
+    const buildDevice = (id) => {
+      const device = {
+        id,
+        name: id,
+        gatt: {
+          connected: false,
+          connect: jest.fn(async function connect() {
+            order.push(id);
+            this.connected = true;
+            return this;
+          }),
+          disconnect: jest.fn(function disconnect() {
+            this.connected = false;
+          }),
+          getPrimaryService: jest.fn(async () => ({
+            getCharacteristic: jest.fn(async () => ({
+              properties: { writeWithoutResponse: true },
+              writeValueWithoutResponse: jest.fn(async () => {}),
+            })),
+          })),
+        },
+      };
+      return device;
+    };
+    const kitchen = buildDevice("KITCHEN-DEVICE");
+    const cashier = buildDevice("CASHIER-DEVICE");
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => [kitchen, cashier]),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    setKitchenPrinterId("KITCHEN-DEVICE");
+    setCashierPrinterId("CASHIER-DEVICE");
+
+    await Promise.all([
+      printBluetoothReceipt("kitchen", { items: [] }, { printerType: "kitchen" }),
+      printBluetoothReceipt("payment", { items: [] }, { printerType: "cashier" }),
+    ]);
+
+    expect(order).toEqual(["KITCHEN-DEVICE", "CASHIER-DEVICE"]);
+
+    clearKitchenPrinterId();
+    clearCashierPrinterId();
+    delete navigator.bluetooth;
   });
 });

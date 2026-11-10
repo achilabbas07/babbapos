@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { ChevronDown, LogOut, Maximize, Minimize } from "lucide-react";
+import { ChevronDown, LogOut, Maximize, Minimize, Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { NAV_GROUPS } from "@/lib/nav";
 import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
 import { WaiterPrinterButton } from "@/components/WaiterPrinterButton";
+import { PrinterMappingDialog } from "@/components/settings/PrinterMappingDialog";
 
 const Clock = () => {
   const [now, setNow] = useState(new Date());
@@ -188,6 +189,7 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [openGroups, setOpenGroups] = useState(readOpenGroups);
+  const [printerOpen, setPrinterOpen] = useState(false);
 
   const visibleGroups = NAV_GROUPS
     .map((group) => ({ ...group, items: group.items.filter((n) => n.roles.includes(user.role)) }))
@@ -254,6 +256,15 @@ export default function Layout() {
             <div className="hidden sm:block"><Clock /></div>
             <div className="flex items-center gap-3">
               {user.role === "waiter" && <WaiterPrinterButton />}
+              <button
+                data-testid="printer-settings-button"
+                type="button"
+                onClick={() => setPrinterOpen(true)}
+                title="Pengaturan Printer (Dapur & Kasir)"
+                className="grid h-10 w-10 touch-manipulation place-items-center rounded-xl border border-border text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              >
+                <Settings className="h-4 w-4" />
+              </button>
               <FullscreenButton />
               <div className="text-right leading-tight">
                 <p data-testid="header-user-name" className="text-sm font-semibold">{user.name}</p>
@@ -277,6 +288,7 @@ export default function Layout() {
           <ShiftGate><Outlet /></ShiftGate>
         </main>
       </div>
+      <PrinterMappingDialog open={printerOpen} onClose={() => setPrinterOpen(false)} />
     </div>
   );
 }

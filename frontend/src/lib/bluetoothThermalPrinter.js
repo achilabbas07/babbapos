@@ -1,13 +1,20 @@
 import { groupOrderItemsForDisplay } from "./openBillDisplay";
 import { resolvePaidTotal } from "./splitPayment";
 import { buildWaiterShiftReportBytes } from "./waiterShiftReport";
+import { getPrinterId, resolveDeviceId } from "./printerSettings";
 
 export const RPP02_SERVICE_UUID = "000018f0-0000-1000-8000-00805f9b34fb";
 export const RPP02_CHARACTERISTIC_UUID = "00002af1-0000-1000-8000-00805f9b34fb";
 export const RECEIPT_FOOTER = "Terima Kasih Atas Kunjungan Anda";
+// Jeda singkat antar dokumen agar tablet Bluetooth tidak error saat berganti koneksi.
+const BLE_PRINTER_GAP_MS = 300;
 const LINE_WIDTH = 32;
 const BLE_WRITE_CHUNK_SIZE = 20;
 let cachedDevice = null;
+let printTail = Promise.resolve();
+let queuedPrints = 0;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function encodeText(value) {
   const encoded = encodeURIComponent(value);
@@ -489,7 +496,50 @@ export async function connectBluetoothPrinter({
   return device;
 }
 
-export async function printBluetoothReceipt(
+// Resolve printerType/serviceUuid. Ketika printerType diberikan (mis. 'kitchen'
+// atau 'cashier'), service UUID diambil dari perangkat yang pernah dipasangkan
+// via navigator.bluetooth.getDevices() agar koneksi kembali tanpa prompt ulang.
+export function hasConfiguredPrinter(printerType) {
+  if (!printerType) return false;
+  try {
+    return Boolean(getPrinterId(printerType));
+  } catch {
+    return false;
+  }
+}
+
+async function resolveTarget({ printerType, serviceUuid, bluetooth }) {
+  if (!printerType) {
+    return { serviceUuid: serviceUuid || RPP02_SERVICE_UUID };
+  }
+
+  const printerId = getPrinterId(printerType);
+  if (!printerId) return { serviceUuid: serviceUuid || RPP02_SERVICE_UUID, paired: null };
+
+  const getDevices = bluetooth?.getDevices?.bind(bluetooth);
+  const devices = typeof getDevices === "function" ? await getDevices() : [];
+  const paired = (devices || []).find((candidate) => resolveDeviceId(candidate) === printerId) || null;
+
+  return {
+    serviceUuid: serviceUuid || paired?.uuids?.[0] || RPP02_SERVICE_UUID,
+    paired,
+  };
+}
+
+async function runPrintJob(type, data, options) {
+  const bluetooth = globalThis.navigator?.bluetooth;
+  if (!bluetooth?.requestDevice) {
+    throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
+  }
+
+  return hasConfiguredPrinter(options.printerType)
+    ? runMappedPrintJob(type, data, options)
+    : runDefaultPrintJob(type, data, options);
+}
+
+// Jalur lama (tanpa printerType) dipertahankan persis seperti semula agar
+// perilaku pairing/reconnect yang sudah teruji tidak berubah.
+async function runDefaultPrintJob(
   type,
   data,
   {
@@ -497,13 +547,8 @@ export async function printBluetoothReceipt(
     requireConnectedDevice = false,
     serviceUuid = RPP02_SERVICE_UUID,
     characteristicUuid = RPP02_CHARACTERISTIC_UUID,
-  } = {},
+  },
 ) {
-  const bluetooth = globalThis.navigator?.bluetooth;
-  if (!bluetooth?.requestDevice) {
-    throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
-  }
-
   if (requireConnectedDevice && !selectedDevice && !cachedDevice) {
     throw new Error("Printer Bluetooth belum terhubung. Hubungkan printer lalu coba cetak ulang.");
   }
@@ -522,6 +567,88 @@ export async function printBluetoothReceipt(
   const bytes = await buildEscPosReceipt(type, data);
   const { characteristic } = await connectionPromise;
   await writeReceipt(characteristic, bytes);
+}
+
+// Jalur printer ganda: perangkat diambil dari pemetaan Pengaturan Printer,
+// koneksi GATT dibuka lalu ditutup untuk tiap dokumen.
+async function runMappedPrintJob(
+  type,
+  data,
+  {
+    device: selectedDevice,
+    requireConnectedDevice = false,
+    serviceUuid,
+    characteristicUuid = RPP02_CHARACTERISTIC_UUID,
+    printerType,
+  },
+) {
+  const bluetooth = globalThis.navigator?.bluetooth;
+  const { serviceUuid: targetServiceUuid, paired } = await resolveTarget({ printerType, serviceUuid, bluetooth });
+
+  if (requireConnectedDevice && !paired && !selectedDevice) {
+    throw new Error("Printer Bluetooth belum terhubung. Hubungkan printer lalu coba cetak ulang.");
+  }
+
+  // Jika perangkat hasil pemetaan tidak ditemukan pada getDevices(), minta
+  // pengguna memilih ulang printer (tanpa memakai cache agar tidak salah arah).
+  const device =
+    selectedDevice ||
+    paired ||
+    (await bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [targetServiceUuid] }));
+  const bytes = await buildEscPosReceipt(type, data);
+  const wasConnected = Boolean(device?.gatt?.connected);
+  cachedDevice = device;
+  const connectionPromise = connectDevice(device, targetServiceUuid, characteristicUuid);
+  try {
+    const { characteristic } = await connectionPromise;
+    await writeReceipt(characteristic, bytes);
+  } finally {
+    // Putuskan koneksi yang dibuka job ini agar port Bluetooth tidak bentrok
+    // dengan printer lain (utama saat mencetak Dapur lalu Kasir berurutan).
+    try {
+      if (!wasConnected && device?.gatt?.connected) device.gatt.disconnect();
+    } catch (error) {
+      console.warn("Gagal memutuskan koneksi printer Bluetooth.", error);
+    }
+  }
+}
+
+const KITCHEN_DOC_TYPES = new Set(["kitchen"]);
+
+// Tentukan printer tujuan dari jenis dokumen: tiket dapur -> printer Dapur,
+// dokumen lain (bill/payment/shift) -> printer Kasir.
+export function printerTypeForDocType(type) {
+  return KITCHEN_DOC_TYPES.has(type) ? "kitchen" : "cashier";
+}
+
+// Semua job cetak dijalankan berurutan (sequential) dengan jeda singkat supaya
+// tablet Bluetooth tidak error saat berpindah printer (mis. Dapur lalu Kasir).
+export function printBluetoothReceipt(type, data, options = {}) {
+  const run = () => runQueuedPrint(type, data, options);
+  // Job pertama dimulai langsung agar error konfigurasi printer muncul sinkron
+  // di tombol cetak; job berikutnya menunggu job sebelumnya + jeda singkat.
+  const job = queuedPrints === 0 ? run() : printTail.then(run, run);
+  queuedPrints += 1;
+  printTail = job.then(
+    () => {},
+    () => {},
+  ).then(() => {
+    queuedPrints -= 1;
+  });
+  return job;
+}
+
+function runQueuedPrint(type, data, options) {
+  const job = (async () => {
+    await runPrintJob(type, data, options);
+    await sleep(BLE_PRINTER_GAP_MS);
+  })();
+  // Hindari unhandled rejection; error tetap disampaikan lewat `job`.
+  job.then(
+    () => {},
+    () => {},
+  );
+  return job;
 }
 
 export async function selectBluetoothPrinter(serviceUuid = RPP02_SERVICE_UUID) {
