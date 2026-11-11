@@ -8,6 +8,7 @@ import { FormDialog } from "@/components/FormDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { RecipeDialog } from "@/components/RecipeDialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export default function Products() {
@@ -18,6 +19,9 @@ export default function Products() {
   const [recipeFor, setRecipeFor] = useState(null);
   const [variantOpen, setVariantOpen] = useState(false);
   const [ojolMarkup, setOjolMarkup] = useState(null);
+  const [editingOjol, setEditingOjol] = useState(false);
+  const [ojolDraft, setOjolDraft] = useState("");
+  const [savingOjol, setSavingOjol] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -33,11 +37,39 @@ export default function Products() {
     load();
   }, [load]);
 
-  // Konfigurasi markup Ojol global (read-only, tanpa tabel baru). Hanya untuk
-  // menampilkan info agar admin tahu persentase yang berlaku otomatis pada varian.
+  // Konfigurasi markup Ojol global. Disimpan pada tabel pengaturan `app_profile`
+  // (bukan tabel transaksional POS) dan bisa diedit langsung dari halaman ini.
   useEffect(() => {
     api.get("/settings/ojol-markup").then((r) => setOjolMarkup(r.data.markup_percent)).catch(() => {});
   }, []);
+
+  const startEditOjol = () => {
+    setOjolDraft(String(ojolMarkup ?? 0));
+    setEditingOjol(true);
+  };
+  const cancelEditOjol = () => {
+    setEditingOjol(false);
+    setOjolDraft("");
+  };
+  const saveOjolMarkup = async () => {
+    const value = Number(ojolDraft);
+    if (!Number.isFinite(value) || value < 0 || value > 1000) {
+      toast.error("Persentase markup harus berupa angka antara 0 dan 1000.");
+      return;
+    }
+    setSavingOjol(true);
+    try {
+      const r = await api.put("/settings/ojol-markup", { markup_percent: value });
+      setOjolMarkup(r.data.markup_percent);
+      setEditingOjol(false);
+      setOjolDraft("");
+      toast.success("Markup Ojol global tersimpan");
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSavingOjol(false);
+    }
+  };
 
   const recipeCount = (pid) => recipes.filter((r) => r.productId === pid).length;
   const invName = (id) => inventory.find((i) => i.id === id)?.name;
@@ -71,9 +103,32 @@ export default function Products() {
       {ojolMarkup != null && (
         <div data-testid="ojol-markup-info" className="mb-5 flex items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Percent className="h-5 w-5" /></div>
-          <div className="text-sm">
-            <p className="font-medium">Markup Ojol global untuk menu ber-varian: <span data-testid="ojol-markup-value" className="font-mono font-semibold text-primary">{ojolMarkup}%</span></p>
-            <p className="text-xs text-muted-foreground">Berlaku otomatis di kanal Ojol tanpa input per item. Varian memakai harga reguler × (1 + markup). Isi <em>Harga Ojol</em> per produk bila ingin menimpa markup ini.</p>
+          <div className="flex-1 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">Markup Ojol global untuk menu ber-varian:</span>
+              {editingOjol ? (
+                <span className="inline-flex items-center gap-1">
+                  <Input data-testid="ojol-markup-input" type="number" min="0" max="1000" step="0.5" autoFocus
+                    value={ojolDraft} onChange={(e) => setOjolDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveOjolMarkup(); if (e.key === "Escape") cancelEditOjol(); }}
+                    className="h-8 w-24 font-mono" />
+                  <span className="font-mono font-semibold text-primary">%</span>
+                </span>
+              ) : (
+                <span data-testid="ojol-markup-value" className="font-mono font-semibold text-primary">{ojolMarkup}%</span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Berlaku otomatis di kanal Ojol tanpa input per item. Varian memakai harga reguler × (1 + markup). Isi <em>Harga Ojol</em> per produk bila ingin menimpa markup ini.</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {editingOjol ? (
+              <>
+                <Button data-testid="ojol-markup-save" size="sm" disabled={savingOjol} onClick={saveOjolMarkup}>{savingOjol ? "Menyimpan…" : "Simpan"}</Button>
+                <Button data-testid="ojol-markup-cancel" size="sm" variant="ghost" disabled={savingOjol} onClick={cancelEditOjol}>Batal</Button>
+              </>
+            ) : (
+              <Button data-testid="ojol-markup-edit" size="sm" variant="outline" onClick={startEditOjol}><Pencil className="mr-1 h-3.5 w-3.5" />Edit</Button>
+            )}
           </div>
         </div>
       )}

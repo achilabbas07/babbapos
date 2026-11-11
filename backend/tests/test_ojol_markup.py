@@ -47,6 +47,19 @@ class TestOjolMarkupPercent:
         assert ojol_markup_percent() == 0
 
 
+class TestNormalizeOjolMarkup:
+    def test_clamps_to_safe_range(self):
+        assert server.normalize_ojol_markup(25) == 25
+        assert server.normalize_ojol_markup(-5) == 0
+        assert server.normalize_ojol_markup(5000) == 1000
+
+    def test_accepts_numeric_strings_and_decimals(self):
+        assert server.normalize_ojol_markup("12.5") == 12.5
+
+    def test_invalid_value_uses_fallback(self):
+        assert server.normalize_ojol_markup("abc", fallback=30) == 30
+
+
 # ---------- build_items (DB tiruan) ----------
 class FakeCursor:
     def __init__(self, rows):
@@ -71,6 +84,15 @@ class FakeProducts:
 class FakeDB:
     def __init__(self, rows):
         self.products = FakeProducts(rows)
+        self.app_profile = FakeProfile()
+
+
+class FakeProfile:
+    def __init__(self, doc=None):
+        self.doc = doc
+
+    async def find_one(self, flt=None, projection=None):
+        return self.doc
 
 
 def _product(pid="PRD-001", price=20000, price_ojol=0):
@@ -132,3 +154,41 @@ class TestBuildItemsVariants:
 def test_ojol_markup_route_registered():
     paths = [getattr(r, "path", "") for r in server.api.routes]
     assert "/api/settings/ojol-markup" in paths
+
+
+def test_ojol_markup_route_supports_put():
+    methods = {getattr(r, "path", ""): getattr(r, "methods", set()) for r in server.api.routes}
+    assert "PUT" in methods.get("/api/settings/ojol-markup", set())
+
+
+class TestLoadOjolMarkupFromProfile:
+    def test_reads_value_from_app_profile(self):
+        original = server.db
+        server.db = FakeDB([])
+        server.db.app_profile = FakeProfile({"_id": 1, "ojol_markup_percent": 27.5})
+        try:
+            assert asyncio.run(server.load_ojol_markup_percent()) == 27.5
+        finally:
+            server.db = original
+
+    def test_falls_back_when_row_missing(self):
+        original = server.db
+        server.db = FakeDB([])
+        server.db.app_profile = FakeProfile(None)
+        try:
+            assert asyncio.run(server.load_ojol_markup_percent()) == float(server.OJOL_MARKUP_PERCENT)
+        finally:
+            server.db = original
+
+    def test_build_items_uses_profile_value_when_not_passed(self):
+        original_db, original_load, original_hpp = server.db, server.load_variants, server.variant_hpp
+        server.db = FakeDB([_product()])
+        server.db.app_profile = FakeProfile({"_id": 1, "ojol_markup_percent": 25})
+        server.load_variants = lambda ids: _async_value(VARIANT)
+        server.variant_hpp = lambda ids: _async_value({})
+        try:
+            items = [OrderItemIn(productId="PRD-001", qty=1, variantId=5)]
+            out, _ = asyncio.run(server.build_items(items, "Ojek Online"))
+            assert out[0]["price"] == 27500  # (20.000 + 2.000) * 1.25
+        finally:
+            server.db, server.load_variants, server.variant_hpp = original_db, original_load, original_hpp

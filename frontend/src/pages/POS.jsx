@@ -55,15 +55,17 @@ export default function POS() {
   const [pending, setPending] = useState(null);
   const [variants, setVariants] = useState([]);
   const [variantFor, setVariantFor] = useState(null);
+  const [ojolMarkup, setOjolMarkup] = useState(() => resolveOjolMarkupPercent());
 
   const loadRefs = useCallback(async () => {
     try {
-      const [p, t, c, w] = await Promise.all([api.get("/products"), api.get("/tables"), api.get("/customers"), api.get("/users/waiters")]);
+      const [p, t, c, w, m] = await Promise.all([api.get("/products"), api.get("/tables"), api.get("/customers"), api.get("/users/waiters"), api.get("/settings/ojol-markup").catch(() => null)]);
       setProducts(p.data);
       api.get("/products/stock").then((r) => setStock(r.data)).catch(() => {});
       setTables(t.data);
       setCustomers(c.data);
       setWaiters(w.data);
+      if (m?.data?.markup_percent != null) setOjolMarkup(resolveOjolMarkupPercent(m.data.markup_percent));
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -230,7 +232,6 @@ export default function POS() {
   });
 
   const ojol = order.type === "Ojek Online";
-  const ojolMarkup = resolveOjolMarkupPercent();
   const priceOf = (item) => {
     const p = products.find((x) => x.id === item.productId);
     if (!p) return item.price;

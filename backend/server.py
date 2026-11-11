@@ -349,10 +349,10 @@ def ojol_variant_unit_price(regular_price: float, price_ojol: float, markup_perc
 
 
 async def build_items(items: List[OrderItemIn], order_type: str, ojol_markup: Optional[float] = None):
-    # Konfigurasi markup dibaca dari env saat request (default OJOL_MARKUP_PERCENT),
-    # tanpa perlu kolom/tabel baru di Supabase.
+    # Konfigurasi markup dibaca saat request dari pengaturan `app_profile`
+    # (dapat diubah dari halaman Produk & Resep), dengan fallback env/konstanta.
     if ojol_markup is None:
-        ojol_markup = ojol_markup_percent()
+        ojol_markup = await load_ojol_markup_percent()
     ids = list({i.productId for i in items})
     prods = {d["_id"]: Product.from_mongo(d) async for d in db.products.find({"_id": {"$in": ids}})}
     vids = list({i.variantId for i in items if i.variantId is not None})
@@ -1682,11 +1682,11 @@ async def pay_supplier(body: SupplierPaymentIn, user: User = Depends(ADMIN)):
 
 # ---------- Expenses ----------
 def ojol_markup_percent() -> float:
-    """Persentase markup Ojol global yang aktif (env ``OJOL_MARKUP_PERCENT``).
+    """Normalisasi persentase markup Ojol global (env ``OJOL_MARKUP_PERCENT``).
 
-    Nilai default ``OJOL_MARKUP_PERCENT``. Dijepit ke rentang 0..1000 agar salah
-    ketik di environment tidak merusak harga. Dibaca saat request sehingga
-    perubahan env langsung berlaku tanpa deploy ulang.
+    Nilai default ``OJOL_MARKUP_PERCENT``, dijepit ke rentang 0..1000 agar salah
+    ketik di environment tidak merusak harga. Dipakai sebagai fallback ketika
+    kolom pengaturan di database belum diisi.
     """
     try:
         value = float(os.environ.get("OJOL_MARKUP_PERCENT", OJOL_MARKUP_PERCENT))
@@ -1695,10 +1695,53 @@ def ojol_markup_percent() -> float:
     return max(0.0, min(value, 1000.0))
 
 
+def normalize_ojol_markup(value, fallback: Optional[float] = None) -> float:
+    """Jepit nilai markup Ojol ke rentang aman 0..1000 (fallback ke env)."""
+    base = ojol_markup_percent() if fallback is None else fallback
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return max(0.0, min(float(base), 1000.0))
+    return max(0.0, min(num, 1000.0))
+
+
+async def load_ojol_markup_percent(connection=None) -> float:
+    """Baca persentase markup Ojol global dari tabel pengaturan `app_profile`.
+
+    Hanya kolom pada tabel pengaturan (bukan tabel transaksional inti POS).
+    Fallback ke env/konstanta bila kolom belum tersedia atau query gagal.
+    """
+    try:
+        if connection is not None:
+            row = await connection.fetchrow('select ojol_markup_percent from public.app_profile where id = 1')
+            raw = row["ojol_markup_percent"] if row else None
+        else:
+            doc = await db.app_profile.find_one({"_id": 1})
+            raw = doc.get("ojol_markup_percent") if doc else None
+        if raw is None:
+            return ojol_markup_percent()
+        return normalize_ojol_markup(raw)
+    except Exception:
+        logger.warning("Gagal membaca ojol_markup_percent, memakai fallback env", exc_info=True)
+        return ojol_markup_percent()
+
+
 @api.get("/settings/ojol-markup")
 async def get_ojol_markup(_: User = Depends(ANY)):
-    """Baca konfigurasi markup Ojol global (read-only, tanpa tabel baru)."""
-    return {"markup_percent": ojol_markup_percent()}
+    """Baca konfigurasi markup Ojol global (tabel pengaturan `app_profile`)."""
+    return {"markup_percent": await load_ojol_markup_percent()}
+
+
+class OjolMarkupIn(BaseModel):
+    markup_percent: float = Field(ge=0, le=1000)
+
+
+@api.put("/settings/ojol-markup")
+async def update_ojol_markup(body: OjolMarkupIn, _: User = Depends(ADMIN)):
+    """Simpan persentase markup Ojol global ke kolom pengaturan `app_profile`."""
+    value = normalize_ojol_markup(body.markup_percent)
+    await db.app_profile.update_one({"_id": 1}, {"$set": {"ojol_markup_percent": value}}, upsert=True)
+    return {"markup_percent": value}
 
 
 class AppProfileIn(BaseModel):
