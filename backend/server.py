@@ -99,6 +99,12 @@ class UserIn(BaseModel):
 ORDER_TYPES = Literal["Dine In", "Takeaway", "Walk In", "Ojek Online"]
 DIRECT_PAY_TYPES = ("Walk In", "Ojek Online")
 
+# Markup harga Ojol global (persen) untuk menu ber-varian. Persentase tunggal ini
+# berlaku otomatis di kanal "Ojek Online" tanpa input per item dan TANPA kolom/tabel
+# baru (tidak mengubah struktur database). Varian yang belum punya harga Ojol khusus
+# memakai harga reguler varian dikali faktor markup ini (harga reguler * (1 + %/100)).
+OJOL_MARKUP_PERCENT = 20
+
 
 class ProductIn(BaseModel):
     name: str = Field(min_length=1)
@@ -328,7 +334,25 @@ def unit_price(p: Product, order_type: str) -> float:
     return p.price_ojol if order_type == "Ojek Online" and p.price_ojol > 0 else p.price
 
 
-async def build_items(items: List[OrderItemIn], order_type: str):
+def ojol_variant_unit_price(regular_price: float, price_ojol: float, markup_percent: float, extra: float = 0.0) -> float:
+    """Harga Ojol satu porsi untuk menu ber-varian dari harga reguler + markup global.
+
+        - Bila produk sudah punya ``price_ojol`` (> 0), harga Ojol khusus itu tetap
+            diutamakan (ditambah surcharge varian ``extra``) tanpa markup tambahan.
+    - Selain itu harga Ojol dihitung on-the-fly: ``regular_price * (1 + markup/100)``.
+
+    ``regular_price`` sebaiknya sudah termasuk ``additional_price`` varian.
+    """
+    if price_ojol and price_ojol > 0:
+                return float(price_ojol) + float(extra)
+    return float(regular_price) * (1 + float(markup_percent or 0) / 100.0)
+
+
+async def build_items(items: List[OrderItemIn], order_type: str, ojol_markup: Optional[float] = None):
+    # Konfigurasi markup dibaca dari env saat request (default OJOL_MARKUP_PERCENT),
+    # tanpa perlu kolom/tabel baru di Supabase.
+    if ojol_markup is None:
+        ojol_markup = ojol_markup_percent()
     ids = list({i.productId for i in items})
     prods = {d["_id"]: Product.from_mongo(d) async for d in db.products.find({"_id": {"$in": ids}})}
     vids = list({i.variantId for i in items if i.variantId is not None})
@@ -343,7 +367,14 @@ async def build_items(items: List[OrderItemIn], order_type: str):
         if i.variantId is not None and (not v or product_num(v["product_id"]) != product_num(p.id)):
             raise HTTPException(400, f"Varian #{i.variantId} tidak cocok untuk {p.name}")
         extra = float(v.get("additional_price") or 0) if v else 0
-        price = unit_price(p, order_type) + extra
+        regular_price = p.price + extra
+        if order_type == "Ojek Online" and i.variantId is not None:
+            # Menu ber-varian: pakai markup Ojol global (harga Ojol khusus per
+            # produk tetap diutamakan bila sudah diisi).
+            price = ojol_variant_unit_price(regular_price, p.price_ojol, ojol_markup, extra)
+        else:
+            # Menu tanpa varian (atau bukan Ojol): perilaku lama dipertahankan.
+            price = unit_price(p, order_type) + extra
         out.append({"id": i.id or str(uuid4()), "is_printed": i.is_printed,
                     "productId": p.id, "productName": p.name, "qty": i.qty, "price": price, "hpp": v_hpp.get(v["_id"], p.hpp) if v else p.hpp,
                     "notes": i.notes, "subtotal": price * i.qty, "variantId": i.variantId,
@@ -1650,6 +1681,26 @@ async def pay_supplier(body: SupplierPaymentIn, user: User = Depends(ADMIN)):
 
 
 # ---------- Expenses ----------
+def ojol_markup_percent() -> float:
+    """Persentase markup Ojol global yang aktif (env ``OJOL_MARKUP_PERCENT``).
+
+    Nilai default ``OJOL_MARKUP_PERCENT``. Dijepit ke rentang 0..1000 agar salah
+    ketik di environment tidak merusak harga. Dibaca saat request sehingga
+    perubahan env langsung berlaku tanpa deploy ulang.
+    """
+    try:
+        value = float(os.environ.get("OJOL_MARKUP_PERCENT", OJOL_MARKUP_PERCENT))
+    except (TypeError, ValueError):
+        value = float(OJOL_MARKUP_PERCENT)
+    return max(0.0, min(value, 1000.0))
+
+
+@api.get("/settings/ojol-markup")
+async def get_ojol_markup(_: User = Depends(ANY)):
+    """Baca konfigurasi markup Ojol global (read-only, tanpa tabel baru)."""
+    return {"markup_percent": ojol_markup_percent()}
+
+
 class AppProfileIn(BaseModel):
     app_name: str = Field(min_length=1, max_length=120)
     logo_url: str = Field("", max_length=1000)

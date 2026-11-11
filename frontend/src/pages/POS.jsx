@@ -13,6 +13,7 @@ import { supabase } from "@/supabaseClient";
 import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 import { buildKitchenPrintData, unprintedKitchenItems } from "@/lib/kitchenTicket";
 import { roleRequiresWaiter, waiterValidationMessage } from "@/lib/orderValidation";
+import { ojolVariantPrice, resolveOjolMarkupPercent } from "@/lib/ojolPricing";
 
 const emptyOrder = (user) => ({
   billId: null, queueNumber: null, type: "Dine In", tableId: "none", customerId: "none", customerName: "", waiterName: user.role === "waiter" ? user.name : "", waiterId: user.role === "waiter" ? user.id : null,
@@ -229,10 +230,11 @@ export default function POS() {
   });
 
   const ojol = order.type === "Ojek Online";
+  const ojolMarkup = resolveOjolMarkupPercent();
   const priceOf = (item) => {
     const p = products.find((x) => x.id === item.productId);
     if (!p) return item.price;
-    return (ojol && p.price_ojol > 0 ? p.price_ojol : p.price) + (item.extra || 0);
+    return ojolVariantPrice(p, item.extra, ojolMarkup, ojol);
   };
   const total = cart.reduce((s, i) => s + priceOf(i) * i.qty, 0);
 
@@ -240,7 +242,8 @@ export default function POS() {
     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_340px] lg:grid-cols-[minmax(0,1fr)_350px] xl:grid-cols-[minmax(0,1fr)_380px]">
       <ProductGrid products={products} stock={stock} onAdd={add} ojol={ojol} />
       <VariantDialog product={variantFor} variants={variantFor ? variantsOf(variantFor) : []} onClose={() => setVariantFor(null)}
-        basePrice={variantFor ? (ojol && variantFor.price_ojol > 0 ? variantFor.price_ojol : variantFor.price) : 0}
+        basePrice={variantFor ? ojolVariantPrice(variantFor, 0, ojolMarkup, ojol) : 0}
+        priceOf={(v) => ojolVariantPrice(variantFor, v.additional_price, ojolMarkup, ojol)}
         onPick={(v) => { addLine(variantFor, v); setVariantFor(null); }} />
       <CartPanel
         order={order} setOrder={setOrder} tables={tables} customers={customers} waiters={waiters} waiterRequired={roleRequiresWaiter(user.role)} cart={cart} setCart={setCart} priceOf={priceOf} total={total}

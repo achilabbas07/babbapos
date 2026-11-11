@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, ChefHat, UtensilsCrossed, Layers } from "lucide-react";
+import { Plus, Pencil, ChefHat, UtensilsCrossed, Layers, Percent } from "lucide-react";
 import { VariantAdminDialog } from "@/components/VariantAdminDialog";
 import { api, errMsg, rp, PRODUCT_TYPE_LABEL } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -17,6 +17,7 @@ export default function Products() {
   const [dialog, setDialog] = useState(null);
   const [recipeFor, setRecipeFor] = useState(null);
   const [variantOpen, setVariantOpen] = useState(false);
+  const [ojolMarkup, setOjolMarkup] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -32,6 +33,12 @@ export default function Products() {
     load();
   }, [load]);
 
+  // Konfigurasi markup Ojol global (read-only, tanpa tabel baru). Hanya untuk
+  // menampilkan info agar admin tahu persentase yang berlaku otomatis pada varian.
+  useEffect(() => {
+    api.get("/settings/ojol-markup").then((r) => setOjolMarkup(r.data.markup_percent)).catch(() => {});
+  }, []);
+
   const recipeCount = (pid) => recipes.filter((r) => r.productId === pid).length;
   const invName = (id) => inventory.find((i) => i.id === id)?.name;
 
@@ -39,7 +46,7 @@ export default function Products() {
     { name: "name", label: "Nama produk", required: true },
     { name: "category", label: "Kategori", required: true, placeholder: "Minuman / Makanan / Snack" },
     { name: "price", label: "Harga jual (Rp)", type: "number", required: true },
-    { name: "price_ojol", label: "Harga Ojol (Rp)", type: "number", hint: "Harga khusus order Ojek Online. Isi 0 untuk memakai harga jual normal." },
+    { name: "price_ojol", label: "Harga Ojol (Rp)", type: "number", hint: "Harga Ojol khusus per produk (menimpa markup global). Isi 0 untuk memakai harga normal + markup Ojol global khusus menu ber-varian." },
     { name: "type", label: "Tipe penjualan", type: "select", options: Object.entries(PRODUCT_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
     { name: "image", label: "URL gambar", placeholder: "https://..." },
     { name: "inventoryId", label: "Barang jadi (stok langsung)", type: "select", allowNone: true, options: inventory.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` })), hint: "Opsional. Dipakai bila produk tidak punya resep — stok berkurang 1 per porsi." },
@@ -61,6 +68,15 @@ export default function Products() {
         <Button data-testid="add-variant-button" variant="outline" onClick={() => setVariantOpen(true)}><Layers className="mr-1 h-4 w-4" />Tambah Varian</Button>
         <Button data-testid="add-product-button" onClick={() => setDialog({ type: "both", hpp: 0, price_ojol: 0 })}><Plus className="mr-1 h-4 w-4" />Tambah Produk</Button>
       </PageHeader>
+      {ojolMarkup != null && (
+        <div data-testid="ojol-markup-info" className="mb-5 flex items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Percent className="h-5 w-5" /></div>
+          <div className="text-sm">
+            <p className="font-medium">Markup Ojol global untuk menu ber-varian: <span data-testid="ojol-markup-value" className="font-mono font-semibold text-primary">{ojolMarkup}%</span></p>
+            <p className="text-xs text-muted-foreground">Berlaku otomatis di kanal Ojol tanpa input per item. Varian memakai harga reguler × (1 + markup). Isi <em>Harga Ojol</em> per produk bila ingin menimpa markup ini.</p>
+          </div>
+        </div>
+      )}
       <div className="overflow-x-auto rounded-2xl border border-border bg-card">
         <Table>
           <TableHeader>

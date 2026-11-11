@@ -8,12 +8,12 @@ const StockBadge = ({ v }) => {
   return null;
 };
 
-export const VariantDialog = ({ product, variants, basePrice, onPick, onClose }) => (
+export const VariantDialog = ({ product, variants, basePrice, priceOf, onPick, onClose }) => (
   <Dialog open={!!product} onOpenChange={(o) => !o && onClose()}>
     <DialogContent data-testid="variant-dialog" className="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>{product?.name}</DialogTitle>
-        <DialogDescription>Pilih variasi rasa / ukuran. Harga dasar {rp(basePrice)}.</DialogDescription>
+        <DialogDescription>Pilih variasi rasa / ukuran. Harga dasar {rp(basePrice)}. Harga Ojol ber-varian dihitung otomatis dari markup global.</DialogDescription>
       </DialogHeader>
       <div className="grid max-h-[60vh] gap-2 overflow-y-auto">
         {variants.map((v) => (
@@ -22,7 +22,7 @@ export const VariantDialog = ({ product, variants, basePrice, onPick, onClose })
             <span className="min-w-0 font-medium">{v.variant_name}<StockBadge v={v} /></span>
             <span className="shrink-0 text-right font-mono text-sm">
               {v.additional_price > 0 && <span className="block text-xs text-muted-foreground">+ {rp(v.additional_price)}</span>}
-              <span className="font-semibold text-primary">{rp(basePrice + Number(v.additional_price || 0))}</span>
+              <span className="font-semibold text-primary">{rp(priceOf ? priceOf(v) : basePrice + Number(v.additional_price || 0))}</span>
             </span>
           </button>
         ))}
