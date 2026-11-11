@@ -83,8 +83,11 @@ const Tile = ({ t, editing }) => {
         </div>
         {od && (
           <div className="mt-auto w-full min-w-0 border-t border-emerald-200 pt-1">
-            <p className="w-full min-w-0 max-w-full truncate text-xs font-semibold text-slate-600">
-              {od.customerName?.trim() || "UMUM"}
+            <p
+              data-testid={`table-tile-paid-customer-${t.id}`}
+              className="w-full min-w-0 max-w-full truncate text-xs font-semibold text-slate-600"
+            >
+              {`${od.customerName || od.customer_name || ""}`.trim() || "UMUM"}
             </p>
             <p className="w-full text-right text-sm font-bold text-emerald-700">{shortRp(od.total || 0)}</p>
           </div>

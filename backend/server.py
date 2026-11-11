@@ -379,7 +379,11 @@ async def free_table(table_id: Optional[str]):
 
 
 async def mark_paid(table_id: str, trx: Transaction):
-    order_data = {"lastTransactionId": trx.id, "total": trx.total, "paidAt": trx.date}
+    # Simpan customerName agar kartu meja LUNAS tetap menampilkan nama pelanggan
+    # (bukan selalu "UMUM"). Hanya metadata tampilan denah, tidak menyentuh
+    # transaksi/pembayaran.
+    order_data = {"lastTransactionId": trx.id, "total": trx.total, "paidAt": trx.date,
+                  "customerName": trx.customerName}
     await db.tables.update_one({"_id": table_id}, {"$set": {"status": "paid", "open_bill_id": None, "orderData": order_data}})
 
 
