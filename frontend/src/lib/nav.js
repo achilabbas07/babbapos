@@ -6,23 +6,30 @@ const ALL = ["admin", "kasir", "waiter"];
 const STAFF = ["admin", "kasir"];
 const ADMIN = ["admin"];
 
+// ID wadah utama sub-menu "Laporan & Analisa Operasional". Dipakai sebagai
+// penanda `group` pada item menu dan sebagai id grup nested di sidebar.
+export const OPERATIONAL_REPORTS_GROUP_ID = "operational-reports";
+
 export const NAV = [
   { to: "/pos", label: "Kasir", icon: ShoppingCart, roles: ALL },
   { to: "/tables", label: "Meja", icon: LayoutGrid, roles: ALL },
   { to: "/open-bills", label: "Open Bill", icon: ReceiptText, roles: ALL },
   { to: "/targets", label: "Target Sales", icon: Target, roles: ["admin", "waiter"] },
   { to: "/cash", label: "Kas & Shift", icon: Wallet, roles: STAFF },
-  { to: "/transactions", label: "Transaksi", icon: History, roles: ADMIN },
   { to: "/customers", label: "Pelanggan", icon: Users, roles: ALL },
   { to: "/products", label: "Produk & Resep", icon: UtensilsCrossed, roles: ADMIN },
   { to: "/inventory", label: "Stok Bahan", icon: Boxes, roles: ADMIN },
   { to: "/purchases", label: "Pembelian", icon: Truck, roles: ADMIN },
   { to: "/expenses", label: "Pengeluaran", icon: Wallet, roles: ADMIN },
   { to: "/reports", label: "Laporan", icon: BarChart3, roles: ADMIN },
-  { to: "/shifts", label: "Riwayat Shift", icon: ClipboardList, roles: ADMIN },
   { to: "/users", label: "Pengguna", icon: UserCog, roles: ADMIN },
   { to: "/profile", label: "Profil Usaha", icon: Store, roles: ADMIN },
   { to: "/promos", label: "Promo", icon: Tags, roles: ADMIN },
+  // Transaksi & Riwayat Shift tampil di dalam grup nested "Laporan & Analisa
+  // Operasional" (OPERATIONAL_REPORTS_NAV_GROUP) tetapi objeknya tetap di NAV
+  // agar route-nya di-generate persis sama seperti sebelumnya.
+  { to: "/transactions", label: "Transaksi", shortLabel: "Riwayat Transaksi", icon: History, roles: ADMIN, group: OPERATIONAL_REPORTS_GROUP_ID },
+  { to: "/shifts", label: "Riwayat Shift", shortLabel: "Riwayat Tutup Shift", icon: ClipboardList, roles: ADMIN, group: OPERATIONAL_REPORTS_GROUP_ID },
 ];
 
 export const FINANCE_NAV = [
@@ -34,11 +41,10 @@ export const FINANCE_NAV = [
 ];
 
 // "Laporan & Analisa Operasional" adalah WADAH UTAMA sub-menu operasional.
-// Sub-menu: Laporan Penjualan Produk, Laporan Void, dan Laporan Sales Target.
+// Sub-menu: Laporan Penjualan Produk, Laporan Void, Laporan Sales Target,
+// Transaksi (riwayat transaksi), dan Riwayat Shift (riwayat tutup shift).
 // Setiap entri di sini punya `group` yang sama supaya sidebar bisa merender
 // induk + anaknya secara berkelompok.
-export const OPERATIONAL_REPORTS_GROUP_ID = "operational-reports";
-
 export const OPERATIONAL_NAV = [
   {
     to: "/reports/product-sales",
@@ -74,15 +80,22 @@ const NAV_BY_PATH = Object.fromEntries(
 
 const pick = (...paths) => paths.map((path) => NAV_BY_PATH[path]).filter(Boolean);
 
-// Wadah utama sub-menu: di sidebar ini dirender sebagai grup berisi sub-menu
-// (Laporan Penjualan Produk, Laporan Void, Laporan Sales Target). Bentuknya nested
-// (punya `items`), berbeda dari item menu biasa (punya `to`).
+// Wadah utama sub-menu: di sidebar ini dirender sebagai grup nested (accordion).
+// Urutan sub-menu: Laporan Penjualan Produk, Laporan Void, Laporan Sales Target,
+// Transaksi (riwayat transaksi), lalu Riwayat Shift (riwayat tutup shift).
+// Bentuknya nested (punya `items`), berbeda dari item menu biasa (punya `to`).
 export const OPERATIONAL_REPORTS_NAV_GROUP = {
   id: OPERATIONAL_REPORTS_GROUP_ID,
   label: "Laporan & Analisa Operasional",
   shortLabel: "Analisa Operasional",
   icon: BarChart3,
-  items: pick("/reports/product-sales", "/reports/void-sales", "/reports/waiter-sales-target"),
+  items: pick(
+    "/reports/product-sales",
+    "/reports/void-sales",
+    "/reports/waiter-sales-target",
+    "/transactions",
+    "/shifts",
+  ),
 };
 
 export const NAV_GROUPS = [
@@ -115,7 +128,7 @@ export const NAV_GROUPS = [
     label: "Manajemen & Laporan",
     items: [
       OPERATIONAL_REPORTS_NAV_GROUP,
-      ...pick("/transactions", "/shifts", "/promos", "/users", "/profile"),
+      ...pick("/promos", "/users", "/profile"),
     ],
   },
 ];

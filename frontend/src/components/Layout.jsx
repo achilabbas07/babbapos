@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
 import { toast } from "sonner";
 import { BrandLogo } from "@/components/BrandLogo";
-import { NAV_GROUPS, filterNavItemsByRole } from "@/lib/nav";
+import { NAV_GROUPS, OPERATIONAL_REPORTS_GROUP_ID, filterNavItemsByRole } from "@/lib/nav";
 import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
 import { WaiterPrinterButton } from "@/components/WaiterPrinterButton";
@@ -122,18 +122,38 @@ const NavItem = ({ to, label, icon: Icon, prefix, nested = false }) => (
 );
 
 // Wadah utama sub-menu (mis. "Laporan & Analisa Operasional"): label induk +
-// sub-menu bertingkat di bawahnya (mis. "Laporan Penjualan Produk").
-const NavNestedGroup = ({ node }) => {
+// sub-menu bertingkat di bawahnya (mis. "Laporan Penjualan Produk"). Dua tingkat:
+// induk ini bisa di-expand/collapse (accordion) agar sidebar tidak terlalu padat.
+const NavNestedGroup = ({ node, open, onToggle, activePath }) => {
   const Icon = node.icon;
+  const hasActive = node.items.some((n) => n.to === activePath);
   return (
     <div data-testid={`nav-nested-${node.id}`}>
-      <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-foreground/80">
+      <button
+        type="button"
+        data-testid={`nav-nested-toggle-${node.id}`}
+        onClick={() => onToggle(node.id)}
+        aria-expanded={open}
+        aria-controls={`nav-nested-panel-${node.id}`}
+        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
+          hasActive ? "text-primary" : "text-foreground/80 hover:text-foreground"
+        }`}
+      >
         <Icon className="h-4 w-4 shrink-0" />
-        <span className="truncate">{node.label}</span>
-      </div>
-      <div className="mt-0.5 space-y-1 border-l border-border/60 pl-2">
-        {node.items.map((n) => <NavItem key={n.to} {...n} prefix="nav" nested />)}
-      </div>
+        <span className="min-w-0 flex-1 truncate">{node.label}</span>
+        <ChevronDown
+          aria-hidden="true"
+          className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div
+          id={`nav-nested-panel-${node.id}`}
+          className="mt-0.5 space-y-1 border-l border-border/60 pl-2"
+        >
+          {node.items.map((n) => <NavItem key={n.to} {...n} prefix="nav" nested />)}
+        </div>
+      )}
     </div>
   );
 };
@@ -141,7 +161,7 @@ const NavNestedGroup = ({ node }) => {
 // Mengubah item bertingkat menjadi daftar datar (dipakai rail mode & nav mobile).
 const flattenNavItems = (items) => (items || []).flatMap((n) => (n.items ? flattenNavItems(n.items) : [n]));
 
-const NavGroup = ({ group, open, onToggle, role }) => {
+const NavGroup = ({ group, open, onToggle, role, nestedOpen, onToggleNested, activePath }) => {
   const items = filterNavItemsByRole(group.items, role);
   if (items.length === 0) return null;
   const expanded = group.alwaysOpen || open;
@@ -169,7 +189,15 @@ const NavGroup = ({ group, open, onToggle, role }) => {
       {expanded && (
         <div id={`nav-group-panel-${group.id}`} className="space-y-1">
           {items.map((n) => (n.items
-            ? <NavNestedGroup key={n.id} node={n} />
+            ? (
+              <NavNestedGroup
+                key={n.id}
+                node={n}
+                open={Boolean(nestedOpen[n.id])}
+                onToggle={onToggleNested}
+                activePath={activePath}
+              />
+            )
             : <NavItem key={n.to} {...n} prefix="nav" nested />))}
         </div>
       )}
@@ -190,10 +218,26 @@ const readOpenGroups = () => {
   return DEFAULT_OPEN_GROUPS;
 };
 
+// State expand/collapse untuk menu bersarang dua tingkat (mis. "Laporan & Analisa
+// Operasional"). Disimpan terpisah agar tidak mengganggu preferensi grup utama.
+const NESTED_STORAGE_KEY = "babbapos.nav.nested";
+const DEFAULT_OPEN_NESTED = { [OPERATIONAL_REPORTS_GROUP_ID]: false };
+
+const readOpenNested = () => {
+  try {
+    const raw = window.localStorage.getItem(NESTED_STORAGE_KEY);
+    if (raw) return { ...DEFAULT_OPEN_NESTED, ...JSON.parse(raw) };
+  } catch {
+    // Ignore unreadable/corrupt storage and fall back to defaults.
+  }
+  return DEFAULT_OPEN_NESTED;
+};
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [openGroups, setOpenGroups] = useState(readOpenGroups);
+  const [openNested, setOpenNested] = useState(readOpenNested);
   const [printerOpen, setPrinterOpen] = useState(false);
 
   const visibleGroups = NAV_GROUPS
@@ -202,6 +246,7 @@ export default function Layout() {
   const flatItems = visibleGroups.flatMap((group) => flattenNavItems(group.items));
 
   const toggleGroup = (id) => setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleNestedGroup = (id) => setOpenNested((prev) => ({ ...prev, [id]: !prev[id] }));
 
   useEffect(() => {
     try {
@@ -211,6 +256,14 @@ export default function Layout() {
     }
   }, [openGroups]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(NESTED_STORAGE_KEY, JSON.stringify(openNested));
+    } catch {
+      // Persisting the nested accordion state is a nice-to-have; ignore storage errors.
+    }
+  }, [openNested]);
+
   // Keep the active route discoverable: expand its group when navigating into it.
   useEffect(() => {
     const activeGroup = NAV_GROUPS.find(
@@ -218,6 +271,15 @@ export default function Layout() {
     );
     if (!activeGroup) return;
     setOpenGroups((prev) => (prev[activeGroup.id] ? prev : { ...prev, [activeGroup.id]: true }));
+  }, [location.pathname]);
+
+  // Expand nested menu (dua tingkat) bila salah satu sub-menu-nya sedang aktif.
+  useEffect(() => {
+    const activeNested = NAV_GROUPS
+      .flatMap((group) => group.items)
+      .find((node) => node.items?.some((n) => n.to === location.pathname));
+    if (!activeNested) return;
+    setOpenNested((prev) => (prev[activeNested.id] ? prev : { ...prev, [activeNested.id]: true }));
   }, [location.pathname]);
 
   const handleLogout = async () => {
@@ -249,6 +311,9 @@ export default function Layout() {
                 open={Boolean(openGroups[group.id])}
                 onToggle={toggleGroup}
                 role={user.role}
+                nestedOpen={openNested}
+                onToggleNested={toggleNestedGroup}
+                activePath={location.pathname}
               />
             ))}
           </div>
