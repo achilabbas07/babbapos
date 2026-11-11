@@ -1,5 +1,5 @@
 import {
-  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart, Ban,
+  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart, Ban, Gift,
 } from "lucide-react";
 
 const ALL = ["admin", "kasir", "waiter"];
@@ -25,6 +25,7 @@ export const NAV = [
   { to: "/users", label: "Pengguna", icon: UserCog, roles: ADMIN },
   { to: "/profile", label: "Profil Usaha", icon: Store, roles: ADMIN },
   { to: "/promos", label: "Promo", icon: Tags, roles: ADMIN },
+  { to: "/point-reward-settings", label: "Point Reward", icon: Gift, roles: ADMIN },
   // Transaksi & Riwayat Shift tampil di dalam grup nested "Laporan & Analisa
   // Operasional" (OPERATIONAL_REPORTS_NAV_GROUP) tetapi objeknya tetap di NAV
   // agar route-nya di-generate persis sama seperti sebelumnya.
@@ -70,6 +71,14 @@ export const OPERATIONAL_NAV = [
     roles: ADMIN,
     group: OPERATIONAL_REPORTS_GROUP_ID,
   },
+  {
+    to: "/reports/point-reward",
+    label: "Laporan Point Reward",
+    shortLabel: "Point Reward",
+    icon: Gift,
+    roles: ADMIN,
+    group: OPERATIONAL_REPORTS_GROUP_ID,
+  },
 ];
 
 // Lookup so the grouped sidebar reuses the exact same objects (path, label, icon, roles)
@@ -93,6 +102,7 @@ export const OPERATIONAL_REPORTS_NAV_GROUP = {
     "/reports/product-sales",
     "/reports/void-sales",
     "/reports/waiter-sales-target",
+    "/reports/point-reward",
     "/transactions",
     "/shifts",
   ),
@@ -128,7 +138,7 @@ export const NAV_GROUPS = [
     label: "Manajemen & Laporan",
     items: [
       OPERATIONAL_REPORTS_NAV_GROUP,
-      ...pick("/promos", "/users", "/profile"),
+      ...pick("/promos", "/point-reward-settings", "/users", "/profile"),
     ],
   },
 ];

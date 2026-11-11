@@ -27,10 +27,12 @@ import FinanceDashboard from "@/pages/finance/FinanceDashboard";
 import ProfitAndLoss from "@/pages/finance/ProfitAndLoss";
 import CashFlowStatement from "@/pages/finance/CashFlowStatement";
 import PromoManagement from "@/pages/PromoManagement";
+import PointRewardSettings from "@/pages/PointRewardSettings";
 import COAManagement from "@/pages/COAManagement";
 import ProductSalesReport from "@/pages/reports/ProductSalesReport";
 import VoidSalesReport from "@/pages/reports/VoidSalesReport";
 import WaiterSalesTargetReport from "@/pages/reports/WaiterSalesTargetReport";
+import PointRewardReport from "@/pages/reports/PointRewardReport";
 import { toast } from "sonner";
 
 const PAGES = {
@@ -41,9 +43,11 @@ const PAGES = {
   "/admin/arus-kas": CashFlowStatement,
   "/coa": COAManagement,
   "/promos": PromoManagement,
+  "/point-reward-settings": PointRewardSettings,
   "/reports/product-sales": ProductSalesReport,
   "/reports/void-sales": VoidSalesReport,
   "/reports/waiter-sales-target": WaiterSalesTargetReport,
+  "/reports/point-reward": PointRewardReport,
 };
 
 const Protected = ({ roles, deniedMessage, children }) => {

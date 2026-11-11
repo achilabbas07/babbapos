@@ -9,6 +9,9 @@ dan varian untuk rentang tanggal tertentu.
 
 Sub-laporan kedua: *Laporan Void* — riwayat pembatalan (void) open bill beserta
 qty dan nilai rupiah item yang dibatalkan.
+
+Sub-laporan ketiga: *Laporan Point Reward* — riwayat penukaran poin pelanggan
+pada saat checkout beserta jumlah poin dan nilai diskonnya.
 """
 
 from fastapi import APIRouter, Depends
@@ -171,5 +174,54 @@ async def void_sales_report(start: str, end: str, _: User = Depends(ADMIN)):
         "total_items": len(rows),
         "total_qty": int(total_qty) if float(total_qty).is_integer() else total_qty,
         "total_value": round(total_value, 2),
+        "items": rows,
+    }
+
+
+@router.get("/reports/point-reward-usage")
+async def point_reward_usage_report(start: str, end: str, _: User = Depends(ADMIN)):
+    """Riwayat penukaran poin (point reward) pada rentang tanggal (WITA).
+
+    Tanggal ``start``/``end`` adalah tanggal kalender Asia/Makassar (``YYYY-MM-DD``).
+    Baca-saja: hanya membaca kolom penukaran poin pada ``transactions`` sehingga
+    tidak menyentuh logika transaksional, pembayaran, maupun cetak struk.
+
+    Mengembalikan daftar transaksi yang menukar poin (``pointsRedeemed`` > 0)
+    beserta jumlah poin, nilai diskon, pelanggan, dan kasir, plus ringkasan
+    total poin yang ditukar dan total nilai rupiah diskonnya.
+    """
+    # Batas tanggal memakai kalender WITA supaya penukaran dini hari tidak jatuh
+    # ke hari sebelumnya -- pola yang sama dipakai endpoint /reports/void-sales.
+    query = date_range_query(start, end)
+    # Filter penukaran poin dilakukan di Python agar payload ``transactions``
+    # tetap dibaca lewat abstraksi yang sama dengan laporan operasional lain.
+    txs = await db.transactions.find(query).sort("date", -1).to_list(None)
+
+    rows = []
+    total_points = 0.0
+    total_discount = 0.0
+    for t in txs:
+        points = float(t.get("pointsRedeemed") or 0)
+        if points <= 0:
+            continue
+        ts = t.get("date")
+        rows.append({
+            "transaction_id": t.get("_id"),
+            "date": to_local_date(ts).isoformat() if ts else "",
+            "timestamp": ts,
+            "customer_name": (t.get("customerName") or "").strip(),
+            "points_redeemed": int(points) if points.is_integer() else points,
+            "discount_value": round(float(t.get("pointsDiscount") or 0), 2),
+            "cashier": (t.get("userName") or "").strip(),
+        })
+        total_points += points
+        total_discount += float(t.get("pointsDiscount") or 0)
+
+    return {
+        "start": start,
+        "end": end,
+        "total_redemptions": len(rows),
+        "total_points_redeemed": int(total_points) if float(total_points).is_integer() else total_points,
+        "total_discount_value": round(total_discount, 2),
         "items": rows,
     }
