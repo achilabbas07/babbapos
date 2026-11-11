@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
 import { toast } from "sonner";
 import { BrandLogo } from "@/components/BrandLogo";
-import { NAV_GROUPS } from "@/lib/nav";
+import { NAV_GROUPS, filterNavItemsByRole } from "@/lib/nav";
 import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
 import { WaiterPrinterButton } from "@/components/WaiterPrinterButton";
@@ -121,23 +121,28 @@ const NavItem = ({ to, label, icon: Icon, prefix, nested = false }) => (
   </NavLink>
 );
 
-const PlaceholderItem = ({ label, icon: Icon, prefix }) => (
-  <div
-    data-testid={`${prefix}-analytics-placeholder`}
-    aria-disabled="true"
-    title="Dalam pengembangan"
-    className="flex shrink-0 cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground/60 2xl:pl-6"
-  >
-    <Icon className="h-4 w-4 shrink-0" />
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="truncate">{label}</span>
-      <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider">Soon</span>
-    </span>
-  </div>
-);
+// Wadah utama sub-menu (mis. "Laporan & Analisa Operasional"): label induk +
+// sub-menu bertingkat di bawahnya (mis. "Laporan Penjualan Produk").
+const NavNestedGroup = ({ node }) => {
+  const Icon = node.icon;
+  return (
+    <div data-testid={`nav-nested-${node.id}`}>
+      <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-foreground/80">
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="truncate">{node.label}</span>
+      </div>
+      <div className="mt-0.5 space-y-1 border-l border-border/60 pl-2">
+        {node.items.map((n) => <NavItem key={n.to} {...n} prefix="nav" nested />)}
+      </div>
+    </div>
+  );
+};
+
+// Mengubah item bertingkat menjadi daftar datar (dipakai rail mode & nav mobile).
+const flattenNavItems = (items) => (items || []).flatMap((n) => (n.items ? flattenNavItems(n.items) : [n]));
 
 const NavGroup = ({ group, open, onToggle, role }) => {
-  const items = group.items.filter((n) => n.roles.includes(role));
+  const items = filterNavItemsByRole(group.items, role);
   if (items.length === 0) return null;
   const expanded = group.alwaysOpen || open;
   return (
@@ -163,8 +168,8 @@ const NavGroup = ({ group, open, onToggle, role }) => {
       </button>
       {expanded && (
         <div id={`nav-group-panel-${group.id}`} className="space-y-1">
-          {items.map((n) => (n.placeholder
-            ? <PlaceholderItem key={n.label} {...n} prefix="nav" />
+          {items.map((n) => (n.items
+            ? <NavNestedGroup key={n.id} node={n} />
             : <NavItem key={n.to} {...n} prefix="nav" nested />))}
         </div>
       )}
@@ -192,9 +197,9 @@ export default function Layout() {
   const [printerOpen, setPrinterOpen] = useState(false);
 
   const visibleGroups = NAV_GROUPS
-    .map((group) => ({ ...group, items: group.items.filter((n) => n.roles.includes(user.role)) }))
+    .map((group) => ({ ...group, items: filterNavItemsByRole(group.items, user.role) }))
     .filter((group) => group.items.length > 0);
-  const flatItems = visibleGroups.flatMap((group) => group.items.filter((n) => !n.placeholder));
+  const flatItems = visibleGroups.flatMap((group) => flattenNavItems(group.items));
 
   const toggleGroup = (id) => setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
 
@@ -209,7 +214,7 @@ export default function Layout() {
   // Keep the active route discoverable: expand its group when navigating into it.
   useEffect(() => {
     const activeGroup = NAV_GROUPS.find(
-      (group) => !group.alwaysOpen && group.items.some((n) => n.to && n.to === location.pathname),
+      (group) => !group.alwaysOpen && flattenNavItems(group.items).some((n) => n.to === location.pathname),
     );
     if (!activeGroup) return;
     setOpenGroups((prev) => (prev[activeGroup.id] ? prev : { ...prev, [activeGroup.id]: true }));
@@ -231,7 +236,7 @@ export default function Layout() {
           <div className="2xl:hidden">
             {visibleGroups.map((group, index) => (
               <div key={group.id} className={index > 0 ? "mt-2 border-t border-border/60 pt-2" : ""}>
-                {group.items.filter((n) => !n.placeholder).map((n) => <NavItem key={n.to} {...n} prefix="nav" />)}
+                {flattenNavItems(group.items).map((n) => <NavItem key={n.to} {...n} prefix="nav" />)}
               </div>
             ))}
           </div>

@@ -3,7 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { FINANCE_NAV, NAV } from "@/lib/nav";
+import { FINANCE_NAV, NAV, OPERATIONAL_NAV } from "@/lib/nav";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import POS from "@/pages/POS";
@@ -28,6 +28,7 @@ import ProfitAndLoss from "@/pages/finance/ProfitAndLoss";
 import CashFlowStatement from "@/pages/finance/CashFlowStatement";
 import PromoManagement from "@/pages/PromoManagement";
 import COAManagement from "@/pages/COAManagement";
+import ProductSalesReport from "@/pages/reports/ProductSalesReport";
 import { toast } from "sonner";
 
 const PAGES = {
@@ -38,6 +39,7 @@ const PAGES = {
   "/admin/arus-kas": CashFlowStatement,
   "/coa": COAManagement,
   "/promos": PromoManagement,
+  "/reports/product-sales": ProductSalesReport,
 };
 
 const Protected = ({ roles, deniedMessage, children }) => {
@@ -60,9 +62,9 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route element={<Protected><Layout /></Protected>}>
-            {[...NAV, ...FINANCE_NAV].map(({ to, roles }) => {
+            {[...NAV, ...FINANCE_NAV, ...OPERATIONAL_NAV].map(({ to, roles }) => {
               const Page = PAGES[to];
-              const isFinanceRoute = FINANCE_NAV.some((item) => item.to === to);
+              const isFinanceRoute = [...FINANCE_NAV, ...OPERATIONAL_NAV].some((item) => item.to === to);
               return <Route key={to} path={to} element={<Protected roles={roles} deniedMessage={isFinanceRoute ? "Akses Ditolak" : undefined}><Page /></Protected>} />;
             })}
           </Route>

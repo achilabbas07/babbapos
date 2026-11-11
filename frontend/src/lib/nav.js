@@ -1,5 +1,5 @@
 import {
-  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags,
+  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart,
 } from "lucide-react";
 
 const ALL = ["admin", "kasir", "waiter"];
@@ -33,21 +33,39 @@ export const FINANCE_NAV = [
   { to: "/admin/laba-rugi", label: "Laporan Laba Rugi", icon: BarChart3, roles: ADMIN },
 ];
 
+// "Laporan & Analisa Operasional" adalah WADAH UTAMA sub-menu operasional.
+// Sub-menu pertama: Laporan Penjualan Produk. Setiap entri di sini punya `group`
+// yang sama supaya sidebar bisa merender induk + anaknya secara berkelompok.
+export const OPERATIONAL_REPORTS_GROUP_ID = "operational-reports";
+
+export const OPERATIONAL_NAV = [
+  {
+    to: "/reports/product-sales",
+    label: "Laporan Penjualan Produk",
+    shortLabel: "Penjualan Produk",
+    icon: LineChart,
+    roles: ADMIN,
+    group: OPERATIONAL_REPORTS_GROUP_ID,
+  },
+];
+
 // Lookup so the grouped sidebar reuses the exact same objects (path, label, icon, roles)
 // that App.js uses to generate routes. Nothing is duplicated or re-declared.
 const NAV_BY_PATH = Object.fromEntries(
-  [...NAV, ...FINANCE_NAV].map((item) => [item.to, item]),
+  [...NAV, ...FINANCE_NAV, ...OPERATIONAL_NAV].map((item) => [item.to, item]),
 );
 
 const pick = (...paths) => paths.map((path) => NAV_BY_PATH[path]).filter(Boolean);
 
-// Placeholder menu: intentionally has no `to`, so it never becomes a <Route> or a link.
-export const ANALYTICS_PLACEHOLDER = {
-  to: null,
-  label: "Laporan & Analytics",
+// Wadah utama sub-menu: di sidebar ini dirender sebagai grup berisi sub-menu
+// pertama (Laporan Penjualan Produk). Bentuknya nested (punya `items`), berbeda
+// dari item menu biasa (punya `to`).
+export const OPERATIONAL_REPORTS_NAV_GROUP = {
+  id: OPERATIONAL_REPORTS_GROUP_ID,
+  label: "Laporan & Analisa Operasional",
+  shortLabel: "Analisa Operasional",
   icon: BarChart3,
-  roles: ADMIN,
-  placeholder: true,
+  items: pick("/reports/product-sales"),
 };
 
 export const NAV_GROUPS = [
@@ -79,8 +97,15 @@ export const NAV_GROUPS = [
     id: "manajemen",
     label: "Manajemen & Laporan",
     items: [
-      ANALYTICS_PLACEHOLDER,
+      OPERATIONAL_REPORTS_NAV_GROUP,
       ...pick("/transactions", "/shifts", "/promos", "/users", "/profile"),
     ],
   },
 ];
+
+// Filter item menu berdasarkan peran. Mendukung item biasa (`roles`) maupun
+// grup nested (`items`) secara rekursif.
+export const filterNavItemsByRole = (items, role) =>
+  (items || [])
+    .map((item) => (item.items ? { ...item, items: filterNavItemsByRole(item.items, role) } : item))
+    .filter((item) => (item.roles ? item.roles.includes(role) : item.items && item.items.length > 0));
