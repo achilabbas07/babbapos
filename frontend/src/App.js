@@ -29,6 +29,7 @@ import CashFlowStatement from "@/pages/finance/CashFlowStatement";
 import PromoManagement from "@/pages/PromoManagement";
 import COAManagement from "@/pages/COAManagement";
 import ProductSalesReport from "@/pages/reports/ProductSalesReport";
+import VoidSalesReport from "@/pages/reports/VoidSalesReport";
 import { toast } from "sonner";
 
 const PAGES = {
@@ -40,6 +41,7 @@ const PAGES = {
   "/coa": COAManagement,
   "/promos": PromoManagement,
   "/reports/product-sales": ProductSalesReport,
+  "/reports/void-sales": VoidSalesReport,
 };
 
 const Protected = ({ roles, deniedMessage, children }) => {

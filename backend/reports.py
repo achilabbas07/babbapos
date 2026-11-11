@@ -6,6 +6,9 @@ logika transaksional, pembayaran, cetak struk, maupun alur POS lainnya.
 
 Sub-laporan pertama: *Laporan Penjualan Produk* — itemized penjualan per produk
 dan varian untuk rentang tanggal tertentu.
+
+Sub-laporan kedua: *Laporan Void* — riwayat pembatalan (void) open bill beserta
+qty dan nilai rupiah item yang dibatalkan.
 """
 
 from fastapi import APIRouter, Depends
@@ -15,6 +18,7 @@ from core import (
     date_range_query,
     db,
     require_roles,
+    to_local_date,
 )
 
 router = APIRouter(prefix="/api")
@@ -101,5 +105,71 @@ async def product_sales_report(start: str, end: str, _: User = Depends(ADMIN)):
         "gross_sales": round(gross_sales, 2),
         "transaction_count": len(txs),
         "item_count": len(rows),
+        "items": rows,
+    }
+
+
+@router.get("/reports/void-sales")
+async def void_sales_report(start: str, end: str, _: User = Depends(ADMIN)):
+    """Riwayat void/pembatalan open bill pada rentang tanggal (WITA).
+
+    Tanggal ``start``/``end`` adalah tanggal kalender Asia/Makassar (``YYYY-MM-DD``).
+    Baca-saja: hanya membaca ``void_logs`` (audit void open bill) sehingga tidak
+    menyentuh logika transaksional, pembayaran, maupun cetak struk.
+
+    Mengembalikan daftar item yang dibatalkan (per baris void) beserta qty dan
+    nilai rupiahnya, plus ringkasan total transaksi void dan total nilai void.
+    """
+    # Batas tanggal memakai kalender WITA supaya void dini hari tidak jatuh ke
+    # hari sebelumnya -- pola yang sama dipakai endpoint /reports/product-sales.
+    query = date_range_query(start, end, field="timestamp")
+    logs = await db.void_logs.find(query).sort("timestamp", -1).to_list(None)
+
+    table_ids = list({v.get("tableId") for v in logs if v.get("tableId")})
+    table_names = {}
+    if table_ids:
+        for t in await db.tables.find({"_id": {"$in": table_ids}}).to_list(None):
+            table_names[t["_id"]] = t.get("name") or ""
+
+    rows = []
+    total_value = 0.0
+    total_qty = 0.0
+    for log in logs:
+        ts = log.get("timestamp")
+        local_date = to_local_date(ts).isoformat() if ts else ""
+        table_name = table_names.get(log.get("tableId")) or ""
+        cashier = log.get("requestedBy") or log.get("authorizedBy") or ""
+        reason = log.get("reason") or ""
+        for item in log.get("items_json") or []:
+            qty = float(item.get("qty") or 0)
+            price = float(item.get("price") or 0)
+            subtotal = item.get("subtotal")
+            subtotal = float(subtotal) if subtotal is not None else price * qty
+            rows.append({
+                "void_id": log.get("_id"),
+                "bill_id": log.get("billId") or "",
+                "date": local_date,
+                "timestamp": ts,
+                "table_id": log.get("tableId"),
+                "table_name": table_name,
+                "product_name": item.get("productName") or "",
+                "variant_name": item.get("variantName") or "",
+                "qty": int(qty) if float(qty).is_integer() else qty,
+                "price": round(price, 2),
+                "value": round(subtotal, 2),
+                "cashier": cashier,
+                "authorized_by": log.get("authorizedBy") or "",
+                "reason": reason,
+            })
+            total_value += subtotal
+            total_qty += qty
+
+    return {
+        "start": start,
+        "end": end,
+        "total_voids": len(logs),
+        "total_items": len(rows),
+        "total_qty": int(total_qty) if float(total_qty).is_integer() else total_qty,
+        "total_value": round(total_value, 2),
         "items": rows,
     }

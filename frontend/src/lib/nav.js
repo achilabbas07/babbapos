@@ -1,5 +1,5 @@
 import {
-  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart,
+  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart, Ban,
 } from "lucide-react";
 
 const ALL = ["admin", "kasir", "waiter"];
@@ -34,8 +34,8 @@ export const FINANCE_NAV = [
 ];
 
 // "Laporan & Analisa Operasional" adalah WADAH UTAMA sub-menu operasional.
-// Sub-menu pertama: Laporan Penjualan Produk. Setiap entri di sini punya `group`
-// yang sama supaya sidebar bisa merender induk + anaknya secara berkelompok.
+// Sub-menu: Laporan Penjualan Produk dan Laporan Void. Setiap entri di sini punya
+// `group` yang sama supaya sidebar bisa merender induk + anaknya secara berkelompok.
 export const OPERATIONAL_REPORTS_GROUP_ID = "operational-reports";
 
 export const OPERATIONAL_NAV = [
@@ -44,6 +44,14 @@ export const OPERATIONAL_NAV = [
     label: "Laporan Penjualan Produk",
     shortLabel: "Penjualan Produk",
     icon: LineChart,
+    roles: ADMIN,
+    group: OPERATIONAL_REPORTS_GROUP_ID,
+  },
+  {
+    to: "/reports/void-sales",
+    label: "Laporan Void",
+    shortLabel: "Laporan Void",
+    icon: Ban,
     roles: ADMIN,
     group: OPERATIONAL_REPORTS_GROUP_ID,
   },
@@ -58,14 +66,14 @@ const NAV_BY_PATH = Object.fromEntries(
 const pick = (...paths) => paths.map((path) => NAV_BY_PATH[path]).filter(Boolean);
 
 // Wadah utama sub-menu: di sidebar ini dirender sebagai grup berisi sub-menu
-// pertama (Laporan Penjualan Produk). Bentuknya nested (punya `items`), berbeda
+// (Laporan Penjualan Produk, Laporan Void). Bentuknya nested (punya `items`), berbeda
 // dari item menu biasa (punya `to`).
 export const OPERATIONAL_REPORTS_NAV_GROUP = {
   id: OPERATIONAL_REPORTS_GROUP_ID,
   label: "Laporan & Analisa Operasional",
   shortLabel: "Analisa Operasional",
   icon: BarChart3,
-  items: pick("/reports/product-sales"),
+  items: pick("/reports/product-sales", "/reports/void-sales"),
 };
 
 export const NAV_GROUPS = [
