@@ -34,8 +34,9 @@ export const FINANCE_NAV = [
 ];
 
 // "Laporan & Analisa Operasional" adalah WADAH UTAMA sub-menu operasional.
-// Sub-menu: Laporan Penjualan Produk dan Laporan Void. Setiap entri di sini punya
-// `group` yang sama supaya sidebar bisa merender induk + anaknya secara berkelompok.
+// Sub-menu: Laporan Penjualan Produk, Laporan Void, dan Laporan Sales Target.
+// Setiap entri di sini punya `group` yang sama supaya sidebar bisa merender
+// induk + anaknya secara berkelompok.
 export const OPERATIONAL_REPORTS_GROUP_ID = "operational-reports";
 
 export const OPERATIONAL_NAV = [
@@ -55,6 +56,14 @@ export const OPERATIONAL_NAV = [
     roles: ADMIN,
     group: OPERATIONAL_REPORTS_GROUP_ID,
   },
+  {
+    to: "/reports/waiter-sales-target",
+    label: "Laporan Sales Target",
+    shortLabel: "Sales Target",
+    icon: Target,
+    roles: ADMIN,
+    group: OPERATIONAL_REPORTS_GROUP_ID,
+  },
 ];
 
 // Lookup so the grouped sidebar reuses the exact same objects (path, label, icon, roles)
@@ -66,14 +75,14 @@ const NAV_BY_PATH = Object.fromEntries(
 const pick = (...paths) => paths.map((path) => NAV_BY_PATH[path]).filter(Boolean);
 
 // Wadah utama sub-menu: di sidebar ini dirender sebagai grup berisi sub-menu
-// (Laporan Penjualan Produk, Laporan Void). Bentuknya nested (punya `items`), berbeda
-// dari item menu biasa (punya `to`).
+// (Laporan Penjualan Produk, Laporan Void, Laporan Sales Target). Bentuknya nested
+// (punya `items`), berbeda dari item menu biasa (punya `to`).
 export const OPERATIONAL_REPORTS_NAV_GROUP = {
   id: OPERATIONAL_REPORTS_GROUP_ID,
   label: "Laporan & Analisa Operasional",
   shortLabel: "Analisa Operasional",
   icon: BarChart3,
-  items: pick("/reports/product-sales", "/reports/void-sales"),
+  items: pick("/reports/product-sales", "/reports/void-sales", "/reports/waiter-sales-target"),
 };
 
 export const NAV_GROUPS = [

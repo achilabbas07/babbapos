@@ -14,6 +14,11 @@ import {
 } from "./bluetoothThermalPrinter";
 import { clearCashierPrinterId, clearKitchenPrinterId, setCashierPrinterId, setKitchenPrinterId } from "./printerSettings";
 
+// Encoder struk memakai structuredClone; sediakan shim untuk lingkungan tes JSDOM.
+if (typeof globalThis.structuredClone !== "function") {
+  globalThis.structuredClone = (value) => JSON.parse(JSON.stringify(value));
+}
+
 describe("Bluetooth ESC/POS receipts", () => {
   it("builds the close-shift report and adds the reprint marker beside its ID", () => {
     const shift = {
@@ -784,6 +789,70 @@ describe("Bluetooth ESC/POS receipts", () => {
       deviceTimeoutMs: 20,
     });
     expect(writes.length).toBeGreaterThan(0);
+
+    clearKitchenPrinterId();
+    delete navigator.bluetooth;
+  });
+
+  it("streams a long shift report in small chunks without truncating the tail", async () => {
+    const writes = [];
+    const device = {
+      id: "KITCHEN-DEVICE",
+      name: "KITCHEN-DEVICE",
+      gatt: {
+        connected: false,
+        connect: jest.fn(async function connect() {
+          this.connected = true;
+          return this;
+        }),
+        disconnect: jest.fn(function disconnect() {
+          this.connected = false;
+        }),
+        getPrimaryService: jest.fn(async () => ({
+          getCharacteristic: jest.fn(async () => ({
+            properties: { writeWithoutResponse: true },
+            writeValueWithoutResponse: jest.fn(async (chunk) => writes.push(chunk)),
+          })),
+        })),
+      },
+    };
+    const bluetooth = {
+      requestDevice: jest.fn(),
+      getDevices: jest.fn(async () => [device]),
+    };
+    Object.defineProperty(navigator, "bluetooth", { configurable: true, value: bluetooth });
+    setKitchenPrinterId("KITCHEN-DEVICE");
+
+    // Laporan panjang: banyak baris produk sehingga jauh melewati ambang chunking.
+    const longShift = {
+      id: "WSHIFT-LONG",
+      waiter_name: "Budi Santoso",
+      shift_id: "SHIFT-SIANG-B",
+      opened_at: "2026-11-03T01:00:00+00:00",
+      closed_at: "2026-11-03T13:00:00+00:00",
+      results: {
+        total_orders: 40,
+        active_tables: 0,
+        orders_data: Array.from({ length: 40 }, (_, index) => ({
+          variant_name: `Menu Panjang Nomor ${index} Spesial`,
+          qty: index + 1,
+        })),
+        voids: { total: 0, details: [] },
+        target_sales_status: "TERCAPAI",
+      },
+    };
+    const expectedBytes = Array.from(await buildEscPosReceipt("waiterShift", longShift));
+    expect(expectedBytes.length).toBeGreaterThan(512);
+
+    await printBluetoothReceipt("waiterShift", longShift, { printerType: "kitchen" });
+
+    // Setiap chunk <= 20 byte, tetapi seluruh payload terkirim persis (tak terpotong).
+    expect(writes.every((chunk) => chunk.byteLength <= 20)).toBe(true);
+    const sent = writes.flatMap((chunk) => Array.from(chunk));
+    expect(sent).toEqual(expectedBytes);
+    // Ekor payload (perintah potong + umpan akhir) ikut terkirim sampai byte terakhir.
+    expect(sent).toContain(0x1d);
+    expect(sent.slice(-5)).toEqual([0x1d, 0x56, 0x00, 0x0a, 0x0d]);
 
     clearKitchenPrinterId();
     delete navigator.bluetooth;

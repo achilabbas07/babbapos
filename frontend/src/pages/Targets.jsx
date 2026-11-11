@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { Plus, Pencil, Lock } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useShift } from "@/components/ShiftGate";
-import { api, errMsg, fmtDate } from "@/lib/api";
+import { api, errMsg } from "@/lib/api";
 import { PageHeader, Empty } from "@/components/PageHeader";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { TargetDialog } from "@/components/TargetDialog";
@@ -114,13 +114,12 @@ const AdminView = () => {
   const [products, setProducts] = useState([]);
   const [waiters, setWaiters] = useState([]);
   const [progress, setProgress] = useState([]);
-  const [history, setHistory] = useState([]);
   const [dialog, setDialog] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const [t, p, w, pr, h] = await Promise.all([api.get("/targets"), api.get("/products"), api.get("/users/waiters"), api.get("/targets/progress"), api.get("/waiter-shifts")]);
-      setTargets(t.data); setProducts(p.data); setWaiters(w.data); setProgress(pr.data); setHistory(h.data);
+      const [t, p, w, pr] = await Promise.all([api.get("/targets"), api.get("/products"), api.get("/users/waiters"), api.get("/targets/progress")]);
+      setTargets(t.data); setProducts(p.data); setWaiters(w.data); setProgress(pr.data);
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -165,26 +164,6 @@ const AdminView = () => {
         <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Progres shift berjalan</h2>
         {progress.length === 0 ? <Empty testid="progress-empty" text="Tidak ada pelayan dengan shift aktif." /> : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>
-        )}
-      </section>
-      <section>
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Riwayat shift pelayan</h2>
-        {history.length === 0 ? <Empty testid="waiter-history-empty" text="Belum ada shift pelayan yang ditutup." /> : (
-          <div className="divide-y divide-border rounded-2xl border border-border bg-card">
-            {history.map((h) => (
-              <div key={h.id} data-testid={`waiter-shift-${h.id}`} className="grid gap-2 px-5 py-3 md:grid-cols-[220px_1fr] md:items-center">
-                <div><p className="font-semibold">{h.userName}</p><p className="font-mono text-xs text-muted-foreground">{fmtDate(h.openedAt)} → {fmtDate(h.closedAt)}</p></div>
-                <div className="flex flex-wrap gap-2">
-                  {h.results.length === 0 && <span className="text-xs text-muted-foreground">Tanpa target</span>}
-                  {h.results.map((r) => (
-                    <span key={r.targetId} className={`rounded-full px-2.5 py-1 text-xs font-medium ${r.achieved >= r.targetQty ? "bg-emerald-100 text-emerald-700" : "bg-secondary text-muted-foreground"}`}>
-                      {r.name}: {r.achieved}/{r.targetQty}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
         )}
       </section>
       <TargetDialog target={dialog} products={products} waiters={waiters} onClose={() => setDialog(null)} onSaved={load} />

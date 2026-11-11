@@ -30,6 +30,7 @@ import PromoManagement from "@/pages/PromoManagement";
 import COAManagement from "@/pages/COAManagement";
 import ProductSalesReport from "@/pages/reports/ProductSalesReport";
 import VoidSalesReport from "@/pages/reports/VoidSalesReport";
+import WaiterSalesTargetReport from "@/pages/reports/WaiterSalesTargetReport";
 import { toast } from "sonner";
 
 const PAGES = {
@@ -42,6 +43,7 @@ const PAGES = {
   "/promos": PromoManagement,
   "/reports/product-sales": ProductSalesReport,
   "/reports/void-sales": VoidSalesReport,
+  "/reports/waiter-sales-target": WaiterSalesTargetReport,
 };
 
 const Protected = ({ roles, deniedMessage, children }) => {

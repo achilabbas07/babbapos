@@ -20,6 +20,14 @@ const BLE_PRINT_RETRY_DELAY_MS = 500;
 const BLE_PRINT_ATTEMPT_TIMEOUT_MS = 8000;
 const LINE_WIDTH = 32;
 const BLE_WRITE_CHUNK_SIZE = 20;
+// Laporan panjang (mis. tutup shift pelayan) rentan terpotong di tengah jalan
+// bila chunk dikirim tanpa jeda: buffer printer thermal 58mm tidak sempat
+// diproses dan perintah cut terakhir ikut hilang. Untuk payload panjang, beri
+// jeda kecil antar chunk agar printer menerima data sampai baris terakhir.
+// Payload pendek (struk penjualan reguler) tetap dikirim tanpa jeda sehingga
+// perilaku cetak reguler tidak berubah.
+const BLE_LONG_RECEIPT_THRESHOLD_BYTES = 512;
+const BLE_WRITE_CHUNK_DELAY_MS = 5;
 let cachedDevice = null;
 let printTail = Promise.resolve();
 let queuedPrints = 0;
@@ -433,7 +441,7 @@ export async function convertImageToESCPOS(imageUrl) {
 }
 
 export async function buildEscPosReceipt(type, data) {
-  if (type === "waiterShift") return buildWaiterShiftReportBytes(data);
+  if (type === "waiterShift") return buildWaiterShiftReportBytes(data, { reprint: Boolean(data?.isReprint) });
   const lines = buildBluetoothReceiptLines(type, data);
   const bytes = [];
   const command = (...values) => appendBytes(bytes, values);
@@ -490,6 +498,9 @@ async function findWritableCharacteristic(service, characteristicUuid) {
 }
 
 async function writeReceipt(characteristic, bytes) {
+  // Dokumen panjang butuh jeda antar chunk agar buffer printer thermal tidak
+  // penuh dan data terakhir (termasuk perintah cut) tidak terpotong.
+  const chunkDelay = bytes.length > BLE_LONG_RECEIPT_THRESHOLD_BYTES ? BLE_WRITE_CHUNK_DELAY_MS : 0;
   for (let offset = 0; offset < bytes.length; offset += BLE_WRITE_CHUNK_SIZE) {
     const chunk = bytes.slice(offset, offset + BLE_WRITE_CHUNK_SIZE);
     if (characteristic.properties.writeWithoutResponse) {
@@ -504,6 +515,7 @@ async function writeReceipt(characteristic, bytes) {
     } else {
       throw new Error("Browser tidak mendukung pengiriman data ke printer ini.");
     }
+    if (chunkDelay && offset + BLE_WRITE_CHUNK_SIZE < bytes.length) await sleep(chunkDelay);
   }
 }
 

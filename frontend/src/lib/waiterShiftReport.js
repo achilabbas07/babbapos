@@ -96,7 +96,7 @@ function validateReport(shift) {
   }
 }
 
-export function buildWaiterShiftReportLines(shift) {
+export function buildWaiterShiftReportLines(shift, { reprint = false } = {}) {
   validateReport(shift);
   const results = shift.results;
   const closedAt = formatShiftDateTime(shift.closed_at);
@@ -107,6 +107,9 @@ export function buildWaiterShiftReportLines(shift) {
   const lines = [
     { text: "LAPORAN TUTUP", align: "center", bold: true },
     { text: "SHIFT PELAYAN", align: "center", bold: true },
+    // Penanda cetak ulang hanya muncul saat laporan dicetak ulang dari riwayat,
+    // bukan saat cetak otomatis pertama setelah tutup shift.
+    ...(reprint ? [{ text: "*** CETAK ULANG ***", align: "center", bold: true }] : []),
     { text: rule("="), align: "center" },
     { text: paddedRow("Nama", shift.waiter_name), align: "left" },
     { text: paddedRow("Tanggal", closedAt.date), align: "left" },
@@ -177,10 +180,10 @@ export function buildWaiterShiftReportLines(shift) {
   return lines;
 }
 
-export function buildWaiterShiftReportBytes(shift) {
+export function buildWaiterShiftReportBytes(shift, { reprint = false } = {}) {
   const encoder = new ReceiptPrinterEncoder({ width: LINE_WIDTH });
   encoder.initialize();
-  for (const line of buildWaiterShiftReportLines(shift)) {
+  for (const line of buildWaiterShiftReportLines(shift, { reprint })) {
     encoder.align(line.align);
     if (line.bold) encoder.bold();
     encoder.text(line.text).newline();

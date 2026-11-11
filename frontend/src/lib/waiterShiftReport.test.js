@@ -89,4 +89,15 @@ describe("waiter shift report printer", () => {
     expect(() => buildWaiterShiftReportLines({ ...shift, results: null }))
       .toThrow("Data laporan shift pelayan tidak valid.");
   });
+
+  it("only marks the report as a reprint when explicitly requested", () => {
+    const normal = buildWaiterShiftReportLines(shift).map(({ text }) => text);
+    const reprint = buildWaiterShiftReportLines(shift, { reprint: true }).map(({ text }) => text);
+
+    expect(normal.some((text) => text.includes("CETAK ULANG"))).toBe(false);
+    expect(reprint.some((text) => text.includes("CETAK ULANG"))).toBe(true);
+
+    const bytes = String.fromCharCode(...buildWaiterShiftReportBytes(shift, { reprint: true }));
+    expect(bytes).toContain("CETAK ULANG");
+  });
 });
