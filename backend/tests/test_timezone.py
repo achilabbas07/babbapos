@@ -10,7 +10,7 @@ import asyncio
 from datetime import date, datetime, timedelta, timezone
 
 import core
-from core import WITA, local_date_str, now_local, to_local_date, today_local
+from core import WITA, local_date_str, now_local, now_local_iso, to_local_date, to_local_iso, today_local
 
 
 def test_wita_is_fixed_utc_plus_eight():
@@ -48,6 +48,52 @@ def test_to_local_date_maps_early_morning_wita_to_local_calendar_day():
 def test_to_local_date_accepts_datetime_and_date():
     assert to_local_date(datetime(2026, 2, 28, 16, 34, tzinfo=timezone.utc)) == date(2026, 3, 1)
     assert to_local_date(date(2026, 3, 1)) == date(2026, 3, 1)
+
+
+def test_now_local_iso_is_wita_offset_string():
+    """Stempel waktu tulis harus eksplisit ber-offset WITA (+08:00)."""
+    value = now_local_iso()
+    parsed = datetime.fromisoformat(value)
+    assert parsed.utcoffset() == timedelta(hours=8)
+    assert value.endswith("+08:00")
+    assert abs(parsed - datetime.now(timezone.utc)) < timedelta(seconds=5)
+
+
+def test_to_local_iso_converts_utc_and_naive_input_to_wita():
+    """UTC mentah harus dikonversi ke WITA sebelum dikirim ke Supabase."""
+    converted = datetime.fromisoformat(to_local_iso("2026-02-28T16:34:00+00:00"))
+    assert converted.utcoffset() == timedelta(hours=8)
+    assert (converted.year, converted.month, converted.day) == (2026, 3, 1)
+    assert (converted.hour, converted.minute) == (0, 34)
+
+    # Naive dianggap jam dinding WITA (kasir mencatat waktu lokal), bukan UTC,
+    # supaya tidak ada pergeseran 8 jam.
+    assert to_local_iso("2026-03-01T08:34:00") == "2026-03-01T08:34:00+08:00"
+    # Input yang sudah WITA tidak digeser lagi.
+    assert to_local_iso("2026-03-01T00:34:00+08:00") == "2026-03-01T00:34:00+08:00"
+
+
+def test_expense_endpoints_stamp_local_wita_time():
+    """Kedua entrypoint `create_expense` wajib memakai helper WITA, bukan UTC mentah."""
+    import inspect
+
+    import server
+
+    source = inspect.getsource(server.create_expense)
+    assert "to_local_iso(body.date) if body.date else now_local_iso()" in source
+    assert "now_iso()" not in source
+    assert "datetime.utcnow" not in source
+
+
+def test_cash_movement_timestamp_uses_wita_offset():
+    """Sumber timestamp baris `expenses` (trigger cash_movements) memakai WITA."""
+    import inspect
+
+    import shifts
+
+    source = inspect.getsource(shifts.add_movement)
+    assert "timestamp=now_local_iso()" in source
+    assert "timestamp=now_iso()" not in source
 
 
 def test_document_ids_use_local_date_not_utc():

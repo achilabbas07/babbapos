@@ -1,7 +1,7 @@
 from core import (  # noqa: I001
     ALL_ROLES, Customer, Expense, InventoryItem, OpenBill, Product, Purchase, Recipe, Table, Transaction, User,
-    client, create_token, date_range_query, db, hash_pin, local_date_str, next_id, now_iso, recalc_hpp, recalc_hpp_for_inventory,
-    require_roles, to_local_date, to_utc_iso, today_local, verify_pin, get_current_user,
+    client, create_token, date_range_query, db, hash_pin, local_date_str, next_id, now_iso, now_local_iso, recalc_hpp, recalc_hpp_for_inventory,
+    require_roles, to_local_date, to_local_iso, to_utc_iso, today_local, verify_pin, get_current_user,
 )
 from seed import seed_all
 from shifts import router as shifts_router, get_open_shift
@@ -1383,7 +1383,9 @@ async def create_expense(body: ExpenseIn, user: User = Depends(ADMIN)):
     cat = await db.expense_categories.find_one({"_id": body.category_id})
     if not cat:
         raise HTTPException(400, "Kategori pengeluaran tidak ditemukan")
-    exp = Expense(id=await next_id("EXP"), date=to_utc_iso(body.date) if body.date else now_iso(), category=cat["name"],
+    # Stempel waktu `expenses.date` WAJIB memakai zona lokal WITA (Asia/Makassar)
+    # agar tanggal kalender yang tersimpan tidak bergeser 8 jam dari UTC.
+    exp = Expense(id=await next_id("EXP"), date=to_local_iso(body.date) if body.date else now_local_iso(), category=cat["name"],
                   category_id=cat["_id"], description=body.description, amount=body.amount, userId=user.id, userName=user.name)
     await db.connect()
     async with db.pool.acquire() as conn:

@@ -5,7 +5,17 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core import BaseDocument, User, date_range_query, db, local_date_str, next_id, now_iso, require_roles
+from core import (
+    BaseDocument,
+    User,
+    date_range_query,
+    db,
+    local_date_str,
+    next_id,
+    now_iso,
+    now_local_iso,
+    require_roles,
+)
 from finance import post_cash_movement_journal
 
 
@@ -138,8 +148,12 @@ async def add_movement(body: MovementIn, user: User = Depends(STAFF)):
         if not category:
             raise HTTPException(400, "Kategori pengeluaran tidak ditemukan")
         cat_id = body.expense_category_id
+    # `cash_movements."timestamp"` adalah sumber timestamp baris `expenses`
+    # (trigger sync_cash_movement_to_expenses menyalin nilainya). Kirim sebagai
+    # ISO ber-offset WITA agar pencatatan pengeluaran eksplisit memakai zona
+    # Asia/Makassar, bukan UTC mentah. Instan/waktu absolutnya tetap sama.
     mov = CashMovement(id=await next_id("KAS", 4), shiftId=shift["_id"], userId=user.id, userName=user.name,
-                       type=body.type, amount=body.amount, note=body.note, timestamp=now_iso(), expense_category_id=cat_id)
+                       type=body.type, amount=body.amount, note=body.note, timestamp=now_local_iso(), expense_category_id=cat_id)
     if body.type == "out":
         await db.connect()
         try:

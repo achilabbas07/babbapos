@@ -80,6 +80,40 @@ def to_utc_iso(value: str) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
+def now_local_iso() -> str:
+    """Waktu sekarang sebagai ISO string ber-offset WITA (``+08:00``).
+
+    Berbeda dari ``now_iso()`` yang mengirim UTC mentah, helper ini dipakai
+    untuk kolom ``timestamptz`` pada tabel ``expenses`` agar stempel waktu
+    dicatat eksplisit dalam zona Asia/Makassar (WITA, UTC+8).
+    """
+    return now_local().isoformat()
+
+
+def to_local_iso(value) -> str:
+    """Konversi ISO string / datetime ke ISO string WITA (``+08:00``).
+
+    Dipakai saat mencatat ``expenses.date``: timestamp selalu dikirim dengan
+    offset lokal Makassar, bukan UTC mentah maupun waktu naive.
+
+    Input tanpa zona waktu (mis. ``2026-11-12T12:00:00``) dianggap sebagai jam
+    dinding lokal WITA, karena pengeluaran dicatat oleh kasir di Makassar.
+    Menafsirkannya sebagai UTC justru menggeser stempel waktu 8 jam. String
+    yang sudah berzona (``Z`` / ``+00:00`` / ``+08:00``) dikonversi apa adanya
+    sehingga instan absolutnya tidak berubah.
+    """
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, f"Format tanggal tidak valid: {value}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=WITA)
+    return dt.astimezone(WITA).isoformat()
+
+
 def local_day_start_utc(value: str) -> str:
     """Awal hari kalender WITA (00:00) sebagai ISO UTC.
 
