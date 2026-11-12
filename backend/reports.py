@@ -275,22 +275,52 @@ def _method_label(raw) -> str:
     return text[:1].upper() + text[1:]
 
 
-def _parse_tx_local_hour(tx) -> int:
-    """Ambil jam (0-23) waktu WITA dari timestamp transaksi.
+# Kolom waktu PESANAN DIBUAT (bukan waktu pembayaran).
+# ``transactions."orderTime"`` diisi saat checkout: untuk open bill memakai
+# waktu bill dibuka, sedangkan transaksi langsung (Walk In/Ojol/bayar di muka)
+# memakai waktu transaksi. ``created_at``/``createdAt`` hanya dipakai bila
+# suatu saat tersedia di skema. Kolom ``date`` adalah waktu PEMBAYARAN sehingga
+# TIDAK boleh dijadikan acuan utama jam sibuk.
+ORDER_TIMESTAMP_FIELDS = ("orderTime", "createdAt", "created_at")
 
-    Transaksi menyimpan ``date`` sebagai ISO UTC; transaksi dini hari harus
-    jatuh pada jam lokal WITA, bukan UTC.
-    """
-    raw = tx.get("date") or tx.get("orderTime")
-    if not raw:
-        return 0
-    try:
-        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except ValueError:
-        return 0
+
+def _parse_iso_local(value):
+    """Parse ISO string/datetime menjadi datetime berzona WITA, atau None."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(WITA).hour
+    return dt.astimezone(WITA)
+
+
+def _tx_order_datetime(tx):
+    """Ambil waktu pesanan dibuat dalam zona WITA.
+
+    Prioritas: ``orderTime`` -> ``createdAt`` -> ``created_at``. Bila seluruh
+    kolom waktu pesanan kosong (data legacy), baru jatuh ke ``date`` (waktu
+    pembayaran) agar transaksi lama tetap terhitung.
+    """
+    for field in ORDER_TIMESTAMP_FIELDS:
+        parsed = _parse_iso_local(tx.get(field))
+        if parsed is not None:
+            return parsed
+    return _parse_iso_local(tx.get("date"))
+
+
+def _parse_tx_local_hour(tx) -> int:
+    """Jam (0-23) waktu pesanan dibuat menurut kalender WITA.
+
+    Transaksi dini hari harus jatuh pada jam lokal WITA, bukan UTC.
+    """
+    order_dt = _tx_order_datetime(tx)
+    return order_dt.hour if order_dt is not None else 0
 
 
 def _tx_item_qty(tx) -> float:

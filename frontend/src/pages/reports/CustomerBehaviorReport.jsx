@@ -168,26 +168,37 @@ export default function CustomerBehaviorReport() {
       {/* Kotak Wawasan Pintar Lokal */}
       <div
         data-testid="customer-behavior-insights"
-        className="mt-6 rounded-2xl border border-primary/30 bg-primary/5 p-5"
+        className="mt-6 rounded-2xl border border-primary/30 bg-primary/5 p-5 md:p-6"
       >
-        <div className="mb-3 flex items-center gap-2">
-          <Lightbulb className="h-4 w-4 text-primary" />
-          <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+        <div className="mb-4 flex items-center gap-2">
+          <Lightbulb className="h-5 w-5 shrink-0 text-primary" />
+          <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-primary">
             Wawasan Pintar
           </h2>
         </div>
         {insights.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Belum ada wawasan untuk rentang ini.</p>
+          <p className="text-base font-medium text-muted-foreground">
+            Belum ada wawasan untuk rentang ini.
+          </p>
         ) : (
-          <ul className="space-y-2">
+          <ul
+            className={`grid gap-3 ${insights.length > 1 ? "md:grid-cols-2" : "md:max-w-3xl"}`}
+          >
             {insights.map((line, index) => (
               <li
                 key={`${index}-${line}`}
                 data-testid={`customer-behavior-insight-${index + 1}`}
-                className="flex gap-2 text-sm text-foreground/90"
+                className="flex items-start gap-3 rounded-xl border border-primary/15 bg-card/80 p-3.5 md:p-4"
               >
-                <span aria-hidden="true" className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                <span>{line}</span>
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/15 text-xs font-bold text-primary"
+                >
+                  {index + 1}
+                </span>
+                <span className="text-base font-semibold leading-relaxed text-foreground md:text-[17px]">
+                  {line}
+                </span>
               </li>
             ))}
           </ul>

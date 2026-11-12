@@ -136,6 +136,74 @@ def test_customer_behavior_peak_and_quiet_hours_use_wita():
     assert len(report["hours"]) == 24
 
 
+def test_customer_behavior_hours_use_order_time_not_payment_time():
+    """Jam sibuk harus mengikuti waktu PESANAN DIBUAT (orderTime)."""
+    rows = [
+        {
+            "_id": "TRX-A",
+            # Pesanan dibuat 08:00 WITA, dibayar 20:00 WITA.
+            "orderTime": "2026-11-10T00:00:00+00:00",
+            "date": "2026-11-10T12:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 10000,
+            "items_json": [{"qty": 1}],
+        },
+        {
+            "_id": "TRX-B",
+            # Pesanan dibuat 09:00 WITA, dibayar 21:00 WITA.
+            "orderTime": "2026-11-10T01:00:00+00:00",
+            "date": "2026-11-10T13:00:00+00:00",
+            "type": "Takeaway",
+            "method": "QRIS",
+            "total": 20000,
+            "items_json": [{"qty": 1}],
+        },
+    ]
+    report = _run(FakeDB(rows))
+    by_hour = {h["hour"]: h["transactions"] for h in report["hours"]}
+    assert by_hour[8] == 1
+    assert by_hour[9] == 1
+    # Tidak boleh jatuh ke jam pembayaran (20:00 / 21:00 WITA).
+    assert by_hour[20] == 0
+    assert by_hour[21] == 0
+    assert report["peak_hour"]["hour"] == 9
+
+
+def test_customer_behavior_hours_prefer_created_at_over_date():
+    rows = [
+        {
+            "_id": "TRX-C",
+            "created_at": "2026-11-10T02:00:00+00:00",  # 10:00 WITA
+            "date": "2026-11-10T15:00:00+00:00",  # 23:00 WITA
+            "type": "Walk In",
+            "method": "Cash",
+            "total": 5000,
+            "items_json": [{"qty": 1}],
+        },
+    ]
+    report = _run(FakeDB(rows))
+    by_hour = {h["hour"]: h["transactions"] for h in report["hours"]}
+    assert by_hour[10] == 1
+    assert by_hour[23] == 0
+
+
+def test_customer_behavior_hours_fall_back_to_date_for_legacy_rows():
+    rows = [
+        {
+            "_id": "TRX-D",
+            # Tanpa orderTime/created_at -> fallback ke waktu pembayaran.
+            "date": "2026-11-10T04:00:00+00:00",  # 12:00 WITA
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 7000,
+            "items_json": [{"qty": 1}],
+        },
+    ]
+    report = _run(FakeDB(rows))
+    assert report["peak_hour"]["hour"] == 12
+
+
 def test_customer_behavior_insights_present():
     report = _run(FakeDB(TRANSACTIONS))
     assert report["insights"]
