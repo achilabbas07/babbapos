@@ -15,6 +15,7 @@ from variants import (
     check_materials,
     consume_checkout_stock,
     product_num,
+    variant_stock_by_product,
     variant_hpp,
 )
 from finance import (
@@ -556,8 +557,14 @@ async def product_stock(_: User = Depends(ANY)):
     by_prod = defaultdict(list)
     async for r in db.recipes.find():
         by_prod[r["productId"]].append(r)
+    # Produk yang punya varian dihitung dari `variant_ingredients` (sumber yang
+    # sama dengan modal pilihan varian) supaya kedua badge tidak pernah berbeda.
+    variant_stock = await variant_stock_by_product()
     out = {}
     async for p in db.products.find():
+        if p["_id"] in variant_stock:
+            out[p["_id"]] = variant_stock[p["_id"]]
+            continue
         recipe = [r for r in by_prod.get(p["_id"], []) if float(r["qty_needed"] or 0) > 0]
         if recipe:
             out[p["_id"]] = min(inv.get(r["inventoryId"], 0) / float(r["qty_needed"]) for r in recipe)

@@ -1,3 +1,4 @@
+import math
 import re
 from collections import defaultdict
 from typing import List
@@ -67,6 +68,47 @@ def product_keys(product_id: str) -> list:
     return list({product_id, str(n), f"{n:03d}", f"PRD-{n:03d}"}) if n >= 0 else [product_id]
 
 
+def variant_availability(ingredients, materials):
+    """Hitung sisa porsi satu varian dari baris `variant_ingredients`.
+
+    `materials` adalah peta `inventory_id` -> {"stock", "min_stock", "unit"} yang
+    berasal dari tabel `inventory` -- sumber data yang sama dengan halaman
+    Inventaris. Dengan begitu angka "Sisa" pada modal varian selalu sinkron
+    dengan stok bahan yang ditampilkan di halaman Inventaris.
+
+    Ambang stok menipis mengikuti aturan halaman Inventaris
+    (`stock <= min_stock`), bukan angka tetap. Perbandingan dilakukan pada
+    satuan bahan baku, sehingga tidak terpengaruh jumlah pemakaian per porsi.
+
+    Mengembalikan `None` bila varian tidak punya bahan valid (sama seperti
+    perilaku lama: badge disembunyikan).
+    """
+    caps = []
+    for ing in ingredients:
+        qty = float(ing.get("qty_needed") or 0)
+        if qty <= 0:
+            continue
+        inv_id = ing.get("inventory_id")
+        mat = materials.get(inv_id)
+        if mat is None:
+            continue
+        caps.append((float(mat.get("stock") or 0) / qty, inv_id, mat))
+    if not caps:
+        return None
+
+    per_portion, inv_id, mat = min(caps, key=lambda c: c[0])
+    stock = float(mat.get("stock") or 0)
+    min_stock = float(mat.get("min_stock") or 0)
+    return {
+        "available": math.floor(per_portion),
+        "stock": stock,
+        "min_stock": min_stock,
+        "unit": mat.get("unit"),
+        "inventory_id": inv_id,
+        "low": stock <= min_stock,
+    }
+
+
 @router.get("/menu-variants")
 async def list_menu_variants(product_id: str, _: User = Depends(ANY)):
     rows = await db.menu_variants.find({"product_id": {"$in": product_keys(product_id)}}).sort("_id", 1).to_list(None)
@@ -75,13 +117,57 @@ async def list_menu_variants(product_id: str, _: User = Depends(ANY)):
         async for r in db.variant_ingredients.find({"variant_id": {"$in": [r["_id"] for r in rows]}}):
             by_variant[r["variant_id"]].append(r)
     mids = list({r["inventory_id"] for lst in by_variant.values() for r in lst})
-    mats = {m["_id"]: float(m["stock"] or 0) async for m in db.inventory.find({"_id": {"$in": mids}})} if mids else {}
+    mats = {
+        m["_id"]: {"stock": m.get("stock"), "min_stock": m.get("min_stock"), "unit": m.get("unit")}
+        async for m in db.inventory.find({"_id": {"$in": mids}})
+    } if mids else {}
     out = []
     for r in rows:
-        caps = [int(mats.get(i["inventory_id"], 0) // float(i["qty_needed"])) for i in by_variant[r["_id"]] if float(i["qty_needed"] or 0) > 0]
+        state = variant_availability(by_variant[r["_id"]], mats)
         out.append({"id": r["_id"], "product_id": r["product_id"], "variant_name": r["variant_name"],
                     "additional_price": r.get("additional_price") or 0,
-                    "available": min(caps) if caps else None})
+                    "available": state["available"] if state else None,
+                    "stock": state["stock"] if state else None,
+                    "min_stock": state["min_stock"] if state else None,
+                    "unit": state["unit"] if state else None,
+                    "low": state["low"] if state else None})
+    return out
+
+
+async def variant_stock_by_product() -> dict:
+    """Sisa porsi per produk untuk produk yang punya varian.
+
+    Nilainya adalah `min(available)` seluruh varian produk tersebut, dihitung
+    dengan `variant_availability` -- fungsi yang sama dengan badge modal varian.
+    Dipakai `GET /products/stock` agar badge stok di kartu produk dan di modal
+    varian tidak pernah berbeda untuk produk yang sama.
+
+    Produk yang tidak punya varian tidak muncul di hasil (pemanggil memakai
+    perhitungan resep biasa), sehingga perilaku produk non-varian tidak berubah.
+    """
+    by_variant = defaultdict(list)
+    async for r in db.variant_ingredients.find():
+        by_variant[r["variant_id"]].append(r)
+    if not by_variant:
+        return {}
+
+    variants = await db.menu_variants.find({"_id": {"$in": list(by_variant)}}).to_list(None)
+    if not variants:
+        return {}
+
+    mids = list({r["inventory_id"] for lst in by_variant.values() for r in lst})
+    mats = {
+        m["_id"]: {"stock": m.get("stock"), "min_stock": m.get("min_stock"), "unit": m.get("unit")}
+        async for m in db.inventory.find({"_id": {"$in": mids}})
+    } if mids else {}
+
+    out = {}
+    for v in variants:
+        state = variant_availability(by_variant[v["_id"]], mats)
+        if state is None:
+            continue
+        key = str(v["product_id"])
+        out[key] = state["available"] if key not in out else min(out[key], state["available"])
     return out
 
 

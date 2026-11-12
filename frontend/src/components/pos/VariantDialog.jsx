@@ -1,10 +1,20 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { rp } from "@/lib/api";
+import { num, rp } from "@/lib/api";
+
+// Ambang peringatan stok WAJIB sama dengan halaman Inventaris:
+// `stock <= min_stock` (lihat status() di pages/Inventory.jsx).
+// Backend (/menu-variants) mengirim `low` dari baris `inventory` yang sama,
+// sehingga badge di sini tidak pernah berbeda dari halaman Inventaris.
+// Fallback `available <= 5` hanya dipakai bila `low` tidak tersedia.
+const isLowStock = (v) => (v.low == null ? v.available <= 5 : v.low);
 
 const StockBadge = ({ v }) => {
   if (v.available == null) return null;
   if (v.available <= 0) return <span data-testid={`variant-out-${v.id}`} className="ml-2 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive">{v.available < 0 ? "Stok Minus" : "Stok 0"}</span>;
-  if (v.available <= 5) return <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Sisa {v.available}</span>;
+  if (isLowStock(v)) {
+    const stok = v.stock == null ? "" : ` (stok ${num(v.stock)}${v.unit ? ` ${v.unit}` : ""})`;
+    return <span data-testid={`variant-low-${v.id}`} className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700" title={`Stok bahan di bawah/berada pada batas minimum${stok}`}>Sisa {v.available}{stok}</span>;
+  }
   return null;
 };
 
