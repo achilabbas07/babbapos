@@ -79,6 +79,14 @@ export const OPERATIONAL_NAV = [
     roles: ADMIN,
     group: OPERATIONAL_REPORTS_GROUP_ID,
   },
+  {
+    to: "/reports/customer-behavior",
+    label: "Analisa Perilaku Pelanggan",
+    shortLabel: "Perilaku Pelanggan",
+    icon: Users,
+    roles: ADMIN,
+    group: OPERATIONAL_REPORTS_GROUP_ID,
+  },
 ];
 
 // Lookup so the grouped sidebar reuses the exact same objects (path, label, icon, roles)
@@ -103,6 +111,7 @@ export const OPERATIONAL_REPORTS_NAV_GROUP = {
     "/reports/void-sales",
     "/reports/waiter-sales-target",
     "/reports/point-reward",
+    "/reports/customer-behavior",
     "/transactions",
     "/shifts",
   ),

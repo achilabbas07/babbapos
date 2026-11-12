@@ -12,11 +12,19 @@ qty dan nilai rupiah item yang dibatalkan.
 
 Sub-laporan ketiga: *Laporan Point Reward* — riwayat penukaran poin pelanggan
 pada saat checkout beserta jumlah poin dan nilai diskonnya.
+
+Sub-laporan keempat: *Analisa Perilaku Pelanggan* — agregasi kanal order,
+metode pembayaran, ukuran keranjang, jam sibuk/sepian, dan wawasan aturan
+(rule-based) untuk rentang tanggal terpilih.
 """
 
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from core import (
+    WITA,
     User,
     date_range_query,
     db,
@@ -224,4 +232,277 @@ async def point_reward_usage_report(start: str, end: str, _: User = Depends(ADMI
         "total_points_redeemed": int(total_points) if float(total_points).is_integer() else total_points,
         "total_discount_value": round(total_discount, 2),
         "items": rows,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Analisa Perilaku Pelanggan & Perputaran Warkop
+# ---------------------------------------------------------------------------
+# Endpoint di bawah ini murni BACA-SAJA: hanya membaca tabel ``transactions``
+# pada rentang tanggal terpilih lalu mengagregasinya di memori. Tidak ada
+# INSERT/UPDATE/DELETE, tidak menyentuh modul pembayaran, kasir, void, shift,
+# maupun stok. Logika dijaga terpisah dari alur transaksional.
+
+CHANNEL_LABELS = {
+    "dine in": "Dine In",
+    "takeaway": "Takeaway",
+    "walk in": "Walk In",
+    "ojek online": "Ojek Online",
+    "ojol": "Ojek Online",
+}
+
+# Metode pembayaran yang dikenal POS. Nilai tak dikenal tetap ditampilkan apa
+# adanya (dinormalisasi kapitalisasinya) agar laporan tidak kehilangan data.
+KNOWN_METHODS = ("Cash", "QRIS", "Card", "Debit")
+
+
+def _channel_label(raw) -> str:
+    """Normalisasi tipe orderan menjadi label kanal yang konsisten."""
+    text = (str(raw).strip() if raw is not None else "")
+    if not text:
+        return "Lainnya"
+    return CHANNEL_LABELS.get(text.lower(), text)
+
+
+def _method_label(raw) -> str:
+    """Normalisasi nama metode pembayaran (legacy single maupun split)."""
+    text = (str(raw).strip() if raw is not None else "")
+    if not text:
+        return "Lainnya"
+    for known in KNOWN_METHODS:
+        if text.lower() == known.lower():
+            return known
+    return text[:1].upper() + text[1:]
+
+
+def _parse_tx_local_hour(tx) -> int:
+    """Ambil jam (0-23) waktu WITA dari timestamp transaksi.
+
+    Transaksi menyimpan ``date`` sebagai ISO UTC; transaksi dini hari harus
+    jatuh pada jam lokal WITA, bukan UTC.
+    """
+    raw = tx.get("date") or tx.get("orderTime")
+    if not raw:
+        return 0
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(WITA).hour
+
+
+def _tx_item_qty(tx) -> float:
+    """Total kuantitas item pada satu transaksi (ukuran keranjang)."""
+    return sum(float(i.get("qty") or 0) for i in tx.get("items_json") or [])
+
+
+def _payment_legs(tx):
+    """Pecah satu transaksi menjadi leg pembayaran (mendukung split payment)."""
+    legs = tx.get("payments") or []
+    parsed = []
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        amount = float(leg.get("amount") or 0)
+        if amount <= 0:
+            continue
+        parsed.append({"method": leg.get("method"), "amount": amount})
+    if parsed:
+        return parsed
+    # Legacy: satu metode, nominal = total transaksi.
+    return [{"method": tx.get("method"), "amount": float(tx.get("total") or 0)}]
+
+
+def _build_insights(summary) -> list:
+    """Wawasan lokal berbasis aturan (rule-based) — tanpa memanggil LLM.
+
+    Setiap aturan hanya mengembalikan kalimat bila datanya relevan, sehingga
+    kotak wawasan tidak pernah berisi klaim kosong/ngawur.
+    """
+    insights = []
+    tx_count = summary["transaction_count"]
+    if tx_count == 0:
+        return ["Belum ada transaksi pada rentang tanggal ini. Coba pilih rentang lain."]
+
+    channels = summary["channels"]
+    methods = summary["methods"]
+    peak = summary["peak_hour"]
+    quiet = summary["quiet_hour"]
+    avg_basket = summary["average_basket_size"]
+    avg_value = summary["average_order_value"]
+
+    top_channel = max(channels, key=lambda c: c["revenue"]) if channels else None
+    if top_channel and top_channel["revenue"] > 0:
+        share = top_channel["revenue_share"]
+        insights.append(
+            f"Kanal {top_channel['channel']} mendominasi omzet "
+            f"({share:.1f}%) dengan {top_channel['transactions']} transaksi "
+            f"dan AOV {top_channel['aov']:,.0f}."
+        )
+
+    if len(channels) > 1:
+        weakest = min(channels, key=lambda c: c["revenue"])
+        if weakest["revenue"] > 0 and weakest["revenue_share"] < 5:
+            insights.append(
+                f"Kanal {weakest['channel']} masih sangat kecil "
+                f"({weakest['revenue_share']:.1f}% omzet) — peluang promosi kanal."
+            )
+
+    top_method = max(methods, key=lambda m: m["total"]) if methods else None
+    if top_method and top_method["total"] > 0:
+        insights.append(
+            f"Pembayaran {top_method['method']} menyumbang "
+            f"{top_method['share']:.1f}% nilai transaksi."
+        )
+
+    if peak:
+        insights.append(
+            f"Jam sibuk di sekitar pukul {peak['hour']:02d}:00 "
+            f"({peak['transactions']} transaksi). Siapkan staf & stok di jam ini."
+        )
+    if quiet and peak and quiet["hour"] != peak["hour"]:
+        insights.append(
+            f"Jam sepian sekitar pukul {quiet['hour']:02d}:00 "
+            f"({quiet['transactions']} transaksi) — waktu ideal untuk persiapan."
+        )
+
+    insights.append(
+        f"Rata-rata nilai belanja {avg_value:,.0f} dengan "
+        f"{avg_basket:.1f} item per transaksi dari total {tx_count} transaksi."
+    )
+    return insights
+
+
+@router.get("/reports/customer-behavior")
+async def customer_behavior_report(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    _: User = Depends(ADMIN),
+):
+    """Analisa perilaku pelanggan & perputaran warkop (BACA-SAJA).
+
+    Tanggal ``start``/``end`` adalah tanggal kalender Asia/Makassar
+    (``YYYY-MM-DD``). Endpoint hanya membaca ``transactions`` dan tidak
+    menulis/mengubah data apa pun sehingga terisolasi dari alur pembayaran.
+
+    Mengembalikan:
+    - ``channels``: Dine In / Takeaway / Walk In / Ojek Online + AOV & porsi omzet.
+    - ``methods``: Cash / QRIS / Card / Debit (attribusi per leg split payment).
+    - ``basket``: statistik ukuran keranjang (item per transaksi).
+    - ``hours``: distribusi transaksi per jam + ``peak_hour`` / ``quiet_hour``.
+    - ``insights``: wawasan ringkas berbasis aturan lokal.
+    """
+    # Kontrak utama memakai ``start_date``/``end_date``; ``start``/``end`` tetap
+    # diterima sebagai alias agar konsisten dengan endpoint laporan lain.
+    start = start_date or start
+    end = end_date or end
+    if not start or not end:
+        raise HTTPException(400, "Parameter start_date dan end_date wajib diisi")
+
+    # Batas tanggal memakai kalender WITA -- pola sama dengan laporan lain.
+    query = date_range_query(start, end)
+    txs = await db.transactions.find(query).to_list(None)
+
+    channel_map = {}
+    method_map = {}
+    hour_counts = {h: {"transactions": 0, "revenue": 0.0} for h in range(24)}
+    basket_sizes = []
+    total_revenue = 0.0
+    total_items = 0.0
+
+    for tx in txs:
+        total = float(tx.get("total") or 0)
+        total_revenue += total
+
+        qty = _tx_item_qty(tx)
+        basket_sizes.append(qty)
+        total_items += qty
+
+        channel = _channel_label(tx.get("type"))
+        ch = channel_map.setdefault(channel, {"transactions": 0, "revenue": 0.0})
+        ch["transactions"] += 1
+        ch["revenue"] += total
+
+        for leg in _payment_legs(tx):
+            method = _method_label(leg["method"])
+            mt = method_map.setdefault(method, {"transactions": 0, "total": 0.0})
+            mt["transactions"] += 1
+            mt["total"] += leg["amount"]
+
+        hour = _parse_tx_local_hour(tx)
+        hour_counts[hour]["transactions"] += 1
+        hour_counts[hour]["revenue"] += total
+
+    tx_count = len(txs)
+
+    def _share(value, base):
+        return round(value / base * 100, 2) if base else 0.0
+
+    channels = []
+    for name, row in channel_map.items():
+        channels.append({
+            "channel": name,
+            "transactions": row["transactions"],
+            "revenue": round(row["revenue"], 2),
+            "revenue_share": _share(row["revenue"], total_revenue),
+            "aov": round(row["revenue"] / row["transactions"], 2) if row["transactions"] else 0.0,
+        })
+    channels.sort(key=lambda c: (-c["revenue"], c["channel"]))
+
+    methods = []
+    for name, row in method_map.items():
+        methods.append({
+            "method": name,
+            "transactions": row["transactions"],
+            "total": round(row["total"], 2),
+            "share": _share(row["total"], total_revenue),
+        })
+    methods.sort(key=lambda m: (-m["total"], m["method"]))
+
+    hours = [
+        {
+            "hour": h,
+            "label": f"{h:02d}:00",
+            "transactions": hour_counts[h]["transactions"],
+            "revenue": round(hour_counts[h]["revenue"], 2),
+        }
+        for h in range(24)
+    ]
+    # Hanya jam yang benar-benar ada transaksinya yang layak jadi kandidat.
+    active_hours = [h for h in hours if h["transactions"] > 0]
+    peak_hour = max(active_hours, key=lambda h: (h["transactions"], h["revenue"])) if active_hours else None
+    quiet_hour = min(active_hours, key=lambda h: (h["transactions"], h["revenue"])) if active_hours else None
+
+    average_basket_size = round(total_items / tx_count, 2) if tx_count else 0.0
+    average_order_value = round(total_revenue / tx_count, 2) if tx_count else 0.0
+    max_basket = max(basket_sizes) if basket_sizes else 0.0
+    min_basket = min(basket_sizes) if basket_sizes else 0.0
+
+    summary = {
+        "transaction_count": tx_count,
+        "total_revenue": round(total_revenue, 2),
+        "total_items": int(total_items) if float(total_items).is_integer() else round(total_items, 2),
+        "average_order_value": average_order_value,
+        "average_basket_size": average_basket_size,
+        "channels": channels,
+        "methods": methods,
+        "peak_hour": peak_hour,
+        "quiet_hour": quiet_hour,
+    }
+
+    return {
+        "start": start,
+        "end": end,
+        **summary,
+        "basket": {
+            "average_items": average_basket_size,
+            "max_items": int(max_basket) if float(max_basket).is_integer() else max_basket,
+            "min_items": int(min_basket) if float(min_basket).is_integer() else min_basket,
+        },
+        "hours": hours,
+        "insights": _build_insights(summary),
     }

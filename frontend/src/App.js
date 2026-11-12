@@ -33,6 +33,7 @@ import ProductSalesReport from "@/pages/reports/ProductSalesReport";
 import VoidSalesReport from "@/pages/reports/VoidSalesReport";
 import WaiterSalesTargetReport from "@/pages/reports/WaiterSalesTargetReport";
 import PointRewardReport from "@/pages/reports/PointRewardReport";
+import CustomerBehaviorReport from "@/pages/reports/CustomerBehaviorReport";
 import { toast } from "sonner";
 
 const PAGES = {
@@ -48,6 +49,7 @@ const PAGES = {
   "/reports/void-sales": VoidSalesReport,
   "/reports/waiter-sales-target": WaiterSalesTargetReport,
   "/reports/point-reward": PointRewardReport,
+  "/reports/customer-behavior": CustomerBehaviorReport,
 };
 
 const Protected = ({ roles, deniedMessage, children }) => {

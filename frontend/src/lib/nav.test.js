@@ -18,6 +18,7 @@ describe("navigasi sidebar bertingkat", () => {
       "/reports/void-sales",
       "/reports/waiter-sales-target",
       "/reports/point-reward",
+      "/reports/customer-behavior",
       "/transactions",
       "/shifts",
     ]);
@@ -26,6 +27,7 @@ describe("navigasi sidebar bertingkat", () => {
       "Laporan Void",
       "Laporan Sales Target",
       "Laporan Point Reward",
+      "Analisa Perilaku Pelanggan",
       "Transaksi",
       "Riwayat Shift",
     ]);
@@ -67,7 +69,7 @@ describe("navigasi sidebar bertingkat", () => {
   it("menyaring sub-menu menyesuaikan peran tanpa menyisakan grup kosong", () => {
     const adminNested = filterNavItemsByRole([OPERATIONAL_REPORTS_NAV_GROUP], "admin");
     expect(adminNested).toHaveLength(1);
-    expect(adminNested[0].items).toHaveLength(6);
+    expect(adminNested[0].items).toHaveLength(7);
 
     // Kasir/waiter bukan admin: grup operasional habis difilter -> tidak dirender.
     expect(filterNavItemsByRole([OPERATIONAL_REPORTS_NAV_GROUP], "kasir")).toHaveLength(0);
