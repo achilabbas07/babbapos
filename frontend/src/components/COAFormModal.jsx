@@ -12,6 +12,7 @@ import {
   getAccountType,
   normalizeAccountCategory,
 } from "@/lib/accountClassification";
+import { COA_HEADER_MAX_LENGTH, getAccountHeader } from "@/lib/coaGrouping";
 
 const ACCOUNT_CATEGORIES = [
   { value: "Aset Lancar", label: "Aset Lancar" },
@@ -25,9 +26,22 @@ const ACCOUNT_CATEGORIES = [
   { value: "Beban Operasional", label: "Beban Operasional" },
   { value: "balance_sheet", label: "Neraca" },
 ];
-const EMPTY_FORM = { account_code: "", account_name: "", account_category: "" };
+const EMPTY_FORM = { account_code: "", account_name: "", account_category: "", header: "" };
 
-export default function COAFormModal({ open, onOpenChange, account, onSubmit }) {
+// Batas panjang mengikuti kolom asli `public.chart_of_accounts`, BUKAN batas
+// Pydantic di backend (code 32 / name 160). Kolom database hanya
+// varchar(15) dan varchar(100); input yang lebih panjang akan ditolak
+// PostgreSQL dan tampil sebagai error 500 yang membingungkan pengguna.
+const ACCOUNT_CODE_MAX_LENGTH = 15;
+const ACCOUNT_NAME_MAX_LENGTH = 100;
+
+export default function COAFormModal({
+  open,
+  onOpenChange,
+  account,
+  headerOptions = [],
+  onSubmit,
+}) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
@@ -37,6 +51,7 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
         account_code: account?.account_code ?? "",
         account_name: account?.account_name ?? "",
         account_category: account?.account_category ?? "",
+        header: getAccountHeader(account),
       });
     }
   }, [open, account]);
@@ -59,12 +74,22 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
 
   const submit = async (event) => {
     event.preventDefault();
+
+    // Backend menolak kategori tanpa tipe akuntansi yang jelas
+    // ("Jenis akun tidak didukung."). Cek lebih dulu agar pengguna tidak
+    // melihat error 422 setelah menekan Simpan.
+    if (!getAccountType({ account_category: accountCategory, account_code: form.account_code })) {
+      toast.error("Jenis akun tidak didukung untuk kode akun ini. Periksa kode dan jenis akun.");
+      return;
+    }
+
     setSaving(true);
     try {
       await onSubmit({
         account_code: form.account_code.trim(),
         account_name: form.account_name.trim(),
         account_category: accountCategory,
+        header: form.header.trim(),
       });
       onOpenChange(false);
     } catch (error) {
@@ -95,7 +120,7 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
               data-testid="coa-account-code"
               value={form.account_code}
               onChange={setField("account_code")}
-              maxLength={32}
+              maxLength={ACCOUNT_CODE_MAX_LENGTH}
               required
             />
           </div>
@@ -106,7 +131,7 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
               data-testid="coa-account-name"
               value={form.account_name}
               onChange={setField("account_name")}
-              maxLength={160}
+              maxLength={ACCOUNT_NAME_MAX_LENGTH}
               required
             />
           </div>
@@ -126,6 +151,27 @@ export default function COAFormModal({ open, onOpenChange, account, onSubmit }) 
               )}
               {ACCOUNT_CATEGORIES.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
             </select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="coa-account-header">Header (opsional)</Label>
+            <Input
+              id="coa-account-header"
+              data-testid="coa-account-header"
+              value={form.header}
+              onChange={setField("header")}
+              maxLength={COA_HEADER_MAX_LENGTH}
+              list="coa-header-options"
+              placeholder="mis. Beban Karyawan"
+              autoComplete="off"
+            />
+            <datalist id="coa-header-options">
+              {headerOptions.map((option) => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <p className="text-xs text-muted-foreground">
+              Sub-kelompok tampilan akun. Kosongkan bila belum ditentukan.
+            </p>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} disabled={saving}>

@@ -1,4 +1,10 @@
-import { COA_HEADER_FALLBACK_LABEL, getAccountHeader, groupAccountsByHeader } from "./coaGrouping";
+import {
+  collectHeaderOptions,
+  COA_HEADER_FALLBACK_LABEL,
+  COA_HEADER_MAX_LENGTH,
+  getAccountHeader,
+  groupAccountsByHeader,
+} from "./coaGrouping";
 
 const accounts = [
   {
@@ -135,5 +141,29 @@ describe("groupAccountsByHeader", () => {
       "6-60102",
       "6-60161",
     ]);
+  });
+});
+
+describe("collectHeaderOptions", () => {
+  it("returns unique, trimmed, alphabetically sorted headers", () => {
+    expect(
+      collectHeaderOptions([
+        { account_code: "6-1", header: "Beban Karyawan" },
+        { account_code: "6-2", header: "  Beban Karyawan  " },
+        { account_code: "6-3", header: "Beban Outlet" },
+        { account_code: "6-4", header: "" },
+        { account_code: "6-5" },
+      ]),
+    ).toEqual(["Beban Karyawan", "Beban Outlet"]);
+  });
+
+  it("never throws for non-array input", () => {
+    expect(collectHeaderOptions()).toEqual([]);
+    expect(collectHeaderOptions(null)).toEqual([]);
+    expect(collectHeaderOptions({})).toEqual([]);
+  });
+
+  it("keeps the header column limit aligned with the database", () => {
+    expect(COA_HEADER_MAX_LENGTH).toBe(100);
   });
 });

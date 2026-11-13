@@ -68,3 +68,40 @@ export function attachAccountHeaders(accounts, headers) {
     return { ...account, header: map[code] };
   });
 }
+
+/**
+ * Simpan kolom `header` satu akun langsung ke Supabase (kolom ini belum
+ * dikirim/diterima endpoint COA backend).
+ *
+ * Return value:
+ *  - `undefined` → Supabase tidak dikonfigurasi, tidak ada yang perlu disimpan;
+ *  - `true`      → header berhasil disimpan (atau dikosongkan);
+ *  - `false`     → gagal disimpan (mis. RLS diaktifkan kembali / jaringan).
+ *
+ * Tidak pernah melempar error: kegagalan hanya menghasilkan peringatan.
+ */
+export async function saveAccountHeader(accountCode, header) {
+  const code = asText(accountCode);
+  if (!supabase || !code) return undefined;
+
+  const value = asText(header) || null;
+
+  try {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update({ header: value })
+      .eq("account_code", code)
+      .select("account_code");
+
+    if (error) throw error;
+
+    // Tanpa policy UPDATE (atau bila akun belum terlihat), Supabase tidak
+    // mengembalikan baris apa pun. Anggap gagal agar UI memberi peringatan.
+    return Array.isArray(data) && data.length > 0;
+  } catch (error) {
+    if (typeof console !== "undefined") {
+      console.warn(`Gagal menyimpan header untuk akun ${code}:`, error);
+    }
+    return false;
+  }
+}

@@ -9,9 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { errMsg, rp } from "@/lib/api";
 import { createAccount, deleteAccount, getAccounts, updateAccount } from "@/services/coaService";
-import { attachAccountHeaders, fetchAccountHeaders } from "@/services/coaHeaderService";
+import {
+  attachAccountHeaders,
+  fetchAccountHeaders,
+  saveAccountHeader,
+} from "@/services/coaHeaderService";
 import { getAccountCategoryLabel, getAccountTypeLabel } from "@/lib/accountClassification";
 import {
+  collectHeaderOptions,
   COA_HEADER_FALLBACK_LABEL,
   getAccountHeader,
   groupAccountsByHeader,
@@ -82,6 +87,7 @@ export default function COAManagement() {
 
   const hasFilter = Boolean(appliedRange.startDate || appliedRange.endDate);
   const groupedAccounts = useMemo(() => groupAccountsByHeader(accounts), [accounts]);
+  const headerOptions = useMemo(() => collectHeaderOptions(accounts), [accounts]);
 
   const openCreateModal = () => {
     setEditingAccount(null);
@@ -93,14 +99,26 @@ export default function COAManagement() {
     setModalOpen(true);
   };
 
-  const saveAccount = async (account) => {
+  const saveAccount = async ({ header = "", ...account }) => {
+    // `header` belum menjadi bagian kontrak API COA backend, jadi dikirim
+    // terpisah. Backend tetap menerima payload tanpa field ini (field asing
+    // diabaikan), sehingga tidak ada perubahan kontrak/validasi di sana.
+    const saved = editingAccount
+      ? await updateAccount(editingAccount.id, account)
+      : await createAccount(account);
+
+    const accountCode = saved?.account_code ?? account.account_code;
+    const headerResult = await saveAccountHeader(accountCode, header);
+
     if (editingAccount) {
-      await updateAccount(editingAccount.id, account);
       toast.success("Akun berhasil diperbarui.");
     } else {
-      await createAccount(account);
       toast.success("Akun berhasil ditambahkan.");
     }
+    if (headerResult === false) {
+      toast.warning("Akun tersimpan, tetapi header gagal disimpan. Coba edit ulang akun.");
+    }
+
     await loadAccounts(appliedRange);
   };
 
@@ -306,6 +324,7 @@ export default function COAManagement() {
         open={modalOpen}
         onOpenChange={setModalOpen}
         account={editingAccount}
+        headerOptions={headerOptions}
         onSubmit={saveAccount}
       />
 

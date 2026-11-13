@@ -28,6 +28,12 @@ const FALLBACK_CATEGORY = "Lainnya";
 
 export const COA_HEADER_FALLBACK_LABEL = "Tanpa header";
 
+/**
+ * Batas panjang kolom `header` di database (`character varying(100)`).
+ * Dipakai form agar input tidak pernah ditolak PostgreSQL.
+ */
+export const COA_HEADER_MAX_LENGTH = 100;
+
 const asText = (value) => (typeof value === "string" ? value.trim() : "");
 
 const asAmount = (value) => {
@@ -50,6 +56,24 @@ export const getAccountHeader = (account = {}) => {
   }
   return "";
 };
+
+/**
+ * Kumpulkan header unik dari daftar akun untuk pilihan pada form.
+ * Aman terhadap input non-array maupun baris tanpa header.
+ */
+export function collectHeaderOptions(accounts) {
+  const rows = Array.isArray(accounts) ? accounts : [];
+  const unique = new Set();
+
+  for (const account of rows) {
+    const header = getAccountHeader(account);
+    if (header) unique.add(header);
+  }
+
+  return [...unique].sort((left, right) =>
+    left.localeCompare(right, "id", { sensitivity: "base" }),
+  );
+}
 
 const compareAccounts = (left, right) => {
   const byCode = String(left?.account_code ?? "").localeCompare(
