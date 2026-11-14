@@ -83,7 +83,14 @@ export default function POS() {
       api.get(`/open-bills/${billId}`, { signal: controller.signal }).then(({ data }) => {
         const billItems = data.items_json.map((i) => {
           const id = i.id || createItemId();
-          return { key: cartItemKey({ ...i, id }), id, is_printed: Boolean(i.is_printed), productId: i.productId, variantId: i.variantId ?? null, extra: i.variantPrice || 0, variantName: i.variantName || "", name: itemName(i), price: i.price, qty: i.qty, notes: i.notes || "" };
+          // `waiterId`/`waiterName` per item dipertahankan agar batch order lama
+          // tetap tercatat atas nama pelayan aslinya saat tambah order.
+          return {
+            key: cartItemKey({ ...i, id }), id, is_printed: Boolean(i.is_printed),
+            productId: i.productId, variantId: i.variantId ?? null, extra: i.variantPrice || 0,
+            variantName: i.variantName || "", name: itemName(i), price: i.price, qty: i.qty,
+            notes: i.notes || "", waiterId: i.waiterId ?? null, waiterName: i.waiterName || "",
+          };
         });
         setOrder({ billId: data.id, queueNumber: data.queueNumber ?? null, type: data.type, tableId: data.tableId || "none", customerId: data.customerId || "none", customerName: data.customerName, waiterName: data.waiterName, waiterId: data.waiterId || null });
         setCart(billItems);
@@ -101,10 +108,18 @@ export default function POS() {
   const addLine = useCallback((p, v) => {
     const key = `${p.id}:${v ? v.id : ""}`;
     const id = createItemId();
-    setCart((c) => (c.some((i) => itemKey(i) === key && !i.is_printed)
-      ? c.map((i) => (itemKey(i) === key && !i.is_printed ? { ...i, qty: i.qty + 1 } : i))
-      : [...c, { key: `${key}:${id}`, id, is_printed: false, productId: p.id, variantId: v ? v.id : null, extra: v ? Number(v.additional_price || 0) : 0, variantName: v ? v.variant_name : "", name: v ? v.variant_name : p.name, price: p.price, qty: 1, notes: "" }]));
-  }, []);
+    // Baris baru langsung dicap pelayan yang sedang dipilih, sehingga pelayan
+    // yang dipilih berikutnya tidak menimpa baris ini.
+    const owner = { waiterId: order.waiterId || null, waiterName: order.waiterName || "" };
+    // Hanya gabungkan ke baris yang belum dicetak DAN milik pelayan yang sama.
+    // Baris milik pelayan lain dibiarkan utuh agar tidak ikut berpindah nama.
+    const sameOwner = (i) => (i.waiterId || null) === owner.waiterId
+      && (i.waiterName || "") === owner.waiterName;
+    const mergeable = (i) => itemKey(i) === key && !i.is_printed && sameOwner(i);
+    setCart((c) => (c.some(mergeable)
+      ? c.map((i) => (mergeable(i) ? { ...i, qty: i.qty + 1 } : i))
+      : [...c, { key: `${key}:${id}`, id, is_printed: false, productId: p.id, variantId: v ? v.id : null, extra: v ? Number(v.additional_price || 0) : 0, variantName: v ? v.variant_name : "", name: v ? v.variant_name : p.name, price: p.price, qty: 1, notes: "", ...owner }]));
+  }, [order.waiterId, order.waiterName]);
   const variantsOf = (p) => variants.filter((v) => v.pid === p.id);
   const add = useCallback(async (p) => {
     try {
@@ -146,7 +161,12 @@ export default function POS() {
     waiterName: order.waiterName,
     waiterId: order.waiterId || null,
     adminPin: authPin,
-    items: cart.map(({ id, is_printed, productId, qty, notes, variantId }) => ({ id, is_printed, productId, qty, notes, variantId })),
+    // Sertakan atribusi pelayan per item agar item yang sudah tersimpan tidak
+    // ikut berpindah nama ketika pelayan diganti pada tambah order.
+    items: cart.map(({ id, is_printed, productId, qty, notes, variantId, waiterId, waiterName }) => ({
+      id, is_printed, productId, qty, notes, variantId,
+      waiterId: waiterId ?? null, waiterName: waiterName || "",
+    })),
   });
 
   const run = async (fn) => {

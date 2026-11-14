@@ -73,8 +73,13 @@ const OrderOptions = ({ order, setOrder, tables, customers, waiters, canPay, wai
   );
 };
 
-const CartLine = ({ item, price, locked, onQty, onNotes, onRemove }) => {
+const CartLine = ({ item, price, locked, onQty, onNotes, onRemove, currentWaiterId }) => {
   const [editNote, setEditNote] = useState(false);
+  // Tampilkan pemilik baris hanya bila berbeda dari pelayan yang sedang dipilih,
+  // sehingga batch lama (mis. sebelum over shift) tetap terlihat jelas.
+  const ownerBadge = item.waiterName && (item.waiterId || null) !== (currentWaiterId || null)
+    ? item.waiterName
+    : null;
   return (
     <div data-testid={`cart-item-${item.key}`} className="rounded-lg border border-border px-2.5 py-1.5">
       <div className="flex items-center gap-2">
@@ -82,6 +87,11 @@ const CartLine = ({ item, price, locked, onQty, onNotes, onRemove }) => {
           <p className="flex items-center gap-1 truncate text-[13px] font-semibold leading-tight">
             {locked && <Lock data-testid={`cart-locked-${item.key}`} className="h-3 w-3 shrink-0 text-amber-600" />}
             <span data-testid={`cart-item-name-${item.key}`} className="truncate">{item.variantName || item.name}</span>
+            {ownerBadge && (
+              <span data-testid={`cart-item-waiter-${item.key}`} className="shrink-0 rounded bg-secondary px-1 text-[10px] font-medium text-muted-foreground">
+                {ownerBadge}
+              </span>
+            )}
           </p>
           <p className="truncate font-mono text-[11px] text-muted-foreground">{rp(price)}{item.notes && !editNote ? ` · ${item.notes}` : ""}</p>
         </div>
@@ -127,7 +137,7 @@ export const CartPanel = ({ order, setOrder, tables, customers, waiters, waiterR
             <div><ShoppingBag className="mx-auto mb-2 h-7 w-7" />Ketuk menu untuk menambahkan</div>
           </div>
         ) : (
-          cart.map((i) => <CartLine key={i.key} item={i} price={priceOf(i)} locked={isLocked(i)} onQty={(d) => onQty(i.key, d)} onNotes={(v) => notes(i.key, v)} onRemove={() => onRemove(i.key)} />)
+          cart.map((i) => <CartLine key={i.key} item={i} price={priceOf(i)} locked={isLocked(i)} currentWaiterId={order.waiterId} onQty={(d) => onQty(i.key, d)} onNotes={(v) => notes(i.key, v)} onRemove={() => onRemove(i.key)} />)
         )}
       </div>
       <div className="space-y-2.5 border-t border-border px-4 py-3">

@@ -61,7 +61,7 @@ import traceback
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request, Response
@@ -229,6 +229,11 @@ class OrderItemIn(BaseModel):
     qty: int = Field(gt=0)
     notes: str = ""
     variantId: Optional[int] = None
+    # Atribusi pelayan per baris item. Diisi saat item dibuat sehingga batch
+    # order lama tetap tercatat atas nama pelayan aslinya meskipun pelayan bill
+    # diganti ketika melakukan "tambah order" setelah over shift.
+    waiterId: Optional[str] = None
+    waiterName: str = ""
 
 
 class OpenBillIn(BaseModel):
@@ -379,8 +384,73 @@ async def build_items(items: List[OrderItemIn], order_type: str, ojol_markup: Op
         out.append({"id": i.id or str(uuid4()), "is_printed": i.is_printed,
                     "productId": p.id, "productName": p.name, "qty": i.qty, "price": price, "hpp": v_hpp.get(v["_id"], p.hpp) if v else p.hpp,
                     "notes": i.notes, "subtotal": price * i.qty, "variantId": i.variantId,
-                    "variantName": v["variant_name"] if v else "", "variantPrice": extra})
+                    "variantName": v["variant_name"] if v else "", "variantPrice": extra,
+                    "waiterId": i.waiterId, "waiterName": i.waiterName or ""})
     return out, sum(x["subtotal"] for x in out)
+
+
+WaiterRef = Tuple[Optional[str], str]
+
+
+def _stamp_item_waiter(items: List[OrderItemIn], waiter: WaiterRef) -> List[OrderItemIn]:
+    """Tandai setiap baris item dengan pelayan batch-nya.
+
+    Dipakai saat membuat/menambah order sehingga identitas pelayan tersimpan
+    per item (bukan hanya per bill). Item yang SUDAH membawa pelayan sendiri
+    (mis. hasil penggabungan bill atau sisa item yang belum dibayar) tidak
+    ditimpa.
+    """
+    wid, wname = waiter
+    out = []
+    for i in items:
+        if i.waiterId is None and not i.waiterName:
+            if wid is not None or wname:
+                i = i.model_copy(update={"waiterId": wid, "waiterName": wname})
+        out.append(i)
+    return out
+
+
+def _item_owner(item: dict, fallback: WaiterRef) -> WaiterRef:
+    return item.get("waiterId", fallback[0]), (item.get("waiterName") or fallback[1] or "")
+
+
+def preserve_item_waiters(new_items: List[dict], old_items: List[dict], fallback: WaiterRef) -> None:
+    """Pertahankan pelayan asli untuk item yang sudah tersimpan di bill.
+
+    Item lama tidak boleh ikut berpindah tangan ketika kasir mengganti pelayan
+    saat "tambah order" (mis. setelah over shift). Hanya baris yang benar-benar
+    baru yang memakai pelayan pilihan terbaru.
+    """
+    old_by_id = {}
+    legacy_by_key = defaultdict(list)
+    for old in old_items or []:
+        owner = _item_owner(old, fallback)
+        if owner[0] is None and not owner[1]:
+            # Item lama tanpa data pelayan (data legacy): biarkan item baru
+            # memakai pelayan yang sedang dipilih, jangan diosongkan.
+            continue
+        if old.get("id"):
+            old_by_id[old["id"]] = owner
+        else:
+            legacy_by_key[(old.get("productId"), old.get("variantId"))].append(owner)
+    for item in new_items or []:
+        owner = old_by_id.get(item.get("id"))
+        if owner is None:
+            queue = legacy_by_key.get((item.get("productId"), item.get("variantId")))
+            if queue:
+                owner = queue.pop(0)
+        if owner is not None:
+            item["waiterId"], item["waiterName"] = owner
+
+
+def item_waiter_summary(items: List[dict], fallback: WaiterRef) -> str:
+    """Gabungkan nama pelayan per item untuk tampilan ringkas (mis. kartu meja)."""
+    names: List[str] = []
+    for item in items or []:
+        name = item.get("waiterName") or fallback[1] or ""
+        if name and name not in names:
+            names.append(name)
+    return " / ".join(names) if names else (fallback[1] or "")
 
 
 async def occupy_table(table_id: str, bill: OpenBill, connection=None):
@@ -396,7 +466,8 @@ async def occupy_table(table_id: str, bill: OpenBill, connection=None):
     od = t.get("orderData") or {}
     if t["status"] == "occupied" and od.get("openBillId") != bill.id:
         raise HTTPException(409, f"{t['name']} sedang terisi")
-    order_data = {"openBillId": bill.id, "customerName": bill.customerName, "waiterName": bill.waiterName,
+    order_data = {"openBillId": bill.id, "customerName": bill.customerName,
+                  "waiterName": item_waiter_summary(bill.items_json, (bill.waiterId, bill.waiterName or "")),
                   "total": bill.total, "itemCount": sum(i["qty"] for i in bill.items_json),
                   "startTime": od.get("startTime") if od.get("openBillId") == bill.id else bill.timestamp}
     await db.tables.update_one({"_id": table_id}, {"$set": {
@@ -996,9 +1067,11 @@ async def delete_customer(cid: str, _: User = Depends(ADMIN)):
 async def compose_bill(body: OpenBillIn, user: User, bill_id: str, timestamp: str) -> OpenBill:
     if body.type in DIRECT_PAY_TYPES:
         raise HTTPException(400, f"Pesanan {body.type} harus langsung dibayar, tidak bisa disimpan sebagai open bill")
-    items, total = await build_items(body.items, body.type)
-    cust = await get_or_404("customers", body.customerId, "Pelanggan") if body.customerId else None
     wid, wname = await resolve_waiter(body.waiterId, body.waiterName, user)
+    # Setiap baris item mewarisi pelayan batch-nya sendiri, sehingga riwayat
+    # order lama tidak ikut tertimpa saat pelayan diganti pada tambah order.
+    items, total = await build_items(_stamp_item_waiter(body.items, (wid, wname)), body.type)
+    cust = await get_or_404("customers", body.customerId, "Pelanggan") if body.customerId else None
     return OpenBill(
         id=bill_id, timestamp=timestamp, type=body.type, total=total, items_json=items,
         queueNumber=str(body.queueNumber) if body.queueNumber is not None else None,
@@ -1098,6 +1171,9 @@ async def update_open_bill(bid: str, body: OpenBillIn, request: Request, user: U
     for item in bill.items_json:
         if printed_by_id.get(item["id"], False):
             item["is_printed"] = True
+    # Item yang sudah tersimpan tetap milik pelayan aslinya. Hanya baris baru
+    # (hasil tambah order) yang memakai pelayan yang dipilih sekarang.
+    preserve_item_waiters(bill.items_json, old.items_json, (old.waiterId, old.waiterName or ""))
     await check_materials(bill.items_json)
     bill.userId, bill.userName = old.userId, old.userName
     if bill.tableId:
@@ -1119,7 +1195,10 @@ async def update_open_bill(bid: str, body: OpenBillIn, request: Request, user: U
 
 
 async def save_bill_items(bill: OpenBill, items: List[OrderItemIn]) -> OpenBill:
-    new_items, total = await build_items(items, bill.type)
+    stamped = _stamp_item_waiter(items, (bill.waiterId, bill.waiterName or ""))
+    new_items, total = await build_items(stamped, bill.type)
+    # Pertahankan pelayan asli untuk item yang memang sudah ada di bill.
+    preserve_item_waiters(new_items, bill.items_json, (bill.waiterId, bill.waiterName or ""))
     updated = bill.model_copy(update={"items_json": new_items, "total": total})
     await db.open_bills.replace_one({"_id": bill.id}, updated.to_mongo())
     if updated.tableId:
@@ -1146,18 +1225,22 @@ def remaining_items(bill_items: List[dict], paid: List[dict]) -> List[OrderItemI
                     variantId=item.get("variantId"),
                     qty=qty,
                     notes=item.get("notes", ""),
+                    waiterId=item.get("waiterId"),
+                    waiterName=item.get("waiterName") or "",
                 ))
         if paid_by_id:
             raise HTTPException(400, "Item yang dibayar tidak ditemukan di bill")
         return remaining
 
-    left, notes, item_ids, printed = defaultdict(int), {}, {}, {}
+    left, notes, item_ids, printed, owners = defaultdict(int), {}, {}, {}, {}
     for i in bill_items:
         k = (i["productId"], i.get("variantId"))
         left[k] += i["qty"]
         notes[k] = notes.get(k) or i.get("notes", "")
         item_ids[k] = item_ids.get(k) or i.get("id")
         printed[k] = printed.get(k, False) or i.get("is_printed", False)
+        if k not in owners:
+            owners[k] = (i.get("waiterId"), i.get("waiterName") or "")
     for p in paid:
         k = (p["productId"], p.get("variantId"))
         if left.get(k, 0) < p["qty"]:
@@ -1167,6 +1250,7 @@ def remaining_items(bill_items: List[dict], paid: List[dict]) -> List[OrderItemI
         OrderItemIn(
             id=item_ids.get(k), is_printed=printed.get(k, False),
             productId=k[0], variantId=k[1], qty=v, notes=notes.get(k, ""),
+            waiterId=owners.get(k, (None, ""))[0], waiterName=owners.get(k, (None, ""))[1],
         )
         for k, v in left.items() if v > 0
     ]
@@ -1198,14 +1282,25 @@ async def merge_open_bills(bid: str, body: MergeIn, _: User = Depends(ANY)):
         raise HTTPException(400, "Tidak bisa menggabungkan bill dengan dirinya sendiri")
     target = OpenBill.from_mongo(await get_or_404("open_bills", bid, "Open bill"))
     source = OpenBill.from_mongo(await get_or_404("open_bills", body.sourceBillId, "Open bill"))
-    qty, notes = defaultdict(int), {}
-    for i in target.items_json + source.items_json:
-        k = (i["productId"], i.get("variantId"))
+    fallback_target = (target.waiterId, target.waiterName or "")
+    fallback_source = (source.waiterId, source.waiterName or "")
+    qty, notes, owners = defaultdict(int), {}, {}
+    combined = [(i, fallback_target) for i in target.items_json] + [
+        (i, fallback_source) for i in source.items_json
+    ]
+    for i, fallback in combined:
+        owner = _item_owner(i, fallback)
+        k = (i["productId"], i.get("variantId"), owner[0], owner[1])
         qty[k] += i["qty"]
         notes[k] = notes.get(k) or i.get("notes", "")
+        owners[k] = owner
     await db.open_bills.delete_one({"_id": source.id})
     await free_table(source.tableId)
-    return await save_bill_items(target, [OrderItemIn(productId=k[0], variantId=k[1], qty=v, notes=notes[k]) for k, v in qty.items()])
+    return await save_bill_items(target, [
+        OrderItemIn(productId=k[0], variantId=k[1], qty=v, notes=notes[k],
+                    waiterId=owners[k][0], waiterName=owners[k][1])
+        for k, v in qty.items()
+    ])
 
 
 @api.post("/open-bills/{bid}/move")
@@ -1275,7 +1370,17 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
                 ),
             },
         )
-    items, subtotal = await build_items(body.items, body.type)
+    if body.waiterId:
+        wid, wname = await resolve_waiter(body.waiterId, "", user)
+    elif bill:
+        wid, wname = bill.waiterId, body.waiterName or bill.waiterName
+    else:
+        wid, wname = None, body.waiterName
+
+    items, subtotal = await build_items(_stamp_item_waiter(body.items, (wid, wname)), body.type)
+    if bill:
+        # Item yang sudah ada di bill tetap atas nama pelayan aslinya.
+        preserve_item_waiters(items, bill.items_json, (bill.waiterId, bill.waiterName or ""))
     remaining = remaining_items(bill.items_json, items) if body.partial else []
     promo = {"code": None, "discount": 0}
     pts = {"pointsRequired": 0, "discount": 0}
@@ -1306,13 +1411,6 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
     cash, change = checkout_cash_amounts(checkout_payments, total, body.cashGiven)
     if method == "Cash" and cash < total:
         raise HTTPException(400, "Uang tunai kurang dari total")
-
-    if body.waiterId:
-        wid, wname = await resolve_waiter(body.waiterId, "", user)
-    elif bill:
-        wid, wname = bill.waiterId, body.waiterName or bill.waiterName
-    else:
-        wid, wname = None, body.waiterName
 
     queue_number = body.queueNumber
     if queue_number is None and bill:
