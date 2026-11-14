@@ -75,7 +75,7 @@ const WaiterView = () => {
         <Button data-testid="close-waiter-shift-button" onClick={() => setConfirm(true)}><Lock className="mr-1 h-4 w-4" />Tutup Shift</Button>
       </PageHeader>
       {progress === null ? <p className="py-10 text-center text-sm text-muted-foreground">Memuat target...</p> : progress.length === 0 ? <Empty testid="target-empty" text="Belum ada shift aktif." /> : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>
+        <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,24rem),1fr))]">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>
       )}
       <Dialog open={confirm} onOpenChange={setConfirm}>
         <DialogContent data-testid="close-waiter-shift-dialog" className="sm:max-w-sm">
@@ -171,7 +171,7 @@ const AdminView = () => {
       <section>
         <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Progres shift berjalan</h2>
         {progress.length === 0 ? <Empty testid="progress-empty" text="Tidak ada pelayan dengan shift aktif." /> : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,24rem),1fr))]">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>
         )}
       </section>
       <TargetDialog target={dialog} products={products} waiters={waiters} onClose={() => setDialog(null)} onSaved={load} />

@@ -43,7 +43,7 @@ export const TargetBar = ({ item, testid }) => (
 );
 
 export const ProgressCard = ({ p, children }) => (
-  <div data-testid={`target-progress-${p.waiterId}`} className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+  <div data-testid={`target-progress-${p.waiterId}`} className="h-full min-w-0 rounded-2xl border border-border bg-card p-5 shadow-sm">
     <div className="mb-4 flex items-start justify-between gap-3">
       <div>
         <p className="font-semibold">{p.waiterName}</p>
