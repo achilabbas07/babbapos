@@ -5,6 +5,7 @@ import { api, errMsg, fmtDate } from "@/lib/api";
 import { PageHeader, Empty } from "@/components/PageHeader";
 import { WaiterShiftPrintDialog } from "@/components/WaiterShiftPrintDialog";
 import { targetBadge } from "@/lib/waiterShiftHistoryData";
+import { targetBadgeText } from "@/lib/targetTypes";
 
 // Sub-laporan "Laporan Sales Target": menampilkan riwayat shift pelayan (yang
 // sebelumnya berada di halaman Target Sales Pelayan) beserta tombol cetak ulang
@@ -53,12 +54,13 @@ export default function WaiterSalesTargetReport() {
                   )}
                   {(Array.isArray(h.results) ? h.results : []).map((r) => {
                     const badge = targetBadge(r);
+                    const text = targetBadgeText(r);
                     return (
                       <span
                         key={r.targetId || badge.name}
-                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${badge.done ? "bg-emerald-100 text-emerald-700" : "bg-secondary text-muted-foreground"}`}
+                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${text.done ? "bg-emerald-100 text-emerald-700" : "bg-secondary text-muted-foreground"}`}
                       >
-                        {badge.name}: {badge.achieved}/{badge.targetQty}
+                        {badge.name}: {text.text}
                       </span>
                     );
                   })}

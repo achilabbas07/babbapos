@@ -8,6 +8,7 @@ import { PageHeader, Empty } from "@/components/PageHeader";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { TargetDialog } from "@/components/TargetDialog";
 import { ProgressCard, TargetBar } from "@/components/TargetProgress";
+import { periodLabel, targetRuleSummary, targetTypeLabel } from "@/lib/targetTypes";
 import { useWaiterShiftReport } from "@/hooks/useWaiterShiftReport";
 import { connectBluetoothPrinter } from "@/lib/bluetoothThermalPrinter";
 import { Button } from "@/components/ui/button";
@@ -70,7 +71,7 @@ const WaiterView = () => {
 
   return (
     <div>
-      <PageHeader title="Target Sales Saya" subtitle="Dihitung dari item yang dipesan (saat order) sejak shift dimulai.">
+      <PageHeader title="Target Sales Saya" subtitle="Target kuantitas item dihitung saat order, target omzet dihitung saat transaksi. Reset setiap shift baru.">
         <Button data-testid="close-waiter-shift-button" onClick={() => setConfirm(true)}><Lock className="mr-1 h-4 w-4" />Tutup Shift</Button>
       </PageHeader>
       {progress === null ? <p className="py-10 text-center text-sm text-muted-foreground">Memuat target...</p> : progress.length === 0 ? <Empty testid="target-empty" text="Belum ada shift aktif." /> : <div className="max-w-2xl">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>}
@@ -131,21 +132,26 @@ const AdminView = () => {
   return (
     <div className="space-y-10">
       <div>
-        <PageHeader title="Target Sales Pelayan" subtitle="Target jumlah item per shift pelayan. Dihitung saat order (bukan saat bayar), reset setiap shift baru.">
+        <PageHeader title="Target Sales Pelayan" subtitle="Target kuantitas item, omzet, atau berbasis periode/jam. Target item dihitung saat order (bukan saat bayar), reset setiap shift baru.">
           <Button data-testid="add-target-button" onClick={() => setDialog({})}><Plus className="mr-1 h-4 w-4" />Tambah Target</Button>
         </PageHeader>
         {targets.length === 0 ? <Empty testid="targets-empty" text="Belum ada target." /> : (
           <div className="overflow-x-auto rounded-2xl border border-border bg-card">
             <Table>
-              <TableHeader><TableRow><TableHead>Target</TableHead><TableHead>Item</TableHead><TableHead className="text-right">Target / shift</TableHead><TableHead>Berlaku untuk</TableHead><TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Target</TableHead><TableHead>Jenis</TableHead><TableHead>Item</TableHead><TableHead className="text-right">Nilai target</TableHead><TableHead>Periode</TableHead><TableHead>Berlaku untuk</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
                 {targets.map((t) => (
                   <TableRow key={t.id} data-testid={`target-row-${t.id}`}>
                     <TableCell className="font-medium">{t.name}</TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap gap-1">{t.productNames.map((n) => <span key={n} className="rounded-full bg-secondary px-2 py-0.5 text-xs">{n}</span>)}</div>
+                      <span data-testid={`target-type-${t.id}`} className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{targetTypeLabel(t)}</span>
                     </TableCell>
-                    <TableCell className="text-right font-mono">{t.targetQty}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">{t.productNames.map((n) => <span key={n} className="rounded-full bg-secondary px-2 py-0.5 text-xs">{n}</span>)}</div>
+                      {t.productNames.length === 0 && <span className="text-xs text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell data-testid={`target-value-${t.id}`} className="text-right font-mono">{targetRuleSummary(t)}</TableCell>
+                    <TableCell className="text-muted-foreground">{periodLabel(t)}</TableCell>
                     <TableCell className="text-muted-foreground">{t.waiterName || "Semua pelayan"}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">

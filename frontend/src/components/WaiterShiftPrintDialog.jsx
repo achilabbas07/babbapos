@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { api, errMsg, fmtDate } from "@/lib/api";
 import { printBluetoothReceipt, printerTypeForDocType, connectBluetoothPrinter } from "@/lib/bluetoothThermalPrinter";
 import { targetBadge } from "@/lib/waiterShiftHistoryData";
+import { targetBadgeText } from "@/lib/targetTypes";
 
 // Dialog cetak ulang laporan tutup shift pelayan dari riwayat.
 // Read-only: hanya memuat laporan tersimpan lalu mengirimkannya kembali ke printer.
@@ -92,11 +93,12 @@ export const WaiterShiftPrintDialog = ({ shift, onClose }) => {
               <div className="space-y-2" data-testid="waiter-shift-print-summary">
                 {(Array.isArray(shift.results) ? shift.results : []).map((r) => {
                   const badge = targetBadge(r);
+                  const text = targetBadgeText(r);
                   return (
                     <div key={r.targetId || badge.name} className="flex items-center justify-between gap-3">
                       <span className="text-muted-foreground">{badge.name}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${badge.done ? "bg-emerald-100 text-emerald-700" : "bg-secondary text-muted-foreground"}`}>
-                        {badge.achieved}/{badge.targetQty}
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${text.done ? "bg-emerald-100 text-emerald-700" : "bg-secondary text-muted-foreground"}`}>
+                        {text.text}
                       </span>
                     </div>
                   );

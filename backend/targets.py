@@ -3,9 +3,27 @@ from collections import defaultdict
 from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from core import BaseDocument, User, db, get_current_user, next_id, now_iso, require_roles
+from core import BaseDocument, User, db, get_current_user, next_id, now_iso, now_local, require_roles
+from target_types import (
+    DEFAULT_TARGET_TYPE,
+    ITEM_QUANTITY,
+    METRIC_ITEM,
+    METRICS,
+    PERIOD_SHIFT,
+    PERIODS,
+    REVENUE_AMOUNT,
+    TARGET_TYPES,
+    TIME_BOUNDED,
+    TargetData,
+    evaluate_target,
+    is_achieved,
+    needs_logs,
+    needs_revenue,
+    period_bounds,
+    period_of,
+)
 
 router = APIRouter(prefix="/api")
 ADMIN = require_roles("admin")
@@ -15,11 +33,20 @@ ANY = require_roles("admin", "kasir", "waiter")
 
 class SalesTarget(BaseDocument):
     name: str
-    productIds: List[str]
-    productNames: List[str]
-    targetQty: int
+    productIds: List[str] = Field(default_factory=list)
+    productNames: List[str] = Field(default_factory=list)
+    targetQty: Optional[int] = None
     waiterId: Optional[str] = None
     waiterName: str = ""
+    # --- Multi-target (opsional, nullable) -------------------------------
+    # Semua kolom di bawah ini boleh kosong sehingga target lama (yang hanya
+    # menyimpan targetQty) tetap terbaca dan berperilaku sama seperti dulu.
+    targetType: str = DEFAULT_TARGET_TYPE
+    targetAmount: Optional[float] = None
+    periodType: str = PERIOD_SHIFT
+    metric: Optional[str] = None
+    startTime: Optional[str] = None
+    endTime: Optional[str] = None
 
 
 class WaiterShift(BaseDocument):
@@ -34,9 +61,37 @@ class WaiterShift(BaseDocument):
 
 class TargetIn(BaseModel):
     name: str = ""
-    productIds: List[str] = Field(min_length=1)
-    targetQty: int = Field(gt=0)
+    productIds: List[str] = Field(default_factory=list)
+    targetQty: Optional[int] = None
     waiterId: Optional[str] = None
+    targetType: str = DEFAULT_TARGET_TYPE
+    targetAmount: Optional[float] = None
+    periodType: str = PERIOD_SHIFT
+    metric: Optional[str] = None
+    startTime: Optional[str] = None
+    endTime: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _check_type_fields(self):
+        """Validasi bergantung tipe target (kompatibel dengan payload lama)."""
+        if self.targetType not in TARGET_TYPES:
+            raise ValueError(f"targetType harus salah satu dari {', '.join(TARGET_TYPES)}")
+        if self.periodType not in PERIODS:
+            raise ValueError(f"periodType harus salah satu dari {', '.join(PERIODS)}")
+        if self.metric is not None and self.metric not in METRICS:
+            raise ValueError(f"metric harus salah satu dari {', '.join(METRICS)}")
+        wants_items = self.targetType == ITEM_QUANTITY or self.metric == METRIC_ITEM
+        wants_revenue = self.targetType == REVENUE_AMOUNT or (
+            self.targetType == TIME_BOUNDED and self.metric != METRIC_ITEM
+        )
+        if wants_items:
+            if not self.productIds:
+                raise ValueError("productIds wajib diisi untuk target kuantitas item")
+            if not self.targetQty or self.targetQty <= 0:
+                raise ValueError("targetQty harus lebih besar dari 0")
+        if wants_revenue and (self.targetAmount is None or self.targetAmount <= 0):
+            raise ValueError("targetAmount harus lebih besar dari 0 untuk target omzet")
+        return self
 
 
 async def resolve_waiter(waiter_id: Optional[str], fallback_name: str, user: User) -> Tuple[Optional[str], str]:
@@ -119,19 +174,51 @@ async def log_order_diff(
         await _write_logs(log_waiter, dict(new), source, ref, connection=connection)
 
 
+async def _target_data(target: dict, shift: dict) -> TargetData:
+    """Muat data pencapaian satu target sesuai tipe & periodenya.
+
+    - ``periodType == "shift"``  → memakai ``shiftId`` (perilaku lama, tidak berubah).
+    - periode harian/mingguan/bulanan → memakai rentang waktu kalender WITA.
+
+    ``order_logs`` dipakai untuk metrik kuantitas item, ``transactions`` untuk
+    metrik omzet.
+    """
+    pids = list({pid for pid in (target.get("productIds") or [])}) if needs_logs(target) else []
+    wants_revenue = needs_revenue(target)
+    if not pids and not wants_revenue:
+        return TargetData()
+
+    if period_of(target) == PERIOD_SHIFT:
+        log_filter = {"shiftId": shift["_id"]}
+        trx_filter = {"shiftId": shift["_id"]}
+        logs: List[dict] = []
+        transactions: List[dict] = []
+        if pids:
+            logs = await db.order_logs.find({**log_filter, "productId": {"$in": pids}}).to_list(None)
+        if wants_revenue:
+            transactions = await db.transactions.find(trx_filter).to_list(None)
+        return TargetData(logs=logs, transactions=transactions)
+
+    start, end = period_bounds(period_of(target), now_local())
+    window = {"$gte": start.isoformat(), "$lt": end.isoformat()}
+    logs = []
+    transactions = []
+    if pids:
+        logs = await db.order_logs.find({
+            "waiterId": shift["userId"], "timestamp": window, "productId": {"$in": pids},
+        }).to_list(None)
+    if wants_revenue:
+        transactions = await db.transactions.find({
+            "waiterId": shift["userId"], "date": window,
+        }).to_list(None)
+    return TargetData(logs=logs, transactions=transactions)
+
+
 async def progress_for(shift: dict) -> dict:
     targets = await db.sales_targets.find({"$or": [{"waiterId": None}, {"waiterId": shift["userId"]}]}).to_list(None)
-    pids = list({pid for t in targets for pid in t["productIds"]})
-    got = defaultdict(int)
-    async for log in db.order_logs.find({"shiftId": shift["_id"], "productId": {"$in": pids}}):
-        got[log["productId"]] += log["qty"]
-    items = []
-    for t in targets:
-        breakdown = [{"productId": pid, "productName": n, "qty": max(0, got.get(pid, 0))} for pid, n in zip(t["productIds"], t["productNames"])]
-        achieved = max(0, sum(got.get(pid, 0) for pid in t["productIds"]))
-        items.append({"targetId": t["_id"], "name": t["name"], "productIds": t["productIds"], "breakdown": breakdown,
-                      "targetQty": t["targetQty"], "achieved": achieved, "pct": min(100.0, achieved / t["targetQty"] * 100)})
-    return {"shiftId": shift["_id"], "waiterId": shift["userId"], "waiterName": shift["userName"], "openedAt": shift["openedAt"], "items": items}
+    items = [evaluate_target(t, await _target_data(t, shift)) for t in targets]
+    return {"shiftId": shift["_id"], "waiterId": shift["userId"], "waiterName": shift["userName"],
+            "openedAt": shift["openedAt"], "items": items}
 
 
 async def waiter_shift_report(shift: dict, target_results: List[dict]) -> dict:
@@ -173,7 +260,7 @@ async def waiter_shift_report(shift: dict, target_results: List[dict]) -> dict:
         "TIDAK ADA TARGET"
         if not target_results
         else "TERCAPAI"
-        if all(item["achieved"] >= item["targetQty"] for item in target_results)
+        if all(is_achieved(item) for item in target_results)
         else "BELUM TERCAPAI"
     )
 
@@ -211,23 +298,43 @@ async def _target_doc(body: TargetIn, target_id: str) -> SalesTarget:
         if not w:
             raise HTTPException(404, "Pelayan tidak ditemukan")
         wname = w["name"]
-    return SalesTarget(id=target_id, name=body.name.strip() or " + ".join(names), productIds=ids, productNames=names,
-                       targetQty=body.targetQty, waiterId=body.waiterId, waiterName=wname)
+    default_name = " + ".join(names) or (
+        f"Omzet {body.periodType}" if body.targetType != TIME_BOUNDED else "Target periode"
+    )
+    return SalesTarget(id=target_id, name=body.name.strip() or default_name, productIds=ids, productNames=names,
+                       targetQty=body.targetQty, waiterId=body.waiterId, waiterName=wname,
+                       targetType=body.targetType, targetAmount=body.targetAmount,
+                       periodType=body.periodType, metric=body.metric or (
+                           METRIC_ITEM if body.targetType == ITEM_QUANTITY else None),
+                       startTime=body.startTime, endTime=body.endTime)
+
+
+async def _persistable(doc: dict) -> dict:
+    """Buang kolom yang belum ada di tabel Supabase.
+
+    Kolom multi-target ditambahkan lewat migrasi opsional. Bila migrasi belum
+    dijalankan, penyimpanan tetap berhasil untuk kolom lama (non-destruktif)
+    alih-alih gagal dengan error "kolom tidak ada".
+    """
+    await db.connect()
+    cols = db.columns.get("sales_targets") or {}
+    return {k: v for k, v in doc.items() if k == "_id" or k in cols}
 
 
 @router.post("/targets")
 async def create_target(body: TargetIn, _: User = Depends(ADMIN)):
     t = await _target_doc(body, await next_id("TGT"))
-    await db.sales_targets.insert_one(t.to_mongo())
+    await db.sales_targets.insert_one(await _persistable(t.to_mongo()))
     return t
 
 
 @router.put("/targets/{tid}")
 async def update_target(tid: str, body: TargetIn, _: User = Depends(ADMIN)):
-    if not await db.sales_targets.find_one({"_id": tid}):
+    existing = await db.sales_targets.find_one({"_id": tid})
+    if not existing:
         raise HTTPException(404, "Target tidak ditemukan")
     t = await _target_doc(body, tid)
-    await db.sales_targets.replace_one({"_id": tid}, t.to_mongo())
+    await db.sales_targets.replace_one({"_id": tid}, await _persistable(t.to_mongo()))
     return t
 
 
