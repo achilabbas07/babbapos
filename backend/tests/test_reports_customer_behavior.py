@@ -92,7 +92,12 @@ def test_customer_behavior_reads_only_transactions_with_date_filter():
     fake = FakeDB(TRANSACTIONS)
     _run(fake)
     assert fake.transactions.filters, "endpoint harus membaca transactions"
-    assert "date" in fake.transactions.filters[0]
+    # Superset: baris yang lunas ATAU dipesan dalam rentang (kalender WITA).
+    query = fake.transactions.filters[0]
+    assert "$or" in query
+    branches = query["$or"]
+    assert any("date" in branch for branch in branches)
+    assert any("orderTime" in branch for branch in branches)
 
 
 def test_customer_behavior_channel_and_aov():
@@ -202,6 +207,82 @@ def test_customer_behavior_hours_fall_back_to_date_for_legacy_rows():
     ]
     report = _run(FakeDB(rows))
     assert report["peak_hour"]["hour"] == 12
+
+
+def test_customer_behavior_excludes_orders_from_previous_day_paid_after_midnight():
+    """Pesanan kemarin yang dibayar dini hari ini bukan bagian dari "hari ini".
+
+    Regresi nyata: open bill pukul 17:36/20:12/20:42/21:56 WITA kemarin dibayar
+    pukul 00:02-00:20 WITA hari ini. Sebelum perbaikan, transaksi tersebut ikut
+    terhitung pada rentang "Hari Ini" sehingga grafik menampilkan jam 17:00,
+    20:00, dan 21:00 yang belum terjadi hari ini.
+    """
+    rows = [
+        {
+            "_id": "TRX-TODAY",
+            # Dipesan 09:00 WITA hari ini, dibayar 13:00 WITA hari ini.
+            "orderTime": "2026-11-14T01:00:00+00:00",
+            "date": "2026-11-14T05:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 12000,
+            "items_json": [{"qty": 1}],
+        },
+        {
+            "_id": "TRX-LASTNIGHT-1",
+            # Dipesan 20:42 WITA KEMARIN, dibayar 00:20 WITA hari ini.
+            "orderTime": "2026-11-13T12:42:00+00:00",
+            "date": "2026-11-13T16:20:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 50000,
+            "items_json": [{"qty": 2}],
+        },
+        {
+            "_id": "TRX-LASTNIGHT-2",
+            # Dipesan 21:56 WITA KEMARIN, dibayar 00:17 WITA hari ini.
+            "orderTime": "2026-11-13T13:56:00+00:00",
+            "date": "2026-11-13T16:17:00+00:00",
+            "type": "Takeaway",
+            "method": "QRIS",
+            "total": 30000,
+            "items_json": [{"qty": 1}],
+        },
+    ]
+    report = _run(FakeDB(rows), start="2026-11-14", end="2026-11-14")
+    by_hour = {h["hour"]: h["transactions"] for h in report["hours"]}
+
+    assert report["transaction_count"] == 1
+    assert by_hour[9] == 1
+    # Jam kemarin tidak boleh muncul pada rentang hari ini.
+    assert by_hour[20] == 0
+    assert by_hour[21] == 0
+
+
+def test_customer_behavior_includes_order_placed_today_paid_after_midnight():
+    """Pesanan hari ini yang baru dibayar besok tetap milik hari ini."""
+    rows = [
+        {
+            "_id": "TRX-LATE",
+            # Dipesan 23:10 WITA 14 Nov, dibayar 00:05 WITA 15 Nov.
+            "orderTime": "2026-11-14T15:10:00+00:00",
+            "date": "2026-11-14T16:05:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 9000,
+            "items_json": [{"qty": 1}],
+        },
+    ]
+    report = _run(FakeDB(rows), start="2026-11-14", end="2026-11-14")
+    by_hour = {h["hour"]: h["transactions"] for h in report["hours"]}
+    assert report["transaction_count"] == 1
+    assert by_hour[23] == 1
+
+
+def test_customer_behavior_rejects_inverted_range():
+    with pytest.raises(HTTPException) as exc:
+        _run(FakeDB(TRANSACTIONS), start="2026-11-30", end="2026-11-01")
+    assert exc.value.status_code == 400
 
 
 def test_customer_behavior_insights_present():

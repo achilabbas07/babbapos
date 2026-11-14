@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Lightbulb, RotateCw } from "lucide-react";
-import { api, errMsg, rp, num, todayStr, daysAgoStr } from "@/lib/api";
+import { api, errMsg, rp, num } from "@/lib/api";
 import { PageHeader, StatCard, Empty } from "@/components/PageHeader";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   formatHour,
   normalizeCustomerBehaviorReport,
+  witaDaysAgoStr,
+  witaTodayStr,
 } from "@/lib/customerBehaviorData";
 
 const PRESETS = [
@@ -40,7 +42,9 @@ const BarRow = ({ label, value, max, sublabel, tone = "bg-primary" }) => (
 );
 
 export default function CustomerBehaviorReport() {
-  const [range, setRange] = useState({ start: daysAgoStr(6), end: todayStr() });
+  // Rentang memakai kalender WITA (Asia/Makassar) agar konsisten dengan filter
+  // backend, apa pun zona waktu perangkat yang dipakai membuka laporan.
+  const [range, setRange] = useState({ start: witaDaysAgoStr(6), end: witaTodayStr() });
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -96,13 +100,13 @@ export default function CustomerBehaviorReport() {
         subtitle="Perputaran warkop: kanal orderan, metode bayar, ukuran keranjang, dan jam sibuk pada rentang tanggal terpilih."
       >
         {PRESETS.map(([label, n]) => {
-          const active = range.start === daysAgoStr(n) && range.end === todayStr();
+          const active = range.start === witaDaysAgoStr(n) && range.end === witaTodayStr();
           return (
             <button
               key={label}
               type="button"
               data-testid={`customer-behavior-preset-${n}`}
-              onClick={() => setRange({ start: daysAgoStr(n), end: todayStr() })}
+              onClick={() => setRange({ start: witaDaysAgoStr(n), end: witaTodayStr() })}
               className={`h-10 rounded-lg px-3 text-sm ${active ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-secondary"}`}
             >
               {label}

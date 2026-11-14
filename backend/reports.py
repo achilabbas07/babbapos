@@ -18,7 +18,7 @@ metode pembayaran, ukuran keranjang, jam sibuk/sepian, dan wawasan aturan
 (rule-based) untuk rentang tanggal terpilih.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -323,6 +323,41 @@ def _parse_tx_local_hour(tx) -> int:
     return order_dt.hour if order_dt is not None else 0
 
 
+def _report_range_bounds(start: str, end: str):
+    """Batas kalender WITA (inklusif) dari ``start``/``end`` sebagai ``date``.
+
+    Dipakai untuk memvalidasi rentang sekaligus menyaring transaksi di Python
+    berdasarkan tanggal PESANAN (bukan tanggal pembayaran).
+    """
+    try:
+        start_day = date.fromisoformat(str(start)[:10])
+        end_day = date.fromisoformat(str(end)[:10])
+    except ValueError:
+        raise HTTPException(400, "Format tanggal tidak valid")
+    if start_day > end_day:
+        raise HTTPException(400, "Tanggal mulai tidak boleh melebihi tanggal akhir")
+    return start_day, end_day
+
+
+def _report_date_query(start: str, end: str) -> dict:
+    """Filter superset di DB untuk rentang tanggal kalender WITA.
+
+    Laporan ini mengagregasi jam berdasarkan WAKTU PESANAN DIBUAT
+    (``orderTime``), sedangkan kolom ``date`` menyimpan WAKTU PEMBAYARAN.
+    Keduanya bisa jatuh pada hari kalender berbeda (mis. pesanan 20:42 lalu
+    dibayar 00:20 dini hari berikutnya), sehingga filter harus mencakup baris
+    yang salah satu waktunya berada di rentang. Penyaringan presisi dilakukan
+    di Python memakai tanggal pesanan.
+    """
+    payment_range = date_range_query(start, end, field="date")
+    # ``orderTime`` boleh NULL pada data legacy; baris tersebut tetap tertangkap
+    # oleh cabang ``date`` dan pembacaan jam memakai fallback ``date``.
+    order_range = date_range_query(start, end, field="orderTime")
+    if not payment_range or not order_range:
+        return payment_range or order_range
+    return {"$or": [payment_range, order_range]}
+
+
 def _tx_item_qty(tx) -> float:
     """Total kuantitas item pada satu transaksi (ukuran keranjang)."""
     return sum(float(i.get("qty") or 0) for i in tx.get("items_json") or [])
@@ -433,9 +468,18 @@ async def customer_behavior_report(
     if not start or not end:
         raise HTTPException(400, "Parameter start_date dan end_date wajib diisi")
 
-    # Batas tanggal memakai kalender WITA -- pola sama dengan laporan lain.
-    query = date_range_query(start, end)
-    txs = await db.transactions.find(query).to_list(None)
+    # Rentang kalender WITA untuk tanggal PESANAN (acuan jam sibuk). Query DB
+    # hanya mengambil superset (lunas ATAU dipesan dalam rentang), lalu
+    # disaring presisi di bawah agar pesanan yang dibayar dini hari berikutnya
+    # tidak ikut menggeser distribusi jam ke hari yang salah.
+    start_day, end_day = _report_range_bounds(start, end)
+    query = _report_date_query(start, end)
+    raw_txs = await db.transactions.find(query).to_list(None)
+    txs = []
+    for tx in raw_txs:
+        order_day = _tx_order_datetime(tx)
+        if order_day is not None and start_day <= order_day.date() <= end_day:
+            txs.append(tx)
 
     channel_map = {}
     method_map = {}

@@ -3,6 +3,9 @@ import {
   formatHour,
   groupChannels,
   normalizeCustomerBehaviorReport,
+  witaDateStr,
+  witaDaysAgoStr,
+  witaTodayStr,
 } from "./customerBehaviorData";
 
 const PAYLOAD = {
@@ -94,5 +97,30 @@ describe("formatHour", () => {
     expect(formatHour(2)).toBe("02:00");
     expect(formatHour(11)).toBe("11:00");
     expect(formatHour(0)).toBe("00:00");
+  });
+});
+
+describe("helper tanggal WITA", () => {
+  it("memakai kalender WITA, bukan zona perangkat", () => {
+    // 2026-11-13T16:30Z = 2026-11-14 00:30 WITA -> sudah tanggal 14 di WITA.
+    expect(witaDateStr(new Date("2026-11-13T16:30:00Z"))).toBe("2026-11-14");
+    // 2026-11-13T15:30Z = 2026-11-13 23:30 WITA -> masih tanggal 13.
+    expect(witaDateStr(new Date("2026-11-13T15:30:00Z"))).toBe("2026-11-13");
+    // 2026-11-14T23:00Z = 2026-11-15 07:00 WITA.
+    expect(witaDateStr("2026-11-14T23:00:00Z")).toBe("2026-11-15");
+  });
+
+  it("mengembalikan string kosong untuk input tidak valid", () => {
+    expect(witaDateStr("bukan-tanggal")).toBe("");
+    expect(witaDateStr(null)).toBe("");
+  });
+
+  it("menghitung hari mundur pada kalender WITA", () => {
+    const base = new Date("2026-11-14T02:00:00Z"); // 10:00 WITA
+    expect(witaDaysAgoStr(6, base)).toBe("2026-11-08");
+  });
+
+  it("witaTodayStr mengembalikan format YYYY-MM-DD", () => {
+    expect(witaTodayStr()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

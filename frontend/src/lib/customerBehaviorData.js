@@ -7,6 +7,35 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+// Warkop Babba memakai kalender bisnis Asia/Makassar (WITA, UTC+8) tanpa DST.
+// Browser pengguna bisa berada di zona lain (mis. laptop admin di-set UTC),
+// sehingga "hari ini" untuk laporan ini TIDAK boleh memakai tanggal lokal
+// perangkat. Backend memfilter memakai kalender WITA, jadi frontend harus
+// mengirim tanggal yang sama agar preset "Hari Ini" tidak meleset satu hari.
+export const WITA_OFFSET_MINUTES = 8 * 60;
+
+const pad2 = (n) => String(n).padStart(2, "0");
+
+/** Tanggal kalender WITA (YYYY-MM-DD) dari sebuah instant. */
+export const witaDateStr = (value = new Date()) => {
+  if (value === null || value === undefined || value === "") return "";
+  const base = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  if (!Number.isFinite(base)) return "";
+  const wita = new Date(base + WITA_OFFSET_MINUTES * 60 * 1000);
+  return `${wita.getUTCFullYear()}-${pad2(wita.getUTCMonth() + 1)}-${pad2(wita.getUTCDate())}`;
+};
+
+/** Tanggal hari ini menurut kalender WITA (YYYY-MM-DD). */
+export const witaTodayStr = () => witaDateStr(new Date());
+
+/** Tanggal WITA ``n`` hari lalu (YYYY-MM-DD). */
+export const witaDaysAgoStr = (n, base = new Date()) => {
+  if (base === null || base === undefined || base === "") return "";
+  const baseMs = base instanceof Date ? base.getTime() : new Date(base).getTime();
+  if (!Number.isFinite(baseMs)) return "";
+  return witaDateStr(new Date(baseMs - toNumber(n) * 86400000));
+};
+
 /**
  * Normalisasi payload `/reports/customer-behavior` milik backend.
  * - Menjamin tipe angka.
