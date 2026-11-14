@@ -84,28 +84,30 @@ const CartLine = ({ item, price, locked, onQty, onNotes, onRemove, currentWaiter
     <div data-testid={`cart-item-${item.key}`} className="rounded-lg border border-border px-2.5 py-1.5">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1 truncate text-[13px] font-semibold leading-tight">
+          <p className="flex min-w-0 items-center gap-1 text-[13px] font-semibold leading-tight">
             {locked && <Lock data-testid={`cart-locked-${item.key}`} className="h-3 w-3 shrink-0 text-amber-600" />}
-            <span data-testid={`cart-item-name-${item.key}`} className="truncate">{item.variantName || item.name}</span>
+            <span data-testid={`cart-item-name-${item.key}`} className="min-w-0 flex-1 truncate">{item.variantName || item.name}</span>
+          </p>
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+            <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{rp(price)}{item.notes && !editNote ? ` · ${item.notes}` : ""}</p>
             {ownerBadge && (
-              <span data-testid={`cart-item-waiter-${item.key}`} className="shrink-0 rounded bg-secondary px-1 text-[10px] font-medium text-muted-foreground">
+              <span data-testid={`cart-item-waiter-${item.key}`} title={`Pelayan: ${ownerBadge}`} className="max-w-[7.5rem] shrink-0 truncate rounded bg-secondary px-1 text-[10px] font-medium leading-4 text-muted-foreground">
                 {ownerBadge}
               </span>
             )}
-          </p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">{rp(price)}{item.notes && !editNote ? ` · ${item.notes}` : ""}</p>
+          </div>
         </div>
         <button data-testid={`cart-note-toggle-${item.key}`} onClick={() => setEditNote((v) => !v)} title="Catatan"
           className={`grid h-7 w-7 place-items-center rounded-md ${item.notes ? "text-primary" : "text-muted-foreground"} hover:bg-secondary`}>
           <StickyNote className="h-3.5 w-3.5" />
         </button>
-        <div className="flex items-center rounded-md border border-border">
+        <div className="flex shrink-0 items-center rounded-md border border-border">
           <button data-testid={`cart-dec-${item.key}`} onClick={() => onQty(-1)} className="grid h-7 w-7 place-items-center"><Minus className="h-3 w-3" /></button>
-          <span data-testid={`cart-qty-${item.key}`} className="w-6 text-center font-mono text-xs font-semibold">{item.qty}</span>
+          <span data-testid={`cart-qty-${item.key}`} className="min-w-6 px-0.5 text-center font-mono text-xs font-semibold">{item.qty}</span>
           <button data-testid={`cart-inc-${item.key}`} onClick={() => onQty(1)} className="grid h-7 w-7 place-items-center"><Plus className="h-3 w-3" /></button>
         </div>
-        <span className="w-[72px] text-right font-mono text-xs font-semibold">{rp(price * item.qty)}</span>
-        <button data-testid={`cart-remove-${item.key}`} onClick={onRemove} className="text-muted-foreground hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
+        <span className="min-w-[72px] shrink-0 whitespace-nowrap text-right font-mono text-xs font-semibold">{rp(price * item.qty)}</span>
+        <button data-testid={`cart-remove-${item.key}`} onClick={onRemove} className="shrink-0 text-muted-foreground hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
       </div>
       {editNote && (
         <input data-testid={`cart-notes-${item.key}`} autoFocus value={item.notes} onChange={(e) => onNotes(e.target.value)}
