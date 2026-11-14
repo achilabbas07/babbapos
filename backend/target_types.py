@@ -165,6 +165,24 @@ def needs_revenue(target: dict) -> bool:
     return False
 
 
+def is_collective(target: dict) -> bool:
+        """Apakah pencapaian target dihitung **kolektif seluruh tim**?
+
+        Aturan baru (Target Global Tim):
+
+        - Target **omzet (Rupiah)** — ``revenue_amount`` — dihitung dari total
+            akumulasi transaksi seluruh tim, bukan per pelayan.
+        - Target **berbasis waktu/periode** — ``time_bounded`` — juga kolektif,
+            baik metriknya omzet maupun kuantitas item, karena sifatnya mengukur
+            capaian periode (harian/mingguan/bulanan), bukan kontribusi pribadi.
+
+        Target **kuantitas item per shift** — ``item_quantity`` — tetap
+        atributif per pelayan (perilaku lama, dipertahankan) sehingga perbaikan
+        atribusi lintas shift tidak berubah.
+        """
+        return target_type_of(target) in (REVENUE_AMOUNT, TIME_BOUNDED)
+
+
 def _pct(achieved: float, target_value: float) -> float:
     if not target_value or target_value <= 0:
         return 0.0

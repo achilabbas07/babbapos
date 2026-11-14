@@ -1,11 +1,13 @@
 import {
   formatProgressValue,
   isAchieved,
+  isCollectiveTarget,
   needsAmount,
   needsProducts,
   periodLabel,
   periodOf,
   progressCaption,
+  isTeamScoped,
   targetBadgeText,
   targetRuleSummary,
   targetTypeLabel,
@@ -199,5 +201,33 @@ describe("targetBadgeText", () => {
 
   it("falls back to a generic name", () => {
     expect(targetBadgeText(undefined).name).toBe("Target");
+  });
+});
+
+describe("isCollectiveTarget", () => {
+  it("treats item quantity targets as per-waiter", () => {
+    expect(isCollectiveTarget({ targetType: TARGET_TYPE_ITEM })).toBe(false);
+    expect(isCollectiveTarget({})).toBe(false);
+  });
+
+  it("treats revenue targets as team-global", () => {
+    expect(isCollectiveTarget({ targetType: TARGET_TYPE_REVENUE })).toBe(true);
+  });
+
+  it("treats time/period based targets as team-global", () => {
+    expect(isCollectiveTarget({ targetType: TARGET_TYPE_TIME, metric: METRIC_ITEM })).toBe(true);
+    expect(isCollectiveTarget({ targetType: TARGET_TYPE_TIME, metric: METRIC_REVENUE })).toBe(true);
+  });
+});
+
+describe("isTeamScoped", () => {
+  it("flags items the backend marked as team scope", () => {
+    expect(isTeamScoped({ scope: "team" })).toBe(true);
+  });
+
+  it("leaves per-waiter and legacy items unflagged", () => {
+    expect(isTeamScoped({ scope: "waiter" })).toBe(false);
+    expect(isTeamScoped({})).toBe(false);
+    expect(isTeamScoped(undefined)).toBe(false);
   });
 });

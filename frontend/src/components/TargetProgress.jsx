@@ -2,6 +2,7 @@ import { Target } from "lucide-react";
 import {
   formatProgressValue,
   isAchieved,
+  isTeamScoped,
   progressCaption,
   targetTypeOf,
   targetValueOf,
@@ -19,12 +20,13 @@ const typeChip = (item) => {
 };
 
 export const TargetBar = ({ item, testid }) => (
-  <div data-testid={testid}>
+  <div data-testid={testid} className="min-w-0 rounded-xl border border-border/60 bg-background/40 p-3">
     <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
       <span className="flex min-w-0 items-center gap-1.5 font-medium">
         <Target className="h-3.5 w-3.5 shrink-0 text-primary" />
         <span className="truncate">{item.name}</span>
         {typeChip(item) && <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{typeChip(item)}</span>}
+        {isTeamScoped(item) && <span data-testid={`team-badge-${item.targetId}`} className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Tim</span>}
       </span>
       <span className="shrink-0 whitespace-nowrap font-mono text-xs">
         <span className="text-base font-bold text-foreground">{formatProgressValue(item, item.achieved)}</span>
@@ -35,6 +37,7 @@ export const TargetBar = ({ item, testid }) => (
     <div className="h-2.5 overflow-hidden rounded-full bg-secondary">
       <div className={`h-full rounded-full transition-[width] duration-500 ${tone(item.pct)}`} style={{ width: `${item.pct}%` }} />
     </div>
+    {isTeamScoped(item) && <p className="mt-1 text-[11px] font-medium text-primary/80">Progres total tim</p>}
     {progressCaption(item) && <p className="mt-1 text-[11px] text-muted-foreground">{progressCaption(item)}</p>}
     {item.breakdown?.length > 1 && (
       <p className="mt-1 text-[11px] text-muted-foreground">{item.breakdown.map((b) => `${b.productName} ${b.qty}`).join(" · ")}</p>
@@ -52,7 +55,7 @@ export const ProgressCard = ({ p, children }) => (
       {children}
     </div>
     {p.items.length === 0 ? <p className="text-sm text-muted-foreground">Belum ada target yang berlaku.</p> : (
-      <div className="space-y-4">{p.items.map((i) => <TargetBar key={i.targetId} item={i} testid={`target-bar-${p.waiterId}-${i.targetId}`} />)}</div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">{p.items.map((i) => <TargetBar key={i.targetId} item={i} testid={`target-bar-${p.waiterId}-${i.targetId}`} />)}</div>
     )}
   </div>
 );

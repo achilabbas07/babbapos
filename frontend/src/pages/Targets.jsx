@@ -8,7 +8,7 @@ import { PageHeader, Empty } from "@/components/PageHeader";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { TargetDialog } from "@/components/TargetDialog";
 import { ProgressCard, TargetBar } from "@/components/TargetProgress";
-import { periodLabel, targetRuleSummary, targetTypeLabel } from "@/lib/targetTypes";
+import { isCollectiveTarget, periodLabel, targetRuleSummary, targetTypeLabel } from "@/lib/targetTypes";
 import { useWaiterShiftReport } from "@/hooks/useWaiterShiftReport";
 import { connectBluetoothPrinter } from "@/lib/bluetoothThermalPrinter";
 import { Button } from "@/components/ui/button";
@@ -71,7 +71,7 @@ const WaiterView = () => {
 
   return (
     <div>
-      <PageHeader title="Target Sales Saya" subtitle="Target kuantitas item dihitung saat order, target omzet dihitung saat transaksi. Reset setiap shift baru.">
+      <PageHeader title="Target Sales Saya" subtitle="Target kuantitas item dihitung per pelayan saat order. Target omzet (Rupiah) dan target berbasis waktu/periode dihitung dari total tim, jadi kartu ini menampilkan progres global tim secara real-time.">
         <Button data-testid="close-waiter-shift-button" onClick={() => setConfirm(true)}><Lock className="mr-1 h-4 w-4" />Tutup Shift</Button>
       </PageHeader>
       {progress === null ? <p className="py-10 text-center text-sm text-muted-foreground">Memuat target...</p> : progress.length === 0 ? <Empty testid="target-empty" text="Belum ada shift aktif." /> : (
@@ -134,7 +134,7 @@ const AdminView = () => {
   return (
     <div className="space-y-10">
       <div>
-        <PageHeader title="Target Sales Pelayan" subtitle="Target kuantitas item, omzet, atau berbasis periode/jam. Target item dihitung saat order (bukan saat bayar), reset setiap shift baru.">
+        <PageHeader title="Target Sales Pelayan" subtitle="Target kuantitas item dihitung per pelayan saat order. Target omzet (Rupiah) dan target berbasis waktu/periode dihitung kolektif dari total akumulasi seluruh tim dan tampil di setiap shift aktif.">
           <Button data-testid="add-target-button" onClick={() => setDialog({})}><Plus className="mr-1 h-4 w-4" />Tambah Target</Button>
         </PageHeader>
         {targets.length === 0 ? <Empty testid="targets-empty" text="Belum ada target." /> : (
@@ -154,7 +154,9 @@ const AdminView = () => {
                     </TableCell>
                     <TableCell data-testid={`target-value-${t.id}`} className="text-right font-mono">{targetRuleSummary(t)}</TableCell>
                     <TableCell className="text-muted-foreground">{periodLabel(t)}</TableCell>
-                    <TableCell className="text-muted-foreground">{t.waiterName || "Semua pelayan"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {isCollectiveTarget(t) ? <span data-testid={`target-scope-${t.id}`} className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Tim (kolektif)</span> : (t.waiterName || "Semua pelayan")}
+                    </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
                         <button data-testid={`target-edit-${t.id}`} onClick={() => setDialog(t)} className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground hover:text-foreground"><Pencil className="h-4 w-4" /></button>

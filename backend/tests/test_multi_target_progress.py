@@ -158,6 +158,8 @@ def test_revenue_target_reads_transactions_of_the_shift(patch_db):
     assert item["targetValue"] == pytest.approx(1000000)
     assert item["unit"] == tt.UNIT_CURRENCY
     assert item["pct"] == pytest.approx(40.0)
+    # Omzet bersifat kolektif tim (semua transaksi shift), bukan per pelayan.
+    assert item["scope"] == "team"
 
 
 def test_revenue_and_item_targets_coexist(patch_db):
@@ -199,6 +201,8 @@ def test_time_bounded_uses_period_window(monkeypatch, patch_db):
         {"total": 100000, "waiterId": "USR-W1", "date": "2026-01-02T01:00:00+08:00"},
         # 2026-01-02 23:00 WITA → masuk
         {"total": 150000, "waiterId": "USR-W1", "date": "2026-01-02T23:00:00+08:00"},
+        # pelayan lain, masih di dalam jendela → ikut terhitung (target global tim)
+        {"total": 50000, "waiterId": "USR-W2", "date": "2026-01-02T23:30:00+08:00"},
         # 2026-01-02 12:00 WITA → di luar jam operasional
         {"total": 900000, "waiterId": "USR-W1", "date": "2026-01-02T12:00:00+08:00"},
         # hari lain → di luar periode harian
@@ -208,9 +212,11 @@ def test_time_bounded_uses_period_window(monkeypatch, patch_db):
 
     item = asyncio.run(targets.progress_for(SHIFT))["items"][0]
 
-    assert item["achieved"] == pytest.approx(250000)
-    assert item["pct"] == pytest.approx(50.0)
+    # 100000 + 150000 + 50000 = 300000 (semua pelayan, bukan per waiterId).
+    assert item["achieved"] == pytest.approx(300000)
+    assert item["pct"] == pytest.approx(60.0)
     assert item["periodType"] == tt.PERIOD_DAILY
+    assert item["scope"] == "team"
 
 
 def test_time_bounded_item_metric_reads_logs_not_transactions(monkeypatch, patch_db):

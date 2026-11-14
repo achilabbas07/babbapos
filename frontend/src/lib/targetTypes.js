@@ -63,6 +63,17 @@ export const isItemTarget = (target) => targetTypeOf(target) === TARGET_TYPE_ITE
 export const isRevenueTarget = (target) => targetTypeOf(target) === TARGET_TYPE_REVENUE;
 export const isTimeTarget = (target) => targetTypeOf(target) === TARGET_TYPE_TIME;
 
+// Target yang pencapaiannya dihitung KOLEKTIF seluruh tim (bukan per pelayan):
+// omzet (Rupiah) dan target berbasis waktu/periode. Harus sejalan dengan
+// `target_types.is_collective` di backend.
+export const isCollectiveTarget = (target) =>
+  isRevenueTarget(target) || isTimeTarget(target);
+
+// Apakah satu item hasil progres berasal dari target kolektif tim?
+// Backend menandai item dengan `scope`; data lama tanpa `scope` dianggap
+// atributif per pelayan.
+export const isTeamScoped = (item) => item?.scope === "team";
+
 // Tipe target butuh daftar produk?
 export const needsProducts = (target) =>
   isItemTarget(target) || (isTimeTarget(target) && (target?.metric ?? METRIC_REVENUE) === METRIC_ITEM);

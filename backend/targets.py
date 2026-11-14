@@ -19,6 +19,7 @@ from target_types import (
     TargetData,
     evaluate_target,
     is_achieved,
+    is_collective,
     needs_logs,
     needs_revenue,
     period_bounds,
@@ -233,10 +234,21 @@ async def log_order_diff(
 
 
 async def _target_data(target: dict, shift: dict) -> TargetData:
-    """Muat data pencapaian satu target sesuai tipe & periodenya.
+    """Muat data pencapaian satu target sesuai tipe, periode, dan cakupannya.
 
-    - ``periodType == "shift"``  → memakai ``shiftId`` (perilaku lama, tidak berubah).
+    - ``periodType == "shift"``  → memakai ``shiftId`` shift yang dibuka
+      (perilaku lama, tidak berubah: semua pelayan pada jam yang sama berbagi
+      ``shiftId`` tersebut).
     - periode harian/mingguan/bulanan → memakai rentang waktu kalender WITA.
+
+    Cakupan data:
+
+    - Target **kolektif tim** (:func:`target_types.is_collective` — omzet
+      Rupiah dan berbasis waktu/periode) diambil dari **seluruh** transaksi/order
+      tim tanpa filter ``waiterId``. Setiap shift pelayan yang aktif memakai
+      kueri yang sama sehingga memantau progres total tim secara real-time.
+    - Target **kuantitas item per shift** tetap difilter per pelayan agar
+      perbaikan atribusi lintas shift tidak berubah.
 
     ``order_logs`` dipakai untuk metrik kuantitas item, ``transactions`` untuk
     metrik omzet.
@@ -246,35 +258,50 @@ async def _target_data(target: dict, shift: dict) -> TargetData:
     if not pids and not wants_revenue:
         return TargetData()
 
+    scope = {} if is_collective(target) else {"waiterId": shift["userId"]}
+    logs: List[dict] = []
+    transactions: List[dict] = []
+
     if period_of(target) == PERIOD_SHIFT:
-        log_filter = {"shiftId": shift["_id"]}
-        trx_filter = {"shiftId": shift["_id"]}
-        logs: List[dict] = []
-        transactions: List[dict] = []
+        # Satu shift = satu ``shiftId``, jadi kueri ini sudah mencakup seluruh
+        # transaksi tim pada jam tersebut (tidak perlu filter ``waiterId``).
+        shift_filter = {"shiftId": shift["_id"]}
         if pids:
-            logs = await db.order_logs.find({**log_filter, "productId": {"$in": pids}}).to_list(None)
+            logs = await db.order_logs.find({**shift_filter, "productId": {"$in": pids}}).to_list(None)
         if wants_revenue:
-            transactions = await db.transactions.find(trx_filter).to_list(None)
+            transactions = await db.transactions.find(shift_filter).to_list(None)
         return TargetData(logs=logs, transactions=transactions)
 
     start, end = period_bounds(period_of(target), now_local())
     window = {"$gte": start.isoformat(), "$lt": end.isoformat()}
-    logs = []
-    transactions = []
     if pids:
         logs = await db.order_logs.find({
-            "waiterId": shift["userId"], "timestamp": window, "productId": {"$in": pids},
+            **scope, "timestamp": window, "productId": {"$in": pids},
         }).to_list(None)
     if wants_revenue:
         transactions = await db.transactions.find({
-            "waiterId": shift["userId"], "date": window,
+            **scope, "date": window,
         }).to_list(None)
     return TargetData(logs=logs, transactions=transactions)
 
 
 async def progress_for(shift: dict) -> dict:
-    targets = await db.sales_targets.find({"$or": [{"waiterId": None}, {"waiterId": shift["userId"]}]}).to_list(None)
-    items = [evaluate_target(t, await _target_data(t, shift)) for t in targets]
+    """Progres target untuk satu shift pelayan yang sedang aktif.
+
+    Target kolektif tim dikirim ke **setiap** shift agar semua pelayan dapat
+    memantau total tim. Setiap item diberi ``scope`` (``team``/``waiter``)
+    supaya UI dapat menandai mana yang bersifat global.
+    """
+    all_targets = await db.sales_targets.find().to_list(None)
+    targets = [
+        t for t in all_targets
+        if is_collective(t) or t.get("waiterId") in (None, shift["userId"])
+    ]
+    items = []
+    for t in targets:
+        item = evaluate_target(t, await _target_data(t, shift))
+        item["scope"] = "team" if is_collective(t) else "waiter"
+        items.append(item)
     return {"shiftId": shift["_id"], "waiterId": shift["userId"], "waiterName": shift["userName"],
             "openedAt": shift["openedAt"], "items": items}
 
