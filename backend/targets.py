@@ -107,15 +107,54 @@ async def resolve_waiter(waiter_id: Optional[str], fallback_name: str, user: Use
 def _qty_map(items: List[dict]) -> dict:
     m = defaultdict(lambda: [0, "", "", None])
     for i in items:
-        variant_id = i.get("variantId")
         variant_name = i.get("variantName") or ""
-        variant_key = ("id", str(variant_id)) if variant_id is not None else ("name", variant_name)
-        key = (i["productId"], variant_key)
+        key = (i["productId"], _variant_key(i))
         if key not in m:
-            m[key] = [0, i["productName"], variant_name, variant_id]
+            m[key] = [0, i["productName"], variant_name, i.get("variantId")]
         m[key][0] += i["qty"]
         m[key][1] = i["productName"]
         m[key][2] = variant_name
+    return m
+
+
+def _variant_key(row: dict) -> tuple:
+    """Kunci varian yang konsisten: pakai ``variantId`` bila ada, jika tidak nama."""
+    variant_id = row.get("variantId")
+    if variant_id is not None:
+        return ("id", str(variant_id))
+    return ("name", row.get("variantName") or "")
+
+
+def _log_owner(item: dict, fallback: Tuple[Optional[str], str]) -> Tuple[Optional[str], str]:
+    """Pelayan pemilik satu baris item (bukan pelayan level bill).
+
+    Baris yang sudah menyimpan pelayan sendiri memakai data itu; baris legacy
+    tanpa data pelayan mewarisi pelayan bill saat ini (identik dengan
+    ``server._item_owner``).
+    """
+    wid = item.get("waiterId", fallback[0])
+    return wid, (item.get("waiterName") or fallback[1] or "")
+
+
+def _owner_qty_map(items: List[dict], fallback: Tuple[Optional[str], str]) -> dict:
+    """Akumulasi kuantitas per pelayan pemilik baris + produk + varian.
+
+    Berbeda dari :func:`_qty_map` (level bill), peta ini menjaga riwayat
+    kontribusi tiap pelayan agar tidak berpindah tangan hanya karena pelayan
+    bill diganti di tengah umur pesanan.
+    """
+    m = defaultdict(lambda: [0, "", "", None, ""])
+    for i in items or []:
+        wid, wname = _log_owner(i, fallback)
+        variant_name = i.get("variantName") or ""
+        key = (wid, i["productId"], _variant_key(i))
+        if key not in m:
+            m[key] = [0, i["productName"], variant_name, i.get("variantId"), wname]
+        row = m[key]
+        row[0] += i["qty"]
+        row[1] = i["productName"]
+        row[2] = variant_name
+        row[4] = wname or row[4]
     return m
 
 
@@ -156,22 +195,41 @@ async def log_order_diff(
     connection=None,
     actor_waiter: Optional[Tuple[Optional[str], str]] = None,
 ):
-    old, new = _qty_map(old_items), _qty_map(new_items)
-    log_waiter = actor_waiter or new_waiter
-    if old_waiter[0] == new_waiter[0]:
-        deltas = {
-            key: [
-                new[key][0] - old[key][0],
-                new[key][1] or old[key][1],
-                new[key][2] or old[key][2],
-                new[key][3] if new[key][3] is not None else old[key][3],
-            ]
-            for key in set(old) | set(new)
-        }
-        await _write_logs(log_waiter, deltas, source, ref, connection=connection)
-    else:
-        await _write_logs(old_waiter, {key: [-row[0], row[1], row[2], row[3]] for key, row in old.items()}, source, ref, connection=connection)
-        await _write_logs(log_waiter, dict(new), source, ref, connection=connection)
+    """Catat selisih pesanan ke ``order_logs`` dengan atribusi per pemilik item.
+
+    Prinsip (mengunci bug lintas shift):
+    - Kuantitas yang **sudah tercatat** tetap milik pelayan pemilik barisnya.
+      Mengganti pelayan bill atau menambah order di shift berikutnya tidak
+      memindahkan riwayat tersebut.
+    - Hanya **pertambahan** kuantitas yang dikreditkan (ke pelayan yang
+      mencatat, ``actor_waiter``, atau pelayan bill).
+    - **Pengurangan** selalu didebit dari pelayan pemilik baris aslinya.
+    """
+    old_fallback = old_waiter or (None, "")
+    new_fallback = new_waiter or (None, "")
+    credit_waiter = actor_waiter or new_fallback
+    old_owned = _owner_qty_map(old_items, old_fallback)
+    new_owned = _owner_qty_map(new_items, new_fallback)
+
+    # waiter -> {(productId, variant_key): [qty, productName, variantName, variantId]}
+    buckets: dict = {}
+    for key in set(old_owned) | set(new_owned):
+        wid, product_id, variant_key = key
+        old_row = old_owned.get(key)
+        new_row = new_owned.get(key)
+        row = new_row or old_row
+        delta = (new_row[0] if new_row else 0) - (old_row[0] if old_row else 0)
+        if not delta:
+            continue
+        # Pertambahan dikreditkan ke pencatat (atau pelayan bill); pengurangan
+        # selalu didebit dari pelayan pemilik baris aslinya.
+        waiter = (credit_waiter if credit_waiter[0] else (wid, row[4])) if delta > 0 else (wid, row[4])
+        bucket = buckets.setdefault(waiter, {})
+        cell = bucket.setdefault((product_id, variant_key), [0, row[1], row[2], row[3]])
+        cell[0] += delta
+
+    for waiter, deltas in buckets.items():
+        await _write_logs(waiter, deltas, source, ref, connection=connection)
 
 
 async def _target_data(target: dict, shift: dict) -> TargetData:
