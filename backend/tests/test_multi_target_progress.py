@@ -2,7 +2,7 @@
 
 Mengunci tiga hal:
 1. Target lama (tanpa ``targetType``) menghasilkan bentuk data yang sama persis.
-2. Target omzet membaca ``transactions`` shift, bukan ``order_logs``.
+2. Target omzet membaca ``transactions`` (total tim), bukan ``order_logs``.
 3. Target berbasis waktu membaca rentang periode + jam operasional.
 """
 
@@ -139,7 +139,10 @@ def test_progress_without_targets_returns_empty_items(patch_db):
 # --------------------------------------------------------------------------
 
 
-def test_revenue_target_reads_transactions_of_the_shift(patch_db):
+def test_revenue_target_reads_transactions_of_the_whole_team(monkeypatch, patch_db):
+    # ``transactions.shiftId`` menunjuk shift kasir, jadi progres omzet periode
+    # shift diambil dari seluruh transaksi tim pada hari kalender WITA ini.
+    monkeypatch.setattr(targets, "now_local", lambda: tt._as_local("2026-01-01T12:00:00+08:00"))
     sales_targets = [{
         "_id": "TGT-REV", "name": "Omzet Shift", "productIds": [], "productNames": [],
         "targetQty": None, "targetType": tt.REVENUE_AMOUNT, "targetAmount": 1000000,
@@ -148,9 +151,9 @@ def test_revenue_target_reads_transactions_of_the_shift(patch_db):
     transactions = [
         {"total": 250000, "shiftId": "WSHIFT-1", "date": "2026-01-01T10:00:00+08:00"},
         {"total": 150000, "shiftId": "WSHIFT-1", "date": "2026-01-01T11:00:00+08:00"},
-        {"total": 999999, "shiftId": "WSHIFT-2", "date": "2026-01-01T12:00:00+08:00"},
+        {"total": 999999, "shiftId": "WSHIFT-2", "date": "2026-01-02T12:00:00+08:00"},
     ]
-    patch_db(fake_db([], transactions, sales_targets))
+    db = patch_db(fake_db([], transactions, sales_targets))
 
     item = asyncio.run(targets.progress_for(SHIFT))["items"][0]
 
@@ -158,12 +161,15 @@ def test_revenue_target_reads_transactions_of_the_shift(patch_db):
     assert item["targetValue"] == pytest.approx(1000000)
     assert item["unit"] == tt.UNIT_CURRENCY
     assert item["pct"] == pytest.approx(40.0)
-    # Omzet bersifat kolektif tim (semua transaksi shift), bukan per pelayan.
+    # Omzet bersifat kolektif tim, bukan per pelayan.
     assert item["scope"] == "team"
+    flt = db.transactions.filters[0]
+    assert "waiterId" not in flt and "shiftId" not in flt
 
 
-def test_revenue_and_item_targets_coexist(patch_db):
+def test_revenue_and_item_targets_coexist(monkeypatch, patch_db):
     """Kedua tipe berdampingan tanpa saling mengganggu."""
+    monkeypatch.setattr(targets, "now_local", lambda: tt._as_local("2026-01-01T12:00:00+08:00"))
     sales_targets = [
         {"_id": "TGT-ITEM", "name": "Kopi", "productIds": ["PRD-1"], "productNames": ["Kopi"],
          "targetQty": 10, "targetType": tt.ITEM_QUANTITY},

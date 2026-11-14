@@ -11,6 +11,7 @@ from target_types import (
     ITEM_QUANTITY,
     METRIC_ITEM,
     METRICS,
+    PERIOD_DAILY,
     PERIOD_SHIFT,
     PERIODS,
     REVENUE_AMOUNT,
@@ -237,8 +238,11 @@ async def _target_data(target: dict, shift: dict) -> TargetData:
     """Muat data pencapaian satu target sesuai tipe, periode, dan cakupannya.
 
     - ``periodType == "shift"``  → memakai ``shiftId`` shift yang dibuka
-      (perilaku lama, tidak berubah: semua pelayan pada jam yang sama berbagi
-      ``shiftId`` tersebut).
+    untuk metrik kuantitas item (perilaku lama, tidak berubah: semua pelayan
+    pada jam yang sama berbagi ``shiftId`` tersebut). Untuk metrik omzet,
+    ``transactions.shiftId`` menunjuk shift **kasir** sehingga tidak dapat
+    dipakai; dipakai seluruh transaksi tim pada tanggal kalender WITA hari
+    ini.
     - periode harian/mingguan/bulanan → memakai rentang waktu kalender WITA.
 
     Cakupan data:
@@ -263,13 +267,23 @@ async def _target_data(target: dict, shift: dict) -> TargetData:
     transactions: List[dict] = []
 
     if period_of(target) == PERIOD_SHIFT:
-        # Satu shift = satu ``shiftId``, jadi kueri ini sudah mencakup seluruh
-        # transaksi tim pada jam tersebut (tidak perlu filter ``waiterId``).
-        shift_filter = {"shiftId": shift["_id"]}
+        # ``order_logs.shiftId`` menunjuk shift **pelayan**, jadi satu shift =
+        # satu ``shiftId`` dan kueri ini sudah mencakup seluruh order tim pada
+        # shift tersebut (tanpa filter ``waiterId``).
         if pids:
-            logs = await db.order_logs.find({**shift_filter, "productId": {"$in": pids}}).to_list(None)
+            logs = await db.order_logs.find(
+                {"shiftId": shift["_id"], "productId": {"$in": pids}},
+            ).to_list(None)
         if wants_revenue:
-            transactions = await db.transactions.find(shift_filter).to_list(None)
+            # ``transactions.shiftId`` menunjuk shift **kasir** (FK ke
+            # ``shifts``), bukan shift pelayan, sehingga filter ``shiftId``
+            # tidak akan pernah cocok di sini (progres omzet selalu 0). Karena
+            # target omzet dihitung kolektif, dipakai seluruh transaksi tim
+            # pada tanggal kalender WITA hari ini.
+            start, end = period_bounds(PERIOD_DAILY, now_local())
+            transactions = await db.transactions.find(
+                {"date": {"$gte": start.isoformat(), "$lt": end.isoformat()}},
+            ).to_list(None)
         return TargetData(logs=logs, transactions=transactions)
 
     start, end = period_bounds(period_of(target), now_local())

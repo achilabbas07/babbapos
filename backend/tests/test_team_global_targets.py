@@ -231,6 +231,37 @@ def test_collective_progress_is_visible_in_every_active_shift(monkeypatch, patch
     assert items_a[0]["achieved"] == items_b[0]["achieved"] == pytest.approx(400000)
 
 
+def test_shift_period_revenue_does_not_filter_by_waiter_shift_id(monkeypatch, patch_db):
+    """Periode ``shift`` tidak boleh memakai ``shiftId`` untuk transaksi.
+
+    ``transactions.shiftId`` menunjuk shift **kasir** (FK ke ``shifts``),
+    sedangkan ``progress_for`` menerima shift **pelayan** (``WSHIFT-*``), jadi
+    filter tersebut tidak akan pernah cocok. Omzet periode shift dihitung dari
+    seluruh transaksi tim pada tanggal kalender WITA hari ini.
+    """
+    freeze_now(monkeypatch)
+    db = patch_db(fake_db(
+        transactions=[
+            {"total": 120000, "shiftId": "SHIFT-20260102-001", "waiterId": WAITER_A[0],
+             "date": "2026-01-02T09:00:00+08:00"},
+            {"total": 80000, "shiftId": "SHIFT-20260102-001", "waiterId": WAITER_B[0],
+             "date": "2026-01-02T11:00:00+08:00"},
+            {"total": 999999, "shiftId": "SHIFT-20260102-001", "waiterId": WAITER_A[0],
+             "date": "2026-01-03T09:00:00+08:00"},  # hari berikutnya, harus diabaikan
+        ],
+        sales_targets=[revenue_target(period=tt.PERIOD_SHIFT)],
+    ))
+
+    items = asyncio.run(targets.progress_for(shift("WSHIFT-1", WAITER_A)))["items"]
+
+    assert items[0]["achieved"] == pytest.approx(200000)
+    assert items[0]["scope"] == "team"
+    flt = db.transactions.filters[0]
+    assert "shiftId" not in flt
+    assert "waiterId" not in flt
+    assert "date" in flt
+
+
 # --------------------------------------------------------------------------
 # 4. Zero-regression: target kuantitas item tetap per pelayan
 # --------------------------------------------------------------------------
