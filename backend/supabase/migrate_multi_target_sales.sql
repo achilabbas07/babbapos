@@ -26,17 +26,27 @@ ALTER TABLE public.sales_targets
   ALTER COLUMN "targetQty" DROP NOT NULL;
 
 -- Pertahankan targetQty > 0 hanya bila diisi.
+--
+-- Nama constraint CHECK yang dibuat inline di schema.sql di-generate oleh
+-- PostgreSQL menjadi huruf kecil (sales_targets_targetqty_check) dan identifier
+-- tanpa tanda kutip juga di-fold ke huruf kecil. Karena itu constraint lama
+-- dicari berdasarkan definisinya, bukan berdasarkan nama.
 DO $constraint$
+DECLARE
+  existing record;
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'sales_targets_targetQty_check'
-      AND conrelid = 'public.sales_targets'::regclass
-  ) THEN
-    ALTER TABLE public.sales_targets DROP CONSTRAINT sales_targets_targetQty_check;
-  END IF;
+  FOR existing IN
+    SELECT con.conname
+    FROM pg_constraint con
+    WHERE con.conrelid = 'public.sales_targets'::regclass
+      AND con.contype = 'c'
+      AND pg_get_constraintdef(con.oid) ILIKE '%"targetQty"%'
+  LOOP
+    EXECUTE format('ALTER TABLE public.sales_targets DROP CONSTRAINT %I', existing.conname);
+  END LOOP;
+
   ALTER TABLE public.sales_targets
-    ADD CONSTRAINT sales_targets_targetQty_check
+    ADD CONSTRAINT sales_targets_targetqty_check
     CHECK ("targetQty" IS NULL OR "targetQty" > 0);
 END;
 $constraint$;
