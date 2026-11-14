@@ -74,7 +74,9 @@ const WaiterView = () => {
       <PageHeader title="Target Sales Saya" subtitle="Target kuantitas item dihitung saat order, target omzet dihitung saat transaksi. Reset setiap shift baru.">
         <Button data-testid="close-waiter-shift-button" onClick={() => setConfirm(true)}><Lock className="mr-1 h-4 w-4" />Tutup Shift</Button>
       </PageHeader>
-      {progress === null ? <p className="py-10 text-center text-sm text-muted-foreground">Memuat target...</p> : progress.length === 0 ? <Empty testid="target-empty" text="Belum ada shift aktif." /> : <div className="max-w-2xl">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>}
+      {progress === null ? <p className="py-10 text-center text-sm text-muted-foreground">Memuat target...</p> : progress.length === 0 ? <Empty testid="target-empty" text="Belum ada shift aktif." /> : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>
+      )}
       <Dialog open={confirm} onOpenChange={setConfirm}>
         <DialogContent data-testid="close-waiter-shift-dialog" className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Tutup shift sekarang?</DialogTitle></DialogHeader>
