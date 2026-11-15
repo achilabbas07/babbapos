@@ -117,7 +117,7 @@ const NavBadge = ({ count, prefix }) => {
       data-testid={`${prefix}-open-bills-badge`}
       title={`${label} open bill aktif`}
       aria-label={`${label} open bill aktif`}
-      className="pointer-events-none ml-auto inline-flex items-center justify-center rounded-full bg-purple-600 px-2 py-0.5 text-xs font-semibold leading-none text-white md:absolute md:right-1 md:top-1 md:ml-0 md:px-1 md:py-0 md:text-[9px] 2xl:static 2xl:ml-auto 2xl:px-2 2xl:py-0.5 2xl:text-xs"
+      className="pointer-events-none ml-auto inline-flex items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-semibold leading-none text-white md:absolute md:right-1 md:top-1 md:ml-0 md:px-1 md:py-0 md:text-[9px] 2xl:static 2xl:ml-auto 2xl:px-2 2xl:py-0.5 2xl:text-xs"
     >
       {label}
     </span>
