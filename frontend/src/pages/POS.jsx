@@ -14,6 +14,7 @@ import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThe
 import { buildKitchenPrintData, unprintedKitchenItems } from "@/lib/kitchenTicket";
 import { roleRequiresWaiter, waiterValidationMessage } from "@/lib/orderValidation";
 import { ojolVariantPrice, resolveOjolMarkupPercent } from "@/lib/ojolPricing";
+import { notifyOpenBillsChanged } from "@/lib/openBillCount";
 
 const emptyOrder = (user) => ({
   billId: null, queueNumber: null, type: "Dine In", tableId: "none", customerId: "none", customerName: "", waiterName: user.role === "waiter" ? user.name : "", waiterId: user.role === "waiter" ? user.id : null,
@@ -226,6 +227,7 @@ export default function POS() {
     const { data } = order.billId ? await api.put(`/open-bills/${order.billId}`, body) : await api.post("/open-bills", body);
     toast.success(`Open bill ${data.id} tersimpan`);
     await autoPrintKitchenTicket(data, { tableName: tables.find((table) => table.id === data.tableId)?.name });
+    notifyOpenBillsChanged();
     reset();
     loadRefs();
   });
@@ -247,6 +249,7 @@ export default function POS() {
     if (!order.billId) {
       await autoPrintKitchenTicket(data, { tableName: tables.find((table) => table.id === data.tableId)?.name || data.tableName });
     }
+    notifyOpenBillsChanged();
     reset();
     loadRefs();
   });

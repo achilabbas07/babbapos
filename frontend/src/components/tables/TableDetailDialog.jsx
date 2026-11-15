@@ -12,6 +12,7 @@ import { PickTableDialog } from "@/components/tables/PickTableDialog";
 import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
 import { PrintTicketDialog } from "@/components/tables/PrintTicketDialog";
 import { groupOrderItemsForDisplay } from "@/lib/openBillDisplay";
+import { notifyOpenBillsChanged } from "@/lib/openBillCount";
 
 const Action = ({ icon: Icon, label, onClick, testid, tone = "", lock }) => (
   <button
@@ -98,6 +99,7 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
       setPay(null);
       setMode(null);
       onPaid(data, partial);
+      notifyOpenBillsChanged();
       if (partial) {
         try {
           const updatedBill = await api.get(`/open-bills/${bill.id}`);
@@ -181,17 +183,17 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
       <PayDialog open={!!pay} onOpenChange={(o) => !o && setPay(null)} total={(pay?.items || []).reduce((sum, i) => sum + i.price * i.qty, 0)} onPay={doPay} busy={busy} customerId={bill?.customerId || null} />
       <PickTableDialog open={mode === "merge"} onClose={() => setMode(null)} testid="merge-table" title={`Gabungkan meja lain ke ${table?.name}`}
         options={others.filter((t) => t.status === "occupied")}
-        onPick={(t) => run(async () => { await api.post(`/open-bills/${bill.id}/merge`, { sourceBillId: t.orderData.openBillId }); setMode(null); }, `${t.name} digabung ke ${table.name}`)} />
+        onPick={(t) => run(async () => { await api.post(`/open-bills/${bill.id}/merge`, { sourceBillId: t.orderData.openBillId }); notifyOpenBillsChanged(); setMode(null); }, `${t.name} digabung ke ${table.name}`)} />
       <PickTableDialog open={mode === "move"} onClose={() => setMode(null)} testid="move-table" title={`Pindahkan pesanan ${table?.name} ke...`}
         options={others.filter((t) => t.status !== "occupied")}
-        onPick={(t) => run(async () => { await api.post(`/open-bills/${bill.id}/move`, { tableId: t.id }); setMode(null); onClose(); }, `Pesanan dipindah ke ${t.name}`)} />
+        onPick={(t) => run(async () => { await api.post(`/open-bills/${bill.id}/move`, { tableId: t.id }); notifyOpenBillsChanged(); setMode(null); onClose(); }, `Pesanan dipindah ke ${t.name}`)} />
       <PrintTicketDialog bill={bill} tableName={table?.name} mode={mode === "printBill" ? "bill" : mode === "printKitchen" ? "kitchen" : null} onClose={() => setMode(null)} />
       <AdminPinDialog open={mode === "pinKitchen"} onClose={() => setMode(null)} testid="kitchen-pin" needPin
         title="Otorisasi Cetak Dapur" description="Masukkan PIN admin untuk mencetak order dapur."
         onSubmit={async ({ pin }) => { await api.post("/auth/verify-admin", { pin }); setMode("printKitchen"); }} />
       <AdminPinDialog open={mode === "void"} onClose={() => setMode(null)} testid="void-pin" needPin={!isAdmin} withReason title={`Void ${bill?.id || ""}`}
         description="Bill dihapus dan meja dikosongkan. Tindakan tercatat di log void."
-        onSubmit={async ({ pin, reason }) => { await api.post(`/open-bills/${bill.id}/void`, { adminPin: pin || null, reason }); toast.success("Bill di-void"); setMode(null); onClose(); onChanged(); }} />
+        onSubmit={async ({ pin, reason }) => { await api.post(`/open-bills/${bill.id}/void`, { adminPin: pin || null, reason }); toast.success("Bill di-void"); notifyOpenBillsChanged(); setMode(null); onClose(); onChanged(); }} />
     </>
   );
 };

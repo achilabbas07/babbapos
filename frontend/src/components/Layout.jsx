@@ -10,6 +10,7 @@ import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
 import { WaiterPrinterButton } from "@/components/WaiterPrinterButton";
 import { PrinterMappingDialog } from "@/components/settings/PrinterMappingDialog";
+import { useOpenBillCount } from "@/hooks/useOpenBillCount";
 
 const Clock = () => {
   const [now, setNow] = useState(new Date());
@@ -104,27 +105,50 @@ const Brand = ({ rail }) => {
   );
 };
 
-const NavItem = ({ to, label, icon: Icon, prefix, nested = false }) => (
-  <NavLink
-    to={to}
-    data-testid={`${prefix}-${to.slice(1)}`}
-    className={({ isActive }) =>
-      `flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200 ${
-        prefix === "nav" ? "md:flex-col md:gap-1 md:px-1 md:py-2 md:text-center md:text-[10px] md:leading-tight 2xl:flex-row 2xl:gap-3 2xl:px-3 2xl:py-2.5 2xl:text-left 2xl:text-sm" : ""
-      } ${nested ? "2xl:pl-6" : ""} ${
-        isActive ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-      }`
-    }
-  >
-    <Icon className={`h-4 w-4 shrink-0 ${prefix === "nav" ? "md:h-5 md:w-5 2xl:h-4 2xl:w-4" : ""}`} />
-    <span>{label}</span>
-  </NavLink>
-);
+// Badge angka (mis. jumlah Open Bill aktif). Di sidebar penuh (2xl+) tampil
+// sebaris di kanan label; di rail ringkas (md–2xl) menempel di pojok kanan atas
+// ikon. Disembunyikan saat jumlah 0 agar sidebar tetap bersih.
+const NavBadge = ({ count, prefix }) => {
+  const value = Number(count);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const label = value > 99 ? "99+" : String(value);
+  return (
+    <span
+      data-testid={`${prefix}-open-bills-badge`}
+      title={`${label} open bill aktif`}
+      aria-label={`${label} open bill aktif`}
+      className="pointer-events-none ml-auto inline-flex items-center justify-center rounded-full bg-purple-600 px-2 py-0.5 text-xs font-semibold leading-none text-white md:absolute md:right-1 md:top-1 md:ml-0 md:px-1 md:py-0 md:text-[9px] 2xl:static 2xl:ml-auto 2xl:px-2 2xl:py-0.5 2xl:text-xs"
+    >
+      {label}
+    </span>
+  );
+};
+
+const NavItem = ({ to, label, icon: Icon, prefix, nested = false, badge = 0 }) => {
+  const hasBadge = Number(badge) > 0;
+  return (
+    <NavLink
+      to={to}
+      data-testid={`${prefix}-${to.slice(1)}`}
+      className={({ isActive }) =>
+        `relative flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200 ${
+          prefix === "nav" ? "md:flex-col md:gap-1 md:px-1 md:py-2 md:text-center md:text-[10px] md:leading-tight 2xl:flex-row 2xl:gap-3 2xl:px-3 2xl:py-2.5 2xl:text-left 2xl:text-sm" : ""
+        } ${nested ? "2xl:pl-6" : ""} ${
+          isActive ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+        }`
+      }
+    >
+      <Icon className={`h-4 w-4 shrink-0 ${prefix === "nav" ? "md:h-5 md:w-5 2xl:h-4 2xl:w-4" : ""}`} />
+      <span className={hasBadge && prefix === "nav" ? "min-w-0 truncate 2xl:flex-1" : ""}>{label}</span>
+      <NavBadge count={badge} prefix={prefix} />
+    </NavLink>
+  );
+};
 
 // Wadah utama sub-menu (mis. "Laporan & Analisa Operasional"): label induk +
 // sub-menu bertingkat di bawahnya (mis. "Laporan Penjualan Produk"). Dua tingkat:
 // induk ini bisa di-expand/collapse (accordion) agar sidebar tidak terlalu padat.
-const NavNestedGroup = ({ node, open, onToggle, activePath }) => {
+const NavNestedGroup = ({ node, open, onToggle, activePath, badgeFor }) => {
   const Icon = node.icon;
   const hasActive = node.items.some((n) => n.to === activePath);
   return (
@@ -151,7 +175,7 @@ const NavNestedGroup = ({ node, open, onToggle, activePath }) => {
           id={`nav-nested-panel-${node.id}`}
           className="mt-0.5 space-y-1 border-l border-border/60 pl-2"
         >
-          {node.items.map((n) => <NavItem key={n.to} {...n} prefix="nav" nested />)}
+          {node.items.map((n) => <NavItem key={n.to} {...n} prefix="nav" nested badge={badgeFor ? badgeFor(n.to) : 0} />)}
         </div>
       )}
     </div>
@@ -161,7 +185,7 @@ const NavNestedGroup = ({ node, open, onToggle, activePath }) => {
 // Mengubah item bertingkat menjadi daftar datar (dipakai rail mode & nav mobile).
 const flattenNavItems = (items) => (items || []).flatMap((n) => (n.items ? flattenNavItems(n.items) : [n]));
 
-const NavGroup = ({ group, open, onToggle, role, nestedOpen, onToggleNested, activePath }) => {
+const NavGroup = ({ group, open, onToggle, role, nestedOpen, onToggleNested, activePath, badgeFor }) => {
   const items = filterNavItemsByRole(group.items, role);
   if (items.length === 0) return null;
   const expanded = group.alwaysOpen || open;
@@ -196,9 +220,10 @@ const NavGroup = ({ group, open, onToggle, role, nestedOpen, onToggleNested, act
                 open={Boolean(nestedOpen[n.id])}
                 onToggle={onToggleNested}
                 activePath={activePath}
+                badgeFor={badgeFor}
               />
             )
-            : <NavItem key={n.to} {...n} prefix="nav" nested />))}
+            : <NavItem key={n.to} {...n} prefix="nav" nested badge={badgeFor ? badgeFor(n.to) : 0} />))}
         </div>
       )}
     </section>
@@ -239,6 +264,11 @@ export default function Layout() {
   const [openGroups, setOpenGroups] = useState(readOpenGroups);
   const [openNested, setOpenNested] = useState(readOpenNested);
   const [printerOpen, setPrinterOpen] = useState(false);
+  const { count: openBillCount } = useOpenBillCount(Boolean(user));
+
+  // Resolver badge angka per path menu. Saat ini hanya "Open Bill" yang
+  // menampilkan jumlah bill aktif; jalur lain cukup mengembalikan 0.
+  const badgeFor = (to) => (to === "/open-bills" ? openBillCount : 0);
 
   const visibleGroups = NAV_GROUPS
     .map((group) => ({ ...group, items: filterNavItemsByRole(group.items, user.role) }))
@@ -298,7 +328,7 @@ export default function Layout() {
           <div className="2xl:hidden">
             {visibleGroups.map((group, index) => (
               <div key={group.id} className={index > 0 ? "mt-2 border-t border-border/60 pt-2" : ""}>
-                {flattenNavItems(group.items).map((n) => <NavItem key={n.to} {...n} prefix="nav" />)}
+                {flattenNavItems(group.items).map((n) => <NavItem key={n.to} {...n} prefix="nav" badge={badgeFor(n.to)} />)}
               </div>
             ))}
           </div>
@@ -314,6 +344,7 @@ export default function Layout() {
                 nestedOpen={openNested}
                 onToggleNested={toggleNestedGroup}
                 activePath={location.pathname}
+                badgeFor={badgeFor}
               />
             ))}
           </div>
@@ -351,7 +382,7 @@ export default function Layout() {
             </div>
           </div>
           <nav className="flex gap-1 overflow-x-auto px-3 pb-2 md:hidden">
-            {flatItems.map((n) => <NavItem key={n.to} {...n} prefix="mobile-nav" />)}
+            {flatItems.map((n) => <NavItem key={n.to} {...n} prefix="mobile-nav" badge={badgeFor(n.to)} />)}
           </nav>
         </header>
         <main className="min-w-0 flex-1 px-3 py-4 sm:px-5 lg:px-6">

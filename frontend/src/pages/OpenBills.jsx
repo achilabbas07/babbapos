@@ -5,6 +5,7 @@ import { ArrowRight, Ban } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, fmtDate, itemName, rp } from "@/lib/api";
 import { groupOrderItemsForDisplay } from "@/lib/openBillDisplay";
+import { notifyOpenBillsChanged } from "@/lib/openBillCount";
 import { PageHeader, Empty } from "@/components/PageHeader";
 import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
 
@@ -20,6 +21,7 @@ export default function OpenBills() {
       const [b, t] = await Promise.all([api.get("/open-bills"), api.get("/tables")]);
       setBills(b.data);
       setTables(Object.fromEntries(t.data.map((x) => [x.id, x.name])));
+      notifyOpenBillsChanged();
     } catch (e) {
       toast.error(errMsg(e));
     }
