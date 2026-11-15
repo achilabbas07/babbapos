@@ -105,9 +105,11 @@ const Brand = ({ rail }) => {
   );
 };
 
-// Badge angka (mis. jumlah Open Bill aktif). Di sidebar penuh (2xl+) tampil
-// sebaris di kanan label; di rail ringkas (md–2xl) menempel di pojok kanan atas
-// ikon. Disembunyikan saat jumlah 0 agar sidebar tetap bersih.
+// Badge angka (mis. jumlah Open Bill aktif) — "notification balloon" merah yang
+// menempel di pojok kanan atas ikon resi agar langsung terlihat di tablet.
+// Di rail tablet (md–2xl) badge mengapung menimpa ikon; di sidebar penuh (2xl+)
+// dan nav mobile tampil sebaris di kanan label. Hilang total saat jumlah 0 agar
+// ikon Open Bill kembali tampil bersih. Hanya UI — tanpa efek samping logika.
 const NavBadge = ({ count, prefix }) => {
   const value = Number(count);
   if (!Number.isFinite(value) || value <= 0) return null;
@@ -117,7 +119,7 @@ const NavBadge = ({ count, prefix }) => {
       data-testid={`${prefix}-open-bills-badge`}
       title={`${label} open bill aktif`}
       aria-label={`${label} open bill aktif`}
-      className="pointer-events-none ml-auto inline-flex items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-semibold leading-none text-white md:absolute md:right-1 md:top-1 md:ml-0 md:px-1 md:py-0 md:text-[9px] 2xl:static 2xl:ml-auto 2xl:px-2 2xl:py-0.5 2xl:text-xs"
+      className="pointer-events-none z-10 ml-auto inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold leading-none tabular-nums text-white shadow-sm ring-2 ring-card animate-pulse motion-reduce:animate-none md:absolute md:right-3 md:top-0 md:ml-0 md:h-[1.375rem] md:min-w-[1.375rem] md:px-1 md:text-[11px] 2xl:static 2xl:ml-auto 2xl:h-5 2xl:min-w-[1.25rem] 2xl:px-1.5 2xl:text-[11px]"
     >
       {label}
     </span>
@@ -138,7 +140,7 @@ const NavItem = ({ to, label, icon: Icon, prefix, nested = false, badge = 0 }) =
         }`
       }
     >
-      <Icon className={`h-4 w-4 shrink-0 ${prefix === "nav" ? "md:h-5 md:w-5 2xl:h-4 2xl:w-4" : ""}`} />
+      <Icon className={`h-4 w-4 shrink-0 ${prefix === "nav" ? "md:h-6 md:w-6 2xl:h-4 2xl:w-4" : ""}`} />
       <span className={hasBadge && prefix === "nav" ? "min-w-0 truncate 2xl:flex-1" : ""}>{label}</span>
       <NavBadge count={badge} prefix={prefix} />
     </NavLink>
