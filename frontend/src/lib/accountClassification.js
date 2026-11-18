@@ -48,6 +48,7 @@ const CANONICAL_CATEGORY_LABELS = new Map([
   ["asset", "Aset Lancar"],
   ["assets", "Aset Lancar"],
   ["aset", "Aset Lancar"],
+  ["aset tetap", "Aset Tetap"],
   ["aset lancar", "Aset Lancar"],
   ["aktiva", "Aset Lancar"],
   ["aktiva lancar", "Aset Lancar"],

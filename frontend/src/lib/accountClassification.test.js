@@ -38,7 +38,7 @@ describe("account classification", () => {
     expect(getAccountCategoryLabel({ account_code: "8-51008", account_category: "bahan penunjang" }))
       .toBe("Bahan Penunjang");
     expect(getAccountCategoryLabel({ account_code: "9-10001", account_category: "Asset" }))
-      .toBe("Aset Lancar");
+      .toBe("Aset Tetap");
     expect(getAccountCategoryLabel({ account_code: "5-50000", account_category: "Beban HPP" }))
       .toBe("Beban Pokok Pendapatan");
     expect(getAccountCategoryLabel({ account_code: "1-10001", account_category: "Kas & Bank" }))
