@@ -32,6 +32,7 @@ set account_category = case lower(btrim(account_category))
         when 'assets' then 'Aset Lancar'
         when 'aset' then 'Aset Lancar'
         when 'aset lancar' then 'Aset Lancar'
+        when 'aset tetap' then 'Aset Tetap'
         when 'aktiva' then 'Aset Lancar'
         when 'aktiva lancar' then 'Aset Lancar'
         -- Kas & bank
@@ -85,6 +86,7 @@ set account_category = case lower(btrim(account_category))
             when '5' then 'Beban Pokok Pendapatan'
             when '6' then 'Beban Operasional'
             when '8' then 'Bahan Penunjang'
+            when '9' then 'Aset Tetap'
             else btrim(account_category)
         end
     end
@@ -93,6 +95,7 @@ where account_category is distinct from case lower(btrim(account_category))
         when 'assets' then 'Aset Lancar'
         when 'aset' then 'Aset Lancar'
         when 'aset lancar' then 'Aset Lancar'
+        when 'aset tetap' then 'Aset Tetap'
         when 'aktiva' then 'Aset Lancar'
         when 'aktiva lancar' then 'Aset Lancar'
         when 'kas' then 'Kas & Bank'
@@ -138,6 +141,7 @@ where account_category is distinct from case lower(btrim(account_category))
             when '5' then 'Beban Pokok Pendapatan'
             when '6' then 'Beban Operasional'
             when '8' then 'Bahan Penunjang'
+            when '9' then 'Aset Tetap'
             else btrim(account_category)
         end
     end;

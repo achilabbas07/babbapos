@@ -17,6 +17,7 @@ import { COA_HEADER_MAX_LENGTH, getAccountHeader } from "@/lib/coaGrouping";
 const ACCOUNT_CATEGORIES = [
   { value: "Aset Lancar", label: "Aset Lancar" },
   { value: "Kas & Bank", label: "Kas & Bank" },
+  { value: "Aset Tetap", label: "Aset Tetap" },
   { value: "Liabilitas", label: "Liabilitas" },
   { value: "Ekuitas", label: "Ekuitas" },
   { value: "Pendapatan", label: "Pendapatan" },

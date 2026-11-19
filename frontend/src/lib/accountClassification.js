@@ -2,6 +2,8 @@ const CATEGORY_TYPES = new Map([
   ["asset", "asset"],
   ["assets", "asset"],
   ["aset", "asset"],
+  ["aset tetap", "asset"],
+  ["aset lancar", "asset"],
   ["aktiva", "asset"],
   ["kas", "asset"],
   ["kas & bank", "asset"],
@@ -38,6 +40,7 @@ const CODE_TYPES = new Map([
   ["5", "expense"],
   ["6", "expense"],
   ["8", "expense"],
+  ["9", "asset"],
 ]);
 
 // Pemetaan nilai mentah `account_category` (warisan snake_case maupun label
@@ -97,7 +100,12 @@ const CANONICAL_BY_CODE_PREFIX = new Map([
   ["5", "Beban Pokok Pendapatan"],
   ["6", "Beban Operasional"],
   ["8", "Bahan Penunjang"],
+  ["9", "Aset Tetap"],
 ]);
+
+// Kategori aset yang masih generik (belum menyebut lancar/tetap). Pada seri
+// kode 9- akun seperti ini adalah aset tetap, bukan aset lancar.
+const GENERIC_ASSET_CATEGORIES = new Set(["", "asset", "assets", "aset", "aktiva", "balance_sheet"]);
 
 const normalize = (value) => String(value || "").trim().toLocaleLowerCase("id-ID");
 
@@ -145,6 +153,7 @@ export const getAccountCategoryFallback = (account = {}) => {
   if (prefix === "1") {
     return isCashBankAccount({ ...account, account_category: "" }) ? "Kas & Bank" : "asset";
   }
+  if (prefix === "9") return "aset tetap";
   if (prefix === "2") return "liability";
   if (prefix === "3") return "equity";
   if (prefix === "4") return "revenue";
@@ -167,15 +176,22 @@ export const getAccountCategoryFallback = (account = {}) => {
  */
 export const normalizeAccountCategory = (account = {}) => {
   const category = normalize(account.account_category);
+  const code = String(account.account_code || "").trim();
+  // Seri kode 9- adalah kelompok aset tetap: kategori generik/kosong tidak
+  // boleh dipaksa menjadi Aset Lancar.
+  if (code.charAt(0) === "9" && GENERIC_ASSET_CATEGORIES.has(category)) {
+    return "Aset Tetap";
+  }
   if (category && category !== "balance_sheet") {
     if (CANONICAL_CATEGORY_LABELS.has(category)) {
       return CANONICAL_CATEGORY_LABELS.get(category);
     }
+    // Kunci terpanjang lebih dulu agar "aset tetap" tidak tertimpa "aset".
     const prefixKey = [...CANONICAL_CATEGORY_LABELS.keys()]
+      .sort((left, right) => right.length - left.length)
       .find((knownCategory) => category.startsWith(`${knownCategory} `));
     if (prefixKey) return CANONICAL_CATEGORY_LABELS.get(prefixKey);
   }
-  const code = String(account.account_code || "").trim();
   return CANONICAL_BY_CODE_PREFIX.get(code.charAt(0)) || "";
 };
 

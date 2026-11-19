@@ -78,7 +78,11 @@ def test_account_input_accepts_account_category_aliases_and_legacy_type():
 def test_canonical_account_category_maps_legacy_values_to_indonesian_labels():
     assert coa.canonical_account_category("operating_expense", "6-60200") == "Beban Operasional"
     assert coa.canonical_account_category("bahan penunjang", "8-51008") == "Bahan Penunjang"
-    assert coa.canonical_account_category("Asset", "9-10001") == "Aset Lancar"
+    # Seri kode 9- adalah Aset Tetap, termasuk untuk kategori aset generik.
+    assert coa.canonical_account_category("Asset", "9-10001") == "Aset Tetap"
+    assert coa.canonical_account_category("aset tetap", "9-10002") == "Aset Tetap"
+    assert coa.canonical_account_category("ASET TETAP", "9-10002") == "Aset Tetap"
+    assert coa.canonical_account_category(None, "9-10001") == "Aset Tetap"
     assert coa.canonical_account_category("cost_of_goods_sold", "5-50000") == "Beban Pokok Pendapatan"
     assert coa.canonical_account_category("Beban HPP", "5-50000") == "Beban Pokok Pendapatan"
     assert coa.canonical_account_category("Kas & Bank", "1-10001") == "Kas & Bank"

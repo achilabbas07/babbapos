@@ -125,7 +125,7 @@ describe("groupAccountsByHeader", () => {
 
   it("falls back to a safe category and zero balance for odd rows", () => {
     const groups = groupAccountsByHeader([
-      { id: "x", account_code: "9-99999", account_name: "Aneh", current_balance: "abc" },
+      { id: "x", account_code: "0-99999", account_name: "Aneh", current_balance: "abc" },
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0].category).toBe("Lainnya");

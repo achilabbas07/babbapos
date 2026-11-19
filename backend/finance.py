@@ -209,6 +209,7 @@ CANONICAL_ACCOUNT_CATEGORIES: dict[str, str] = {
     "assets": "Aset Lancar",
     "aset": "Aset Lancar",
     "aset lancar": "Aset Lancar",
+    "aset tetap": "Aset Tetap",
     "aktiva": "Aset Lancar",
     "aktiva lancar": "Aset Lancar",
     # Kas & bank
@@ -265,7 +266,15 @@ CANONICAL_CATEGORY_BY_CODE_PREFIX: dict[str, str] = {
     "5": "Beban Pokok Pendapatan",
     "6": "Beban Operasional",
     "8": "Bahan Penunjang",
+    "9": "Aset Tetap",
 }
+
+# Nilai kategori aset yang masih generik (belum menyebut lancar/tetap). Bila
+# sebuah akun memakai salah satunya DAN berada pada seri kode 9-, akun tersebut
+# adalah aset tetap, bukan aset lancar.
+GENERIC_ASSET_CATEGORIES = frozenset(
+    {"", "asset", "assets", "aset", "aktiva", "balance_sheet"}
+)
 
 
 def canonical_account_category(
@@ -281,16 +290,28 @@ def canonical_account_category(
     awalan kode akun.
     """
     normalized = " ".join(str(account_category or "").split()).casefold()
+    code_prefix = str(account_code or "").strip()[:1]
+    # Seri kode 9- adalah kelompok aset tetap. Nilai kategori generik
+    # ("asset"/"aset"/"aktiva") atau nilai kosong pada seri ini diperlakukan
+    # sebagai Aset Tetap agar tidak dipaksa menjadi Aset Lancar.
+    if code_prefix == "9" and normalized in GENERIC_ASSET_CATEGORIES:
+        return "Aset Tetap"
     if normalized and normalized != "balance_sheet":
         canonical = CANONICAL_ACCOUNT_CATEGORIES.get(normalized)
         if canonical is not None:
             return canonical
         # Nilai gabungan seperti "Kas & Bank - Aset Lancar".
-        for key, value in CANONICAL_ACCOUNT_CATEGORIES.items():
+        # Kunci terpanjang diuji lebih dulu supaya "aset tetap" tidak tertimpa
+        # oleh kunci "aset".
+        for key, value in sorted(
+            CANONICAL_ACCOUNT_CATEGORIES.items(),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        ):
             if normalized.startswith(f"{key} "):
                 return value
     return CANONICAL_CATEGORY_BY_CODE_PREFIX.get(
-        str(account_code or "").strip()[:1],
+        code_prefix,
         "Aset Lancar",
     )
 
@@ -2102,6 +2123,7 @@ _POSITION_ACCOUNT_TYPE_SQL = """
                                     when '5' then 'expense'
                                     when '6' then 'expense'
                                     when '8' then 'expense'
+                                    when '9' then 'asset'
                                     else ledger.account_type
                                 end
                             when lower(coalesce(account.account_category, '')) like 'asset%'
@@ -2135,6 +2157,7 @@ _POSITION_ACCOUNT_TYPE_SQL = """
                             when ledger.account_code like '5-%'
                                 or ledger.account_code like '6-%'
                                 or ledger.account_code like '8-%' then 'expense'
+                            when ledger.account_code like '9-%' then 'asset'
                             else ledger.account_type
                         end
 """

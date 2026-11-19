@@ -15,6 +15,7 @@ const HEADER_FIELDS = ["header", "account_header", "coa_header", "group_header"]
 const CATEGORY_ORDER = [
   "Aset Lancar",
   "Kas & Bank",
+  "Aset Tetap",
   "Liabilitas",
   "Ekuitas",
   "Pendapatan",
