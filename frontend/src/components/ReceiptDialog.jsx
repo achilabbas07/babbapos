@@ -114,7 +114,7 @@ export const ReceiptDialog = ({ trx, onClose }) => {
 
   return (
     <Dialog open={!!trx} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="receipt-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-sm">
+      <DialogContent data-testid="receipt-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-sm">
         <DialogHeader><DialogTitle>Struk Pembayaran</DialogTitle></DialogHeader>
         {trx && (
           <div className="print-area thermal-print-area space-y-3 text-sm">

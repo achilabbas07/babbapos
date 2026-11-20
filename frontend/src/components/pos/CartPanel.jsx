@@ -124,7 +124,7 @@ export const CartPanel = ({ order, setOrder, tables, customers, waiters, waiterR
   const count = cart.reduce((s, i) => s + i.qty, 0);
 
   return (
-    <aside data-testid="cart-panel" className="flex flex-col rounded-2xl border border-border bg-card shadow-sm md:sticky md:top-[5.5rem] md:h-[calc(100vh-6.5rem)] md:min-h-[560px]">
+    <aside data-testid="cart-panel" className="flex flex-col rounded-2xl border border-border bg-card shadow-sm md:sticky md:top-[5.5rem] md:h-[calc(100dvh-6.5rem)] md:min-h-[560px]">
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <p className="text-sm font-semibold">
           Pesanan {order.billId && <span data-testid="cart-bill-id" className="font-mono text-primary">#{order.billId}</span>}
@@ -142,7 +142,7 @@ export const CartPanel = ({ order, setOrder, tables, customers, waiters, waiterR
           cart.map((i) => <CartLine key={i.key} item={i} price={priceOf(i)} locked={isLocked(i)} currentWaiterId={order.waiterId} onQty={(d) => onQty(i.key, d)} onNotes={(v) => notes(i.key, v)} onRemove={() => onRemove(i.key)} />)
         )}
       </div>
-      <div className="space-y-2.5 border-t border-border px-4 py-3">
+      <div className="space-y-2.5 border-t border-border px-4 pt-3 pb-safe">
         <div className="flex items-baseline justify-between">
           <span className="text-sm text-muted-foreground">Total {order.type === "Ojek Online" && <span className="text-xs text-primary">(harga Ojol)</span>}</span>
           <span data-testid="cart-total" className="font-mono text-xl font-bold text-primary">{rp(total)}</span>

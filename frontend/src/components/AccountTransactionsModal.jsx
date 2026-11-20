@@ -81,7 +81,7 @@ export default function AccountTransactionsModal({ open, onOpenChange, account, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="coa-transactions-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+      <DialogContent data-testid="coa-transactions-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Rincian Transaksi Akun</DialogTitle>
           <DialogDescription>

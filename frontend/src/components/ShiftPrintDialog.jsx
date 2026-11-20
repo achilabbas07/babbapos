@@ -38,7 +38,7 @@ const ShiftPrintContent = ({ shift, onClose }) => {
 
   return (
     <Dialog open={!!shift} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="shift-print-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-sm">
+      <DialogContent data-testid="shift-print-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-sm">
         <DialogHeader><DialogTitle>Laporan Tutup Shift</DialogTitle></DialogHeader>
         {shift && (
           <div className="print-area space-y-4 text-sm">

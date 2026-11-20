@@ -35,7 +35,7 @@ export const SplitBillDialog = ({ bill, open, onClose, onConfirm }) => {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="split-bill-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent data-testid="split-bill-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Pisah Bill · {bill.id}</DialogTitle>
           <DialogDescription>Pilih item yang dibayar terpisah. Sisa item tetap di bill meja ini.</DialogDescription>

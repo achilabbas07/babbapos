@@ -98,7 +98,7 @@ export const TargetDialog = ({ target, products, waiters, onClose, onSaved }) =>
 
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="target-form-dialog" className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent data-testid="target-form-dialog" className="max-h-[92dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader><DialogTitle>{target?.id ? "Edit Target" : "Tambah Target"}</DialogTitle></DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-1.5">

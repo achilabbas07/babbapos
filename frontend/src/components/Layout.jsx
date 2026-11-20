@@ -322,8 +322,8 @@ export default function Layout() {
     }
   };
   return (
-    <div className="min-h-screen md:flex">
-      <aside className="sticky top-0 hidden h-screen w-[88px] shrink-0 flex-col border-r border-border bg-card md:flex 2xl:w-64 print:hidden">
+    <div className="min-h-dvh md:flex">
+      <aside className="sticky top-0 hidden h-dvh w-[88px] shrink-0 flex-col border-r border-border bg-card md:flex 2xl:w-64 print:hidden">
         <div className="px-3 py-4 2xl:px-5 2xl:py-5"><Brand rail /></div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 pb-6 2xl:px-3">
           {/* Rail mode (md–2xl): icon-only list, groups separated by dividers. */}
@@ -354,7 +354,7 @@ export default function Layout() {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="glass sticky top-0 z-30 border-b border-border print:hidden">
-          <div className="flex h-16 items-center justify-between gap-4 px-4 lg:px-6">
+          <div className="flex min-h-16 flex-wrap items-center justify-between gap-2 px-4 py-2 lg:gap-4 lg:px-6">
             <div className="md:hidden"><Brand /></div>
             <div className="hidden sm:block"><Clock /></div>
             <div className="flex items-center gap-3">
@@ -387,7 +387,7 @@ export default function Layout() {
             {flatItems.map((n) => <NavItem key={n.to} {...n} prefix="mobile-nav" badge={badgeFor(n.to)} />)}
           </nav>
         </header>
-        <main className="min-w-0 flex-1 px-3 py-4 sm:px-5 lg:px-6">
+        <main className="min-w-0 flex-1 px-3 pt-4 pb-safe sm:px-5 lg:px-6">
           <ShiftGate><Outlet /></ShiftGate>
         </main>
       </div>

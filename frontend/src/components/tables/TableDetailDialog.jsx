@@ -129,7 +129,7 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
   return (
     <>
       <Dialog open={!!table && !mode && !pay} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent data-testid="table-detail-dialog" className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
+        <DialogContent data-testid="table-detail-dialog" className="max-h-[92dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3">
               {table?.name}

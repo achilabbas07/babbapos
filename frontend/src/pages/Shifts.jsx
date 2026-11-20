@@ -31,7 +31,7 @@ export default function Shifts() {
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="[&>th]:whitespace-nowrap">
                 <TableHead>Shift</TableHead><TableHead>Kasir</TableHead><TableHead>Waktu</TableHead><TableHead className="text-right">Kas awal</TableHead>
                 <TableHead className="text-right">Tunai</TableHead><TableHead className="text-right">Non-tunai</TableHead><TableHead className="text-right">Masuk</TableHead>
                 <TableHead className="text-right">Keluar</TableHead><TableHead className="text-right">Seharusnya</TableHead><TableHead className="text-right">Fisik</TableHead><TableHead className="text-right">Selisih</TableHead><TableHead />
@@ -46,14 +46,14 @@ export default function Shifts() {
                   </TableCell>
                   <TableCell>{s.userName}</TableCell>
                   <TableCell className="whitespace-nowrap text-xs text-muted-foreground"><p>{fmtDate(s.openedAt)}</p><p>{s.closedAt ? fmtDate(s.closedAt) : "—"}</p></TableCell>
-                  <TableCell className="text-right font-mono">{rp(s.openingCash)}</TableCell>
-                  <TableCell className="text-right font-mono">{rp(s.cashSales)}</TableCell>
-                  <TableCell className="text-right font-mono text-muted-foreground">{rp(s.nonCashSales)}</TableCell>
-                  <TableCell className="text-right font-mono">{rp(s.cashIn)}</TableCell>
-                  <TableCell className="text-right font-mono">{rp(s.cashOut)}</TableCell>
-                  <TableCell className="text-right font-mono font-semibold">{rp(s.expectedCash)}</TableCell>
-                  <TableCell className="text-right font-mono">{s.countedCash == null ? "—" : rp(s.countedCash)}</TableCell>
-                  <TableCell data-testid={`shift-diff-${s.id}`} className={`text-right font-mono font-semibold ${diffTone(s.difference)}`}>{s.difference == null ? "—" : rp(s.difference)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono">{rp(s.openingCash)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono">{rp(s.cashSales)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono text-muted-foreground">{rp(s.nonCashSales)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono">{rp(s.cashIn)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono">{rp(s.cashOut)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono font-semibold">{rp(s.expectedCash)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono">{s.countedCash == null ? "—" : rp(s.countedCash)}</TableCell>
+                  <TableCell data-testid={`shift-diff-${s.id}`} className={`whitespace-nowrap text-right font-mono font-semibold ${diffTone(s.difference)}`}>{s.difference == null ? "—" : rp(s.difference)}</TableCell>
                   <TableCell>
                     <button data-testid={`shift-reprint-${s.id}`} onClick={() => setPrinting(s)}
                       className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-xs font-medium hover:border-primary">

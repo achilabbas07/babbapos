@@ -120,7 +120,7 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="purchase-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent data-testid="purchase-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader><DialogTitle>Pembelian Bahan</DialogTitle></DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">

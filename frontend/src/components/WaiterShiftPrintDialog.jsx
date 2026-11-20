@@ -73,7 +73,7 @@ export const WaiterShiftPrintDialog = ({ shift, onClose }) => {
 
   return (
     <Dialog open={!!shift} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="waiter-shift-print-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+      <DialogContent data-testid="waiter-shift-print-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader><DialogTitle>Cetak Ulang Laporan Shift Pelayan</DialogTitle></DialogHeader>
         {shift && (
           <div className="space-y-4 text-sm">

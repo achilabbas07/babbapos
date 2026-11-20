@@ -88,7 +88,7 @@ function PointSettingForm({ setting, onClose, onSave }) {
         aria-modal="true"
         aria-labelledby="point-setting-form-title"
         data-testid="point-setting-form"
-        className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6"
+        className="safe-dialog max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6"
       >
         <div className="mb-5">
           <h2 id="point-setting-form-title" className="text-xl font-semibold">

@@ -97,12 +97,12 @@ export default function Login() {
   };
 
   if (user === null) {
-    return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Memuat...</div>;
+    return <div className="grid min-h-dvh place-items-center text-sm text-muted-foreground">Memuat...</div>;
   }
   if (user) return <Navigate to="/pos" replace />;
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[1fr_1.1fr]">
+    <div className="grid min-h-dvh lg:grid-cols-[1fr_1.1fr]">
       <div
         className="relative hidden overflow-hidden bg-slate-900 lg:block"
         style={{ backgroundImage: "url('/bg-warkop.jpg')", backgroundSize: "cover", backgroundPosition: "center" }}

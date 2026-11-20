@@ -70,7 +70,7 @@ export const ProductGrid = ({ products, stock = {}, onAdd, ojol }) => {
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(128px,1fr))]">
         {list.map((product, index) => (
           <ProductCard
             key={product.id}

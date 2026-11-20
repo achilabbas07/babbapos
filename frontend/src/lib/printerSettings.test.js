@@ -7,10 +7,12 @@ import {
   getCashierPrinterId,
   getKitchenPrinterId,
   getPrinterId,
+  getPrinterRecord,
   resolveDeviceId,
   setCashierPrinterId,
   setKitchenPrinterId,
   setPrinterId,
+  setPrinterRecord,
 } from "./printerSettings";
 
 describe("printer settings storage", () => {
@@ -29,10 +31,38 @@ describe("printer settings storage", () => {
     setKitchenPrinterId("device-kitchen");
     setCashierPrinterId("device-cashier");
 
-    expect(window.localStorage.getItem(KITCHEN_PRINTER_KEY)).toBe("device-kitchen");
-    expect(window.localStorage.getItem(CASHIER_PRINTER_KEY)).toBe("device-cashier");
+    expect(JSON.parse(window.localStorage.getItem(KITCHEN_PRINTER_KEY))).toMatchObject({
+      t: "web",
+      id: "device-kitchen",
+    });
+    expect(JSON.parse(window.localStorage.getItem(CASHIER_PRINTER_KEY))).toMatchObject({
+      t: "web",
+      id: "device-cashier",
+    });
     expect(getKitchenPrinterId()).toBe("device-kitchen");
     expect(getCashierPrinterId()).toBe("device-cashier");
+  });
+
+  it("stores transport and name for native devices", () => {
+    setPrinterRecord("kitchen", { id: "AA:BB:CC:DD:EE:FF", name: "RPP02", transport: "native" });
+
+    expect(getPrinterRecord("kitchen")).toEqual({
+      transport: "native",
+      id: "AA:BB:CC:DD:EE:FF",
+      name: "RPP02",
+    });
+    expect(getKitchenPrinterId()).toBe("AA:BB:CC:DD:EE:FF");
+  });
+
+  it("keeps reading the legacy plain-string format as a web device", () => {
+    window.localStorage.setItem(KITCHEN_PRINTER_KEY, "LEGACY-DEVICE");
+
+    expect(getKitchenPrinterId()).toBe("LEGACY-DEVICE");
+    expect(getPrinterRecord("kitchen")).toEqual({
+      transport: "web",
+      id: "LEGACY-DEVICE",
+      name: "",
+    });
   });
 
   it("returns an empty string when nothing is stored", () => {

@@ -150,7 +150,7 @@ export const VariantAdminDialog = ({ open, products, onClose }) => {
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent data-testid="variant-admin-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+      <DialogContent data-testid="variant-admin-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-5xl">
         <DialogHeader><DialogTitle>Kelola Varian & Resep</DialogTitle></DialogHeader>
         <label className="grid gap-1.5 text-sm font-medium">
           Pilih Menu

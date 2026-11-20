@@ -121,7 +121,7 @@ function PromoForm({ promo, onClose, onSave }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="promo-form-title"
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6"
+        className="safe-dialog max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6"
       >
         <div className="mb-5">
           <h2 id="promo-form-title" className="text-xl font-semibold">

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { RPP02_SERVICE_UUID } from "@/lib/bluetoothThermalPrinter";
+import { printerTransport } from "@/lib/printerTransport";
 import {
   clearCashierPrinterId,
   clearKitchenPrinterId,
@@ -20,18 +21,21 @@ import {
   setKitchenPrinterId,
 } from "@/lib/printerSettings";
 
-// Murni pendaftaran identitas printer ke localStorage (Tahap 1). Tidak
+// Murni pendaftaran identitas printer ke localStorage. Transport dipilih
+// otomatis (Web Bluetooth di browser, native di Android) sehingga tidak
 // menyentuh alur cetak struk kasir maupun tiket dapur yang sudah berjalan.
 const requestBluetoothDevice = async () => {
-  const bluetooth = globalThis.navigator?.bluetooth;
-  if (!bluetooth?.requestDevice) {
-    throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
+  if (!printerTransport.canRequestDevice()) {
+    throw new Error(printerTransport.unavailableMessage);
   }
-  return bluetooth.requestDevice({
-    acceptAllDevices: true,
-    optionalServices: [RPP02_SERVICE_UUID],
-  });
+  return printerTransport.requestDevice({ serviceUuid: RPP02_SERVICE_UUID });
 };
+
+const isCancelled = (error) => (
+  error?.name === "NotFoundError"
+  || error?.code === "USER_CANCELLED"
+  || /cancel|dibatalkan/i.test(error?.message || "")
+);
 
 const SLOTS = [
   {
@@ -106,17 +110,19 @@ export const PrinterMappingDialog = ({ open, onClose }) => {
     setConnecting(slot.kind);
     try {
       const device = await requestBluetoothDevice();
-      const deviceId = resolveDeviceId(device);
+      const deviceId = device?.id || resolveDeviceId(device);
       if (!deviceId) {
         toast.error(`ID perangkat ${slot.label} tidak tersedia.`);
         return;
       }
-      slot.set(deviceId);
+      // Simpan record lengkap (transport + nama) agar perangkat native tetap
+      // bisa dihubungi kembali lewat alamat MAC-nya.
+      slot.set({ id: deviceId, name: device?.name || "", transport: device?.transport });
       setValues((current) => ({ ...current, [slot.kind]: deviceId }));
       toast.success(`${slot.label} disimpan: ${deviceId}`);
     } catch (error) {
       toast.error(
-        error?.name === "NotFoundError"
+        isCancelled(error)
           ? "Pemilihan perangkat dibatalkan."
           : error?.message || `Gagal memilih ${slot.label}.`,
       );

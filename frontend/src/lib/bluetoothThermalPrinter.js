@@ -1,7 +1,8 @@
 import { groupOrderItemsForDisplay } from "./openBillDisplay";
+import { printerTransport } from "./printerTransport";
 import { resolvePaidTotal } from "./splitPayment";
 import { buildWaiterShiftReportBytes } from "./waiterShiftReport";
-import { getPrinterId, resolveDeviceId, setPrinterId } from "./printerSettings";
+import { getPrinterId, setPrinterId } from "./printerSettings";
 
 export const RPP02_SERVICE_UUID = "000018f0-0000-1000-8000-00805f9b34fb";
 export const RPP02_CHARACTERISTIC_UUID = "00002af1-0000-1000-8000-00805f9b34fb";
@@ -19,16 +20,6 @@ const BLE_PRINT_RETRY_DELAY_MS = 500;
 // menggantung selamanya dan tombol "Mencetak..." tidak tersangkut permanen.
 const BLE_PRINT_ATTEMPT_TIMEOUT_MS = 8000;
 const LINE_WIDTH = 32;
-const BLE_WRITE_CHUNK_SIZE = 20;
-// Laporan panjang (mis. tutup shift pelayan) rentan terpotong di tengah jalan
-// bila chunk dikirim tanpa jeda: buffer printer thermal 58mm tidak sempat
-// diproses dan perintah cut terakhir ikut hilang. Untuk payload panjang, beri
-// jeda kecil antar chunk agar printer menerima data sampai baris terakhir.
-// Payload pendek (struk penjualan reguler) tetap dikirim tanpa jeda sehingga
-// perilaku cetak reguler tidak berubah.
-const BLE_LONG_RECEIPT_THRESHOLD_BYTES = 512;
-const BLE_WRITE_CHUNK_DELAY_MS = 5;
-let cachedDevice = null;
 let printTail = Promise.resolve();
 let queuedPrints = 0;
 
@@ -480,65 +471,10 @@ export async function buildEscPosReceipt(type, data) {
   return Uint8Array.from(bytes);
 }
 
-async function findWritableCharacteristic(service, characteristicUuid) {
-  if (characteristicUuid) {
-    const characteristic = await service.getCharacteristic(characteristicUuid);
-    if (characteristic.properties.write || characteristic.properties.writeWithoutResponse) {
-      return characteristic;
-    }
-    throw new Error("Karakteristik printer tidak mendukung penulisan data.");
-  }
-
-  const characteristics = await service.getCharacteristics();
-  const characteristic = characteristics.find(
-    (candidate) => candidate.properties.writeWithoutResponse || candidate.properties.write,
-  );
-  if (!characteristic) throw new Error("Karakteristik tulis printer tidak ditemukan.");
-  return characteristic;
-}
-
-async function writeReceipt(characteristic, bytes) {
-  // Dokumen panjang butuh jeda antar chunk agar buffer printer thermal tidak
-  // penuh dan data terakhir (termasuk perintah cut) tidak terpotong.
-  const chunkDelay = bytes.length > BLE_LONG_RECEIPT_THRESHOLD_BYTES ? BLE_WRITE_CHUNK_DELAY_MS : 0;
-  for (let offset = 0; offset < bytes.length; offset += BLE_WRITE_CHUNK_SIZE) {
-    const chunk = bytes.slice(offset, offset + BLE_WRITE_CHUNK_SIZE);
-    if (characteristic.properties.writeWithoutResponse) {
-      if (!characteristic.writeValueWithoutResponse) {
-        throw new Error("Browser tidak mendukung pengiriman tanpa respons ke printer ini.");
-      }
-      await characteristic.writeValueWithoutResponse(chunk);
-    } else if (characteristic.properties.write && characteristic.writeValueWithResponse) {
-      await characteristic.writeValueWithResponse(chunk);
-    } else if (characteristic.properties.write && characteristic.writeValue) {
-      await characteristic.writeValue(chunk);
-    } else {
-      throw new Error("Browser tidak mendukung pengiriman data ke printer ini.");
-    }
-    if (chunkDelay && offset + BLE_WRITE_CHUNK_SIZE < bytes.length) await sleep(chunkDelay);
-  }
-}
-
-async function connectDevice(device, serviceUuid, characteristicUuid) {
-  if (!device?.gatt) throw new Error("Perangkat yang dipilih tidak menyediakan koneksi GATT.");
-  // Bersihkan sisa sesi sebelumnya: putuskan koneksi basi (printer idle/sleep)
-  // sebelum menyambung ulang agar port GATT tidak memakai state lama.
-  await resetGattConnection(device);
-  const server = device.gatt.connected ? device.gatt : await device.gatt.connect();
-  const service = await server.getPrimaryService(serviceUuid);
-  const characteristic = await findWritableCharacteristic(service, characteristicUuid);
-  return { device, characteristic };
-}
-
-// Tutup koneksi GATT yang tersisa dari job sebelumnya (best-effort). Disconnect
-// kilat membuat percobaan sambung ulang selalu berangkat dari kondisi bersih.
-async function resetGattConnection(device) {
-  if (!device?.gatt?.connected) return;
-  try {
-    device.gatt.disconnect();
-  } catch (error) {
-    console.warn("Gagal membersihkan koneksi printer Bluetooth.", error);
-  }
+// Bersihkan sisa sesi sebelumnya (best-effort). Koneksi kilat membuat percobaan
+// sambung ulang selalu berangkat dari kondisi bersih.
+async function resetGattConnection(target) {
+  await printerTransport.resetConnection(target);
 }
 
 // Ulangi satu job cetak lengkap (connect + write) selama masih ada percobaan
@@ -546,12 +482,12 @@ async function resetGattConnection(device) {
 // yang baru bangun dari sleep punya kesempatan tersambung kembali.
 async function runPrintAttempts(attempt, { attemptTimeoutMs = BLE_PRINT_ATTEMPT_TIMEOUT_MS } = {}) {
   let lastError;
-  let device;
+  let target;
   for (let attemptIndex = 0; attemptIndex < BLE_PRINT_RETRY_LIMIT; attemptIndex += 1) {
     try {
       // Batasi tiap percobaan: bila koneksi/penulisan menggantung, percobaan
       // dianggap gagal dan akan dicoba ulang, bukan menunggu tanpa akhir.
-      device = await withTimeout(
+      target = await withTimeout(
         Promise.resolve().then(() => attempt()),
         attemptTimeoutMs,
         "Koneksi printer Bluetooth tidak merespons (timeout).",
@@ -561,7 +497,7 @@ async function runPrintAttempts(attempt, { attemptTimeoutMs = BLE_PRINT_ATTEMPT_
       lastError = error;
       if (attemptIndex < BLE_PRINT_RETRY_LIMIT - 1) {
         // Bersihkan sisa sesi gagal sebelum percobaan berikutnya.
-        await resetGattConnection(device);
+        await resetGattConnection(target);
         await sleep(BLE_PRINT_RETRY_DELAY_MS);
       }
     }
@@ -574,22 +510,17 @@ export async function connectBluetoothPrinter({
   characteristicUuid = RPP02_CHARACTERISTIC_UUID,
   printerType,
 } = {}) {
-  const bluetooth = globalThis.navigator?.bluetooth;
-  if (!bluetooth?.requestDevice) {
-    throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
+  if (!printerTransport.canRequestDevice()) {
+    throw new Error(printerTransport.unavailableMessage);
   }
   // Satu-satunya jalur yang memunculkan dialog pemilihan perangkat; dipakai
   // saat pairing awal dari tombol pengaturan.
-  const device = cachedDevice || (await bluetooth.requestDevice({
-    acceptAllDevices: true,
-    optionalServices: [serviceUuid],
-  }));
-  cachedDevice = device;
+  const target = await printerTransport.requestDevice({ serviceUuid });
   // Simpan identitas perangkat ke pemetaan printer agar cetak otomatis
-  // berikutnya bisa memakai getDevices() tanpa dialog pemilihan lagi.
-  if (printerType) setPrinterId(printerType, resolveDeviceId(device));
-  await connectDevice(device, serviceUuid, characteristicUuid);
-  return device;
+  // berikutnya bisa mencari ulang perangkat tanpa dialog pemilihan lagi.
+  if (printerType) setPrinterId(printerType, target.id);
+  await printerTransport.connect(target, { serviceUuid, characteristicUuid });
+  return { id: target.id, name: target.name, transport: target.transport };
 }
 
 // Apakah jenis printer (mis. 'kitchen' atau 'cashier') sudah dipetakan ke
@@ -603,22 +534,17 @@ export function hasConfiguredPrinter(printerType) {
   }
 }
 
-// Cari BluetoothDevice yang identitasnya tersimpan di localStorage melalui
-// navigator.bluetooth.getDevices(). Dipakai untuk mencetak ulang tanpa
-// memunculkan dialog pemilihan perangkat lagi.
+// Cari perangkat yang identitasnya tersimpan di localStorage lewat transport
+// aktif. Dipakai untuk mencetak ulang tanpa memunculkan dialog pemilihan lagi.
 export async function findMappedBluetoothDevice(printerType) {
-  const bluetooth = globalThis.navigator?.bluetooth;
-  if (!bluetooth?.getDevices) return null;
   const printerId = getPrinterId(printerType);
   if (!printerId) return null;
-  const devices = (await bluetooth.getDevices()) || [];
-  return devices.find((candidate) => resolveDeviceId(candidate) === printerId) || null;
+  return printerTransport.findDevice({ printerId });
 }
 
 async function runPrintJob(type, data, options) {
-  const bluetooth = globalThis.navigator?.bluetooth;
-  if (!bluetooth?.getDevices) {
-    throw new Error("Web Bluetooth tidak tersedia. Gunakan Chrome atau Edge melalui HTTPS.");
+  if (!printerTransport.canEnumerate()) {
+    throw new Error(printerTransport.unavailableMessage);
   }
 
   const printerType = options.printerType || "cashier";
@@ -627,35 +553,36 @@ async function runPrintJob(type, data, options) {
     throw new Error(`Printer ${label} belum diatur. Buka Pengaturan Printer lalu daftarkan perangkatnya.`);
   }
 
-  // Pencarian perangkat juga dibatasi waktu: getDevices() dapat menggantung bila
+  // Pencarian perangkat juga dibatasi waktu: enumerasi dapat menggantung bila
   // adapter Bluetooth bermasalah, dan itu akan menyangkutkan promise cetak.
-  const device = options.device || (await withTimeout(
+  const target = options.device || (await withTimeout(
     findMappedBluetoothDevice(printerType),
     options.deviceTimeoutMs || BLE_PRINT_ATTEMPT_TIMEOUT_MS,
     `Printer ${label} tidak merespons saat dicari (timeout).`,
   ));
-  if (!device) {
+  if (!target) {
     throw new Error(`Printer ${label} tidak ditemukan. Hubungkan ulang melalui Pengaturan Printer lalu coba lagi.`);
   }
 
-  const serviceUuid = options.serviceUuid || device.uuids?.[0] || RPP02_SERVICE_UUID;
+  const serviceUuid = options.serviceUuid || target.uuids?.[0] || RPP02_SERVICE_UUID;
   const characteristicUuid = options.characteristicUuid || RPP02_CHARACTERISTIC_UUID;
-  const wasConnected = Boolean(device?.gatt?.connected);
-  cachedDevice = device;
+  const wasConnected = printerTransport.isConnected(target);
   const bytes = await buildEscPosReceipt(type, data);
   try {
     // Auto-reconnect: bila printer idle/sleep dan GATT gagal atau terputus saat
     // tombol cetak ditekan, sambung ulang (koneksi bersih) sampai beberapa kali.
     await runPrintAttempts(async () => {
-      const { characteristic } = await connectDevice(device, serviceUuid, characteristicUuid);
-      await writeReceipt(characteristic, bytes);
-      return device;
+      const connection = await printerTransport.connect(target, { serviceUuid, characteristicUuid });
+      await printerTransport.write(connection, bytes);
+      return target;
     }, { attemptTimeoutMs: options.attemptTimeoutMs });
   } finally {
     // Putuskan koneksi yang dibuka job ini agar port Bluetooth tidak bentrok
     // dengan printer lain (utama saat mencetak Dapur lalu Kasir berurutan).
     try {
-      if (!wasConnected && device?.gatt?.connected) device.gatt.disconnect();
+      if (!wasConnected && printerTransport.isConnected(target)) {
+        await printerTransport.disconnect(target);
+      }
     } catch (error) {
       console.warn("Gagal memutuskan koneksi printer Bluetooth.", error);
     }

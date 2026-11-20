@@ -64,7 +64,7 @@ export const FormDialog = ({ open, onOpenChange, title, description, fields, ini
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid={`${testid}-dialog`} className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent data-testid={`${testid}-dialog`} className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className={description ? undefined : "sr-only"}>{description || title}</DialogDescription>

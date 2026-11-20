@@ -58,7 +58,7 @@ const Protected = ({ roles, deniedMessage, children }) => {
   useEffect(() => {
     if (denied && deniedMessage) toast.error(deniedMessage);
   }, [denied, deniedMessage]);
-  if (user === null) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Memuat...</div>;
+  if (user === null) return <div className="grid min-h-dvh place-items-center text-sm text-muted-foreground">Memuat...</div>;
   if (!user) return <Navigate to="/login" replace />;
   if (denied) return <Navigate to="/pos" replace />;
   return children;

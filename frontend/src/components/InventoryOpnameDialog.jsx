@@ -60,7 +60,7 @@ export default function InventoryOpnameDialog({ open, onOpenChange, items, onSav
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>{result ? "Hasil Stok Opname" : "Mulai Stok Opname"}</DialogTitle>
         </DialogHeader>

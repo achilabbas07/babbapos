@@ -9,6 +9,70 @@ body {
     font-family: "Plus Jakarta Sans", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overflow-x: hidden;
+    overflow-wrap: break-word;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+/* Safe-area helpers for the Android WebView (Capacitor edge-to-edge).
+   Left OUTSIDE @layer so they win over Tailwind padding utilities on the
+   same element, preventing the bottom action buttons from being covered by
+   the Android system navigation / Back bar. Spacing must be responsive
+   (left) so this file is not treated as a "temporary" one-off. */
+.pb-safe {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+}
+
+.pb-safe-lg {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+}
+
+.safe-dialog {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+}
+
+/* Denah meja: ukuran sel & kartu menyesuaikan lebar layar HP & tablet.
+   Nilai juga dibaca JS (FloorCanvas) agar logika drag tetap sinkron. */
+.floor-canvas {
+    --floor-cell: 100px;
+    --floor-tile: 92px;
+}
+
+@media (min-width: 640px) {
+    .floor-canvas {
+        --floor-cell: 112px;
+        --floor-tile: 102px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .floor-canvas {
+        --floor-cell: 132px;
+        --floor-tile: 120px;
+    }
+}
+
+/* Landscape (HP/tablet miring): rapatkan kartu agar lebih banyak meja terlihat
+   tanpa scroll berlebih. Portrait tetap memakai nilai di atas. Ditulis SETELAH
+   aturan min-width agar menang saat orientasi landscape. */
+@media (orientation: landscape) {
+    .floor-canvas {
+        --floor-cell: 96px;
+        --floor-tile: 88px;
+    }
+}
+
+@media (orientation: landscape) and (min-width: 900px) {
+    .floor-canvas {
+        --floor-cell: 112px;
+        --floor-tile: 102px;
+    }
 }
 
 code, .font-mono {

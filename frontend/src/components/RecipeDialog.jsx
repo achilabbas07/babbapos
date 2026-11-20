@@ -36,7 +36,7 @@ export const RecipeDialog = ({ product, inventory, onClose, onSaved }) => {
 
   return (
     <Dialog open={!!product} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent data-testid="recipe-dialog" className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent data-testid="recipe-dialog" className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader><DialogTitle>Resep · {product?.name}</DialogTitle></DialogHeader>
         <p className="text-sm text-muted-foreground">Bahan per 1 porsi. Stok bahan berkurang otomatis saat transaksi dibayar.</p>
         <div className="space-y-2">

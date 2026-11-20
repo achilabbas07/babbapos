@@ -140,7 +140,7 @@ const AdminView = () => {
         {targets.length === 0 ? <Empty testid="targets-empty" text="Belum ada target." /> : (
           <div className="overflow-x-auto rounded-2xl border border-border bg-card">
             <Table>
-              <TableHeader><TableRow><TableHead>Target</TableHead><TableHead>Jenis</TableHead><TableHead>Item</TableHead><TableHead className="text-right">Nilai target</TableHead><TableHead>Periode</TableHead><TableHead>Berlaku untuk</TableHead><TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow className="[&>th]:whitespace-nowrap"><TableHead>Target</TableHead><TableHead>Jenis</TableHead><TableHead>Item</TableHead><TableHead className="text-right">Nilai target</TableHead><TableHead>Periode</TableHead><TableHead>Berlaku untuk</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
                 {targets.map((t) => (
                   <TableRow key={t.id} data-testid={`target-row-${t.id}`}>
@@ -152,8 +152,8 @@ const AdminView = () => {
                       <div className="flex flex-wrap gap-1">{t.productNames.map((n) => <span key={n} className="rounded-full bg-secondary px-2 py-0.5 text-xs">{n}</span>)}</div>
                       {t.productNames.length === 0 && <span className="text-xs text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell data-testid={`target-value-${t.id}`} className="text-right font-mono">{targetRuleSummary(t)}</TableCell>
-                    <TableCell className="text-muted-foreground">{periodLabel(t)}</TableCell>
+                    <TableCell data-testid={`target-value-${t.id}`} className="whitespace-nowrap text-right font-mono">{targetRuleSummary(t)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">{periodLabel(t)}</TableCell>
                     <TableCell className="text-muted-foreground">
                       {isCollectiveTarget(t) ? <span data-testid={`target-scope-${t.id}`} className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Tim (kolektif)</span> : (t.waiterName || "Semua pelayan")}
                     </TableCell>

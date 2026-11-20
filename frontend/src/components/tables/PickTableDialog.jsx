@@ -5,7 +5,7 @@ import { rp } from "@/lib/api";
 
 export const PickTableDialog = ({ open, onClose, title, options, onPick, testid }) => (
   <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-    <DialogContent data-testid={`${testid}-dialog`} className="max-h-[85vh] overflow-y-auto sm:max-w-[600px]">
+    <DialogContent data-testid={`${testid}-dialog`} className="max-h-[85dvh] overflow-y-auto sm:max-w-[600px]">
       <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
       {options.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">Tidak ada meja yang bisa dipilih.</p>
