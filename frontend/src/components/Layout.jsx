@@ -8,7 +8,6 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { NAV_GROUPS, OPERATIONAL_REPORTS_GROUP_ID, filterNavItemsByRole } from "@/lib/nav";
 import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
-import { WaiterPrinterButton } from "@/components/WaiterPrinterButton";
 import { PrinterMappingDialog } from "@/components/settings/PrinterMappingDialog";
 import { useOpenBillCount } from "@/hooks/useOpenBillCount";
 
@@ -358,7 +357,6 @@ export default function Layout() {
             <div className="md:hidden"><Brand /></div>
             <div className="hidden sm:block"><Clock /></div>
             <div className="flex items-center gap-3">
-              {user.role === "waiter" && <WaiterPrinterButton />}
               <button
                 data-testid="printer-settings-button"
                 type="button"
