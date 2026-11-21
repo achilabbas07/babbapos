@@ -8,6 +8,12 @@ const PAD = 26;
 const TILE = 132;
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
+// Satu unit grid = 1/GRID dari satu sel/kotak. Koordinat x, y disimpan ke DB
+// dalam satuan unit ini (bilangan bulat 0..60), sehingga meja bisa digeser
+// bebas tanpa terkunci ke grid kasar. GRID=6 -> 60 unit = 10 sel (rentang
+// kanvas desktop lama tetap sama, jadi denah lama tampil identik).
+export const GRID = 6;
+
 // Ukuran sel & kartu dibaca dari CSS (`.floor-canvas`), sehingga denah meja
 // menyesuaikan lebar layar HP/tablet. Nilai fallback = default desktop.
 const readCssSize = (el, name, fallback) => {
@@ -44,18 +50,30 @@ export const STATUS = {
   reserved: { label: "Reservasi", dot: "bg-amber-500", text: "text-amber-600" },
 };
 
-export const autoLayout = (tables) => {
+// `convertLegacy` = koordinat DB masih satuan SEL (denah lama) -> dikali GRID
+// agar setara dengan satuan unit baru. Bila false, koordinat dianggap sudah
+// satuan unit dan dipakai apa adanya (denah baru, penempatan bebas).
+export const autoLayout = (tables, convertLegacy = false) => {
   const pos = {};
   const byArea = {};
+  const scale = convertLegacy ? GRID : 1;
   tables.forEach((t) => (byArea[t.area] = [...(byArea[t.area] || []), t]));
   Object.values(byArea).forEach((list) => {
     const used = new Set();
-    list.filter((t) => t.x != null && t.y != null).forEach((t) => { pos[t.id] = { x: t.x, y: t.y }; used.add(`${t.x},${t.y}`); });
+    list.filter((t) => t.x != null && t.y != null).forEach((t) => {
+      const x = t.x * scale;
+      const y = t.y * scale;
+      pos[t.id] = { x, y }; used.add(`${x},${y}`);
+    });
     let i = 0;
     list.filter((t) => t.x == null || t.y == null).forEach((t) => {
-      while (used.has(`${i % 8},${Math.floor(i / 8)}`)) i += 1;
-      pos[t.id] = { x: i % 8, y: Math.floor(i / 8) };
-      used.add(`${i % 8},${Math.floor(i / 8)}`);
+      // Slot otomatis selalu berjarak 1 sel penuh (GRID unit) agar meja baru
+      // tanpa koordinat tidak saling menumpuk.
+      while (used.has(`${(i % 8) * GRID},${Math.floor(i / 8) * GRID}`)) i += 1;
+      const x = (i % 8) * GRID;
+      const y = Math.floor(i / 8) * GRID;
+      pos[t.id] = { x, y };
+      used.add(`${x},${y}`);
     });
   });
   return pos;
@@ -133,7 +151,7 @@ const Tile = ({ t, editing }) => {
   );
 };
 
-const FloorTileButton = memo(({ t, position, ghost, editing, down, move, up, onTileClick, onDelete, cell, tile }) => {
+const FloorTileButton = memo(({ t, position, ghost, editing, down, move, up, onTileClick, onDelete, unit, tile }) => {
   const handlePointerDown = useCallback((event) => down(event, t), [down, t]);
   const handlePointerUp = useCallback((event) => up(event, t), [up, t]);
   const handleClick = useCallback(() => {
@@ -149,8 +167,8 @@ const FloorTileButton = memo(({ t, position, ghost, editing, down, move, up, onT
       onPointerUp={handlePointerUp}
       onClick={handleClick}
       style={{
-        left: ghost ? ghost.left : PAD + position.x * cell,
-        top: ghost ? ghost.top : PAD + position.y * cell,
+        left: ghost ? ghost.left : PAD + position.x * unit,
+        top: ghost ? ghost.top : PAD + position.y * unit,
         width: tile,
         height: tile,
         touchAction: editing ? "none" : "manipulation",
@@ -179,19 +197,20 @@ export const FloorCanvas = ({ tables, positions, setPositions, editing, onTileCl
   const drag = useRef(null);
   const [ghost, setGhost] = useState(null);
   const { cell, tile } = useFloorSizes(canvasRef);
+  const unit = cell / GRID;
 
   // Koordinat kini bebas (bisa pecahan), jadi kolom/baris dibulatkan ke atas
   // agar ukuran kanvas tetap bilangan bulat dan meja di tepi tidak terpotong.
-  const cols = Math.ceil(Math.max(10, ...tables.map((t) => (positions[t.id]?.x ?? 0) + 2)));
-  const rows = Math.ceil(Math.max(4, ...tables.map((t) => (positions[t.id]?.y ?? 0) + 2)));
+  const cols = Math.ceil(Math.max(10 * GRID, ...tables.map((t) => (positions[t.id]?.x ?? 0) + 2 * GRID)));
+  const rows = Math.ceil(Math.max(4 * GRID, ...tables.map((t) => (positions[t.id]?.y ?? 0) + 2 * GRID)));
 
   const down = useCallback((e, t) => {
     if (!editing) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const p = positions[t.id];
-    drag.current = { id: t.id, dx: e.clientX - rect.left - (PAD + p.x * cell), dy: e.clientY - rect.top - (PAD + p.y * cell), sx: e.clientX, sy: e.clientY, moved: false };
+    drag.current = { id: t.id, dx: e.clientX - rect.left - (PAD + p.x * unit), dy: e.clientY - rect.top - (PAD + p.y * unit), sx: e.clientX, sy: e.clientY, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
-  }, [editing, positions, cell]);
+  }, [editing, positions, unit]);
   const move = useCallback((e) => {
     const d = drag.current;
     if (!d) return;
@@ -209,8 +228,8 @@ export const FloorCanvas = ({ tables, positions, setPositions, editing, onTileCl
     const rect = canvasRef.current.getBoundingClientRect();
     // Posisi bebas (tanpa snap ke grid): koordinat pecahan langsung dipakai,
     // sehingga meja bisa diletakkan di mana saja tanpa melompat per 1 kotak.
-    const x = Math.max(0, Math.min(60, (e.clientX - rect.left - d.dx - PAD) / cell));
-    const y = Math.max(0, Math.min(60, (e.clientY - rect.top - d.dy - PAD) / cell));
+    const x = Math.max(0, Math.min(60, (e.clientX - rect.left - d.dx - PAD) / unit));
+    const y = Math.max(0, Math.min(60, (e.clientY - rect.top - d.dy - PAD) / unit));
     setPositions((prev) => {
       const next = { ...prev };
       const other = tables.find((o) => o.id !== d.id && next[o.id]?.x === x && next[o.id]?.y === y);
@@ -218,14 +237,14 @@ export const FloorCanvas = ({ tables, positions, setPositions, editing, onTileCl
       next[d.id] = { x, y };
       return next;
     });
-  }, [onTileClick, setPositions, tables, cell]);
+  }, [onTileClick, setPositions, tables, unit]);
 
   return (
     <div className="floor-canvas max-w-full overflow-auto rounded-3xl border border-border bg-white shadow-sm" data-testid="floor-canvas">
       <div
         ref={canvasRef}
         className="relative min-w-full"
-        style={{ width: cols * cell + PAD, height: rows * cell + PAD, backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: "18px 18px" }}
+        style={{ width: cols * unit + PAD, height: rows * unit + PAD, backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: "18px 18px" }}
       >
         {tables.map((table) => (
           <FloorTileButton
@@ -239,7 +258,7 @@ export const FloorCanvas = ({ tables, positions, setPositions, editing, onTileCl
             up={up}
             onTileClick={onTileClick}
             onDelete={onDelete}
-            cell={cell}
+            unit={unit}
             tile={tile}
           />
         ))}

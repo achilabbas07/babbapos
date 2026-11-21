@@ -17,6 +17,19 @@ const FIELDS = [
   { name: "kind", label: "Jenis", type: "select", options: [{ value: "table", label: "Meja" }, { value: "fixture", label: "Objek denah (Kasir, Bar, dll)" }] },
 ];
 
+// Penanda bahwa koordinat di DB sudah memakai satuan unit halus (bukan satuan
+// sel lama). Disimpan per-perangkat; bila DB sudah berisi unit (nilai > 10),
+// deteksi otomatis juga menganggapnya unit sehingga denah tidak melompat.
+const LAYOUT_UNITS_MARKER = "babbapos.table-layout-units";
+
+const layoutUsesUnits = (tables) => {
+  try {
+    if (typeof window !== "undefined" && window.localStorage.getItem(LAYOUT_UNITS_MARKER) === "1") return true;
+  } catch { /* localStorage tidak tersedia -> pakai deteksi data */ }
+  const coords = tables.flatMap((t) => (t.x != null && t.y != null ? [t.x, t.y] : []));
+  return coords.length > 0 && Math.max(...coords) > 10;
+};
+
 export default function Tables() {
   const { user } = useAuth();
   const isAdmin = user.role === "admin";
@@ -59,7 +72,7 @@ export default function Tables() {
   }, [load]);
 
   useEffect(() => {
-    if (!editing) setPositions(autoLayout(tables));
+    if (!editing) setPositions(autoLayout(tables, !layoutUsesUnits(tables)));
   }, [tables, editing]);
 
   const areas = [...new Set(tables.map((t) => t.area))];
@@ -70,7 +83,19 @@ export default function Tables() {
 
   const saveLayout = async () => {
     try {
-      await api.put("/tables/layout", Object.entries(positions).map(([id, p]) => ({ id, x: Math.round(p.x), y: Math.round(p.y) })));
+      // Simpan dalam satuan unit halus (integer 0..60). Pembulatan hanya untuk
+      // memenuhi tipe int backend/DB, BUKAN snap ke grid sel -> posisi bebas
+      // tetap bertahan setelah save & muat ulang.
+      const clampUnit = (v) => Math.max(0, Math.min(60, Math.round(v)));
+      const saved = Object.entries(positions).map(([id, p]) => ({ id, x: clampUnit(p.x), y: clampUnit(p.y) }));
+      await api.put("/tables/layout", saved);
+      // Sinkronkan state lokal lebih dulu agar posisi tidak melompat balik
+      // sebelum hasil muat ulang tiba (tabel lama masih berisi koordinat lama).
+      const byId = Object.fromEntries(saved.map((s) => [s.id, s]));
+      setTables((prev) => prev.map((t) => (byId[t.id] ? { ...t, x: byId[t.id].x, y: byId[t.id].y } : t)));
+      try {
+        if (typeof window !== "undefined") window.localStorage.setItem(LAYOUT_UNITS_MARKER, "1");
+      } catch { /* localStorage tidak tersedia -> abaikan */ }
       toast.success("Layout meja tersimpan");
       setEditing(false);
       load();
