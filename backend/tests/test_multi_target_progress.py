@@ -262,3 +262,36 @@ def test_shift_report_status_handles_mixed_target_types():
 
     results[1]["achieved"] = 100000
     assert all(tt.is_achieved(r) for r in results) is False
+
+
+def test_target_summary_items_snapshot_is_receipt_ready():
+    summary = targets._target_summary_items([
+        {"targetId": "TGT-ITEM", "name": "Kopi", "unit": tt.UNIT_ITEM,
+         "targetQty": 70, "targetValue": 70, "achieved": 70, "scope": "waiter"},
+        {"targetId": "TGT-REV", "name": "Omzet Tim", "unit": tt.UNIT_CURRENCY,
+         "targetQty": None, "targetValue": 400000, "achieved": 150000,
+         "targetType": tt.REVENUE_AMOUNT, "scope": "team"},
+    ])
+
+    assert summary[0] == {
+        "targetId": "TGT-ITEM", "name": "Kopi", "targetType": tt.ITEM_QUANTITY,
+        "unit": tt.UNIT_ITEM, "metric": tt.METRIC_ITEM, "periodType": tt.PERIOD_SHIFT,
+        "startTime": None, "endTime": None, "scope": "waiter",
+        "targetValue": 70.0, "achieved": 70.0, "achieved_flag": True,
+    }
+    assert summary[1]["targetType"] == tt.REVENUE_AMOUNT
+    assert summary[1]["unit"] == tt.UNIT_CURRENCY
+    assert summary[1]["targetValue"] == 400000.0
+    assert summary[1]["achieved"] == 150000.0
+    assert summary[1]["achieved_flag"] is False
+    assert summary[1]["scope"] == "team"
+
+
+def test_target_summary_items_handles_empty_and_legacy_values():
+    assert targets._target_summary_items([]) == []
+    # Target lama tanpa ``unit``/``targetValue`` tetap aman (fallback targetQty).
+    legacy = targets._target_summary_items([{"targetId": "T1", "achieved": 3, "targetQty": 5}])
+    assert legacy[0]["unit"] == tt.UNIT_ITEM
+    assert legacy[0]["targetValue"] == 5.0
+    assert legacy[0]["achieved"] == 3.0
+    assert legacy[0]["achieved_flag"] is False

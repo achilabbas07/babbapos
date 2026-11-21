@@ -4,6 +4,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Safe-area insets (Android WebView / Capacitor edge-to-edge + iOS notch).
+   Dijadikan variabel agar bisa dipakai berulang tanpa menulis env() di mana-mana.
+   Nilai 0px di browser desktop / WebView tanpa edge-to-edge. */
+:root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+}
+
 body {
     margin: 0;
     font-family: "Plus Jakarta Sans", sans-serif;
@@ -25,16 +35,20 @@ html {
    same element, preventing the bottom action buttons from being covered by
    the Android system navigation / Back bar. Spacing must be responsive
    (left) so this file is not treated as a "temporary" one-off. */
+.pt-safe {
+    padding-top: var(--sat);
+}
+
 .pb-safe {
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+    padding-bottom: calc(var(--sab) + 0.75rem);
 }
 
 .pb-safe-lg {
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+    padding-bottom: calc(var(--sab) + 1.5rem);
 }
 
 .safe-dialog {
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+    padding-bottom: calc(var(--sab) + 1.5rem);
 }
 
 /* Denah meja: ukuran sel & kartu menyesuaikan lebar layar HP & tablet.

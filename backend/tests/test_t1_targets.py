@@ -130,8 +130,11 @@ def test_close_and_reset():
     assert report.json()["waiter_name"] == c.json()["userName"]
     assert report.json()["shift_id"] == c.json()["id"]
     assert set(report.json()["results"]) == {
-        "total_orders", "active_tables", "orders_data", "voids", "target_sales_status"
+        "total_orders", "active_tables", "orders_data", "voids", "target_sales_status",
+        "target_items",
     }
+    target_items = report.json()["results"]["target_items"]
+    assert any(t["targetId"] == S["tgt"] and t["achieved"] == 1 for t in target_items)
     assert any(x["id"] == c.json()["id"] for x in S["admin"].get(f"{BASE}/waiter-shifts").json())
     assert w.post(f"{BASE}/waiter-shifts/close").status_code == 400
     assert w.post(f"{BASE}/waiter-shifts/open").status_code == 200

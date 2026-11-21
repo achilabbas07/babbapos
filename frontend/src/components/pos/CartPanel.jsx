@@ -124,7 +124,7 @@ export const CartPanel = ({ order, setOrder, tables, customers, waiters, waiterR
   const count = cart.reduce((s, i) => s + i.qty, 0);
 
   return (
-    <aside data-testid="cart-panel" className="flex flex-col rounded-2xl border border-border bg-card shadow-sm md:sticky md:top-[5.5rem] md:h-[calc(100dvh-6.5rem)] md:min-h-[560px]">
+    <aside data-testid="cart-panel" className="flex flex-col rounded-2xl border border-border bg-card shadow-sm md:sticky md:top-[calc(var(--sat)_+_5.5rem)] md:h-[calc(100dvh_-_var(--sat)_-_6.5rem)] md:min-h-[560px]">
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <p className="text-sm font-semibold">
           Pesanan {order.billId && <span data-testid="cart-bill-id" className="font-mono text-primary">#{order.billId}</span>}

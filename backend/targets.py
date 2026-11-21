@@ -10,6 +10,7 @@ from target_types import (
     DEFAULT_TARGET_TYPE,
     ITEM_QUANTITY,
     METRIC_ITEM,
+    METRIC_REVENUE,
     METRICS,
     PERIOD_DAILY,
     PERIOD_SHIFT,
@@ -18,6 +19,8 @@ from target_types import (
     TARGET_TYPES,
     TIME_BOUNDED,
     TargetData,
+    UNIT_CURRENCY,
+    UNIT_ITEM,
     evaluate_target,
     is_achieved,
     is_collective,
@@ -320,6 +323,45 @@ async def progress_for(shift: dict) -> dict:
             "openedAt": shift["openedAt"], "items": items}
 
 
+def _target_summary_items(target_results: List[dict]) -> List[dict]:
+    """Ringkasan tiap target untuk struk tutup shift pelayan.
+
+    Mengubah hasil :func:`evaluate_target` menjadi daftar ringkas yang cukup
+    untuk dicetak: nama, tipe, satuan, nilai target, capaian, persentase, dan
+    penanda tercapai. Struk memakai nilai ini apa adanya (tanpa menghitung
+    ulang) supaya angka di struk identik dengan menu Target Sales.
+    """
+    items: List[dict] = []
+    for r in target_results or []:
+        unit = r.get("unit") or (UNIT_ITEM if r.get("targetQty") is not None else UNIT_CURRENCY)
+        target_value = r.get("targetValue")
+        if target_value is None:
+            target_value = r.get("targetQty") or 0
+        try:
+            target_value = float(target_value)
+        except (TypeError, ValueError):
+            target_value = 0.0
+        try:
+            achieved = float(r.get("achieved") or 0)
+        except (TypeError, ValueError):
+            achieved = 0.0
+        items.append({
+            "targetId": r.get("targetId"),
+            "name": r.get("name") or "Target",
+            "targetType": r.get("targetType") or DEFAULT_TARGET_TYPE,
+            "unit": unit,
+            "metric": r.get("metric") or (METRIC_ITEM if unit == UNIT_ITEM else METRIC_REVENUE),
+            "periodType": r.get("periodType") or PERIOD_SHIFT,
+            "startTime": r.get("startTime"),
+            "endTime": r.get("endTime"),
+            "scope": r.get("scope") or "waiter",
+            "targetValue": target_value,
+            "achieved": achieved,
+            "achieved_flag": is_achieved(r),
+        })
+    return items
+
+
 async def waiter_shift_report(shift: dict, target_results: List[dict]) -> dict:
     logs = await db.order_logs.find({"shiftId": shift["_id"]}).to_list(None)
     # Payment logs settle bills; these sources track ordered-quantity changes.
@@ -376,6 +418,7 @@ async def waiter_shift_report(shift: dict, target_results: List[dict]) -> dict:
         ],
         "voids": {"total": len(void_logs), "details": void_details},
         "target_sales_status": target_status,
+        "target_items": _target_summary_items(target_results),
     }
 
 
@@ -505,6 +548,10 @@ async def get_waiter_shift_report(shift_id: str, user: User = Depends(get_curren
     report = shift.get("report")
     if report is None:
         report = await waiter_shift_report(shift, shift.get("results") or [])
+    elif "target_items" not in report:
+        # Laporan lama belum menyimpan ringkasan target; lengkapi dari hasil
+        # tersimpan supaya cetak ulang tetap menampilkan capaian target.
+        report = {**report, "target_items": _target_summary_items(shift.get("results") or [])}
     return {
         "id": shift["_id"],
         "waiter_name": shift.get("userName", ""),

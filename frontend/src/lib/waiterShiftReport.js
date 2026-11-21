@@ -19,6 +19,34 @@ const paddedRow = (label, value) => {
 
 const pad2 = (number) => String(number).padStart(2, "0");
 
+const thousands = (value) => new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 })
+  .format(Math.round(Number(value) || 0));
+
+// Teks capaian/target untuk satu target: `70/70` untuk item, `Rp350.000/400.000`
+// untuk omzet. Ringkas agar tetap rapi di lebar struk 32 karakter.
+const targetValueText = (item) => {
+  const achieved = Math.round(Number(item?.achieved) || 0);
+  const target = Math.round(Number(item?.targetValue) || 0);
+  return item?.unit === "currency"
+    ? `Rp${thousands(achieved)}/${thousands(target)}`
+    : `${achieved}/${target}`;
+};
+
+// Baris ringkasan target: nama target lalu status + capaian/target aktual.
+const targetSummaryLines = (items) => {
+  const lines = [];
+  items.forEach((item) => {
+    wrap(`* ${item?.name || "Target"}`, LINE_WIDTH - 4).forEach((text) => {
+      lines.push({ text, align: "left" });
+    });
+    const status = item?.achieved_flag ? "TERCAPAI" : "BELUM TERCAPAI";
+    wrap(`${status} ${targetValueText(item)}`, LINE_WIDTH - 4).forEach((text) => {
+      lines.push({ text, align: "left" });
+    });
+  });
+  return lines;
+};
+
 // Backend stores shift timestamps in UTC (with an explicit offset). The receipt
 // must show the cashier/waiter local time, so any zoned value is converted while
 // legacy wall-clock strings (no offset) are printed as-is.
@@ -90,6 +118,7 @@ function validateReport(shift) {
     }
   }
   if (typeof results.target_sales_status !== "string"
+    || (results.target_items != null && !Array.isArray(results.target_items))
     || results.orders_data.some((item) => !item || typeof item.variant_name !== "string" || typeof item.qty !== "number")
     || results.voids.details.some((item) => !item || typeof item.name !== "string" || typeof item.qty !== "number")) {
     throw new Error("Isi laporan produk, void, atau target tidak valid.");
@@ -164,6 +193,12 @@ export function buildWaiterShiftReportLines(shift, { reprint = false } = {}) {
     { text: "RINGKASAN TARGET", align: "center", bold: true },
     { text: `+${"-".repeat(LINE_WIDTH - 2)}+`, align: "center" },
   );
+  if (Array.isArray(results.target_items) && results.target_items.length) {
+    targetSummaryLines(results.target_items).forEach((line) => {
+      lines.push({ text: `| ${line.text.padEnd(LINE_WIDTH - 4)} |`, align: "center" });
+    });
+    lines.push({ text: `+${"-".repeat(LINE_WIDTH - 2)}+`, align: "center" });
+  }
   wrap(results.target_sales_status || "-", LINE_WIDTH - 4).forEach((text) => {
     lines.push({ text: `| ${text.padEnd(LINE_WIDTH - 4)} |`, align: "center", bold: true });
   });

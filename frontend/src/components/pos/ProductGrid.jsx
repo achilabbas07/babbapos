@@ -13,7 +13,7 @@ const ProductCard = ({ product, stock, ojol, onAdd, index }) => {
       style={{ animationDelay: `${index * 30}ms` }}
       className="fade-up group touch-manipulation overflow-hidden rounded-xl border border-border bg-card text-left shadow-sm transition-transform duration-200 hover:-translate-y-0.5 hover:border-primary/60 active:scale-[0.97]"
     >
-      <div className="relative aspect-[4/3] overflow-hidden bg-secondary">
+      <div className="relative aspect-[16/10] overflow-hidden bg-secondary">
         {stock[product.id] != null && stock[product.id] < 1 && (
           <span data-testid={`pos-product-stock-minus-${product.id}`} className="absolute left-1.5 top-1.5 z-10 rounded-full bg-destructive px-2 py-0.5 text-[10px] font-bold text-white shadow">
             {stock[product.id] < 0 ? "Stok Minus" : "Stok 0"}
@@ -25,9 +25,9 @@ const ProductCard = ({ product, stock, ojol, onAdd, index }) => {
           <div className="grid h-full place-items-center text-muted-foreground"><UtensilsCrossed className="h-8 w-8" /></div>
         )}
       </div>
-      <div className="p-2.5">
-        <p className="line-clamp-2 min-h-[2.25rem] text-[13px] font-semibold leading-snug">{product.name}</p>
-        <p data-testid={`pos-product-price-${product.id}`} className="mt-1 font-mono text-xs font-semibold text-primary">
+      <div className="p-2">
+        <p className="line-clamp-2 min-h-[2rem] text-[12px] font-semibold leading-tight sm:text-[13px]">{product.name}</p>
+        <p data-testid={`pos-product-price-${product.id}`} className="mt-0.5 font-mono text-[11px] font-semibold text-primary sm:text-xs">
           {rp(price)}{ojol && <span className="ml-1 font-sans text-[10px] text-muted-foreground">Ojol</span>}
         </p>
       </div>
@@ -70,7 +70,7 @@ export const ProductGrid = ({ products, stock = {}, onAdd, ojol }) => {
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(128px,1fr))]">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(102px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(112px,1fr))] lg:gap-2.5">
         {list.map((product, index) => (
           <ProductCard
             key={product.id}
