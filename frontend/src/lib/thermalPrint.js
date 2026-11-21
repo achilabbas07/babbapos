@@ -58,7 +58,7 @@ export function incrementPrintCount(key) {
 const append = (lines, value) => lines.push(...wrapPrintText(value));
 const addSeparator = (lines) => lines.push("-".repeat(PRINT_LINE_WIDTH));
 
-export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, currency, itemName }) {
+export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, currency, itemName, customerPoints }) {
   const lines = [];
   const waiterName = trx.waiterName || trx.userName || trx.userId || "-";
   const cashierName = trx.userName || trx.userId || "-";
@@ -79,8 +79,16 @@ export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, c
   }
   addSeparator(lines);
   if (trx.discount > 0) append(lines, `Subtotal: ${currency(trx.subtotal)}`);
-  if (trx.promoDiscount > 0) append(lines, `Promo: -${currency(trx.promoDiscount)}`);
-  if (trx.pointsDiscount > 0) append(lines, `Poin: -${currency(trx.pointsDiscount)}`);
+  // Nama promo memakai kode promo yang tersimpan pada transaksi.
+  if (trx.promoDiscount > 0) {
+    append(lines, `Promo${trx.promoCode ? ` ${trx.promoCode}` : ""}: -${currency(trx.promoDiscount)}`);
+  }
+  if (trx.pointsDiscount > 0) {
+    const redeemed = Number(trx.pointsRedeemed) || 0;
+    append(lines, redeemed > 0
+      ? `Poin ditukar: ${redeemed} (-${currency(trx.pointsDiscount)})`
+      : `Poin: -${currency(trx.pointsDiscount)}`);
+  }
   append(lines, `Total: ${currency(trx.total)}`);
   const payments = Array.isArray(trx.payments) ? trx.payments.filter((leg) => Number(leg?.amount) > 0) : [];
   const isSplit = payments.length > 1;
@@ -108,6 +116,18 @@ export function buildPaidReceiptLines({ trx, printCount, dateText, paidAtText, c
   }
   append(lines, "Status: LUNAS");
   if (trx.tableName) append(lines, "Status Meja: LUNAS");
+  // Rincian poin pelanggan: perolehan poin (1 poin / Rp10.000, sama dengan
+  // trigger loyalitas pada transaksi) dan saldo poin terbaru bila tersedia.
+  const pointsEarned = Math.floor((Number(trx.total) || 0) / 10000);
+  const customerPointsLines = [];
+  if (trx.customerId || trx.customerName) {
+    if (pointsEarned > 0) customerPointsLines.push(...wrapPrintText(`Poin didapat: ${pointsEarned}`));
+    if (customerPoints != null) customerPointsLines.push(...wrapPrintText(`Saldo poin: ${customerPoints}`));
+  }
+  if (customerPointsLines.length) {
+    addSeparator(lines);
+    lines.push(...customerPointsLines);
+  }
   addSeparator(lines);
   if (paidAtText) append(lines, `Waktu bayar: ${paidAtText}`);
   append(lines, "Terima Kasih Atas Kunjungan Anda");

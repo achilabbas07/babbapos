@@ -65,6 +65,40 @@ describe("thermal print templates", () => {
     expect(lines[lines.length - 1]).toBe("Terima Kasih Atas Kunjungan Anda");
   });
 
+  it("shows the promo name, redeemed points details, and the customer points summary", () => {
+    const lines = buildPaidReceiptLines({
+      trx: {
+        ...bill,
+        id: "TRX-PROMO",
+        method: "Cash",
+        subtotal: 50000,
+        discount: 15000,
+        promoCode: "HEMAT",
+        promoDiscount: 5000,
+        pointsRedeemed: 100,
+        pointsDiscount: 10000,
+        total: 35000,
+        cashGiven: 35000,
+        change: 0,
+        customerId: "CUST-1",
+        customerName: "Budi",
+      },
+      printCount: 0,
+      dateText: "29/10/2026 10:00",
+      paidAtText: "29/10/2026 10:03",
+      currency,
+      itemName,
+      customerPoints: 250,
+    });
+
+    expect(lines).toContain("Promo HEMAT: -Rp5000");
+    expect(lines).toContain("Poin ditukar: 100 (-Rp10000)");
+    expect(lines).toContain("Total: Rp35000");
+    expect(lines).toContain("Poin didapat: 3");
+    expect(lines).toContain("Saldo poin: 250");
+    expect(lines.every((line) => line.length <= PRINT_LINE_WIDTH)).toBe(true);
+  });
+
   it("prints the combined split total with each leg and derives change from the cash leg", () => {
     const lines = buildPaidReceiptLines({
       trx: {

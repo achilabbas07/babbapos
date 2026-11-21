@@ -200,6 +200,32 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(lines.some((line) => line.includes("Kembalian"))).toBe(false);
   });
 
+  it("prints the promo name, redeemed points, and customer points summary for payments", () => {
+    const lines = buildBluetoothReceiptLines("payment", {
+      id: "TRX-PROMO",
+      paymentMethod: "Cash",
+      customerId: "CUST-1",
+      customerName: "Budi",
+      items: [{ qty: 1, name: "Kopi Susu", price: 50000, subtotal: 50000 }],
+      subtotal: 50000,
+      promoCode: "HEMAT",
+      promoDiscount: 5000,
+      pointsRedeemed: 100,
+      pointsDiscount: 10000,
+      total: 35000,
+      cashGiven: 35000,
+      change: 0,
+      customerPoints: 250,
+    });
+    const text = lines.map(({ text: value }) => value);
+
+    expect(text.some((line) => line.includes("Promo HEMAT") && line.includes("Rp 5.000"))).toBe(true);
+    expect(text.some((line) => line.includes("Poin ditukar 100") && line.includes("Rp 10.000"))).toBe(true);
+    expect(text.some((line) => line.startsWith("Total") && line.includes("Rp 35.000"))).toBe(true);
+    expect(text.some((line) => line.startsWith("Poin didapat") && line.includes("3"))).toBe(true);
+    expect(text.some((line) => line.startsWith("Saldo poin") && line.includes("250"))).toBe(true);
+  });
+
   it("prints the total once, then every split leg and the change row for mixed cash", () => {
     const lines = buildBluetoothReceiptLines("payment", {
       paymentMethod: "QRIS",

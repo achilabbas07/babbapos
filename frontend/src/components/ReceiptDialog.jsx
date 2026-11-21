@@ -1,9 +1,9 @@
 import { Printer } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { fmtDate, itemName, rp } from "@/lib/api";
+import { api, fmtDate, itemName, rp } from "@/lib/api";
 import { printBluetoothReceipt, printerTypeForDocType } from "@/lib/bluetoothThermalPrinter";
 import { useProfile } from "@/context/ProfileContext";
 import { BrandLogo } from "@/components/BrandLogo";
@@ -53,9 +53,30 @@ export const ReceiptDialog = ({ trx, onClose }) => {
   const { profile } = useProfile();
   const [, setPrintRevision] = useState(0);
   const [printing, setPrinting] = useState(false);
+  // Saldo poin terbaru pelanggan (best-effort) untuk ditampilkan di struk. Bila
+  // gagal diambil, bagian ini dilewati tanpa mengganggu alur pembayaran.
+  const [customerPoints, setCustomerPoints] = useState(null);
   const printKey = printCountKey("receipt", trx?.id);
   const printCount = readPrintCount(printKey);
   const dateText = trx ? fmtDate(trx.orderTime || trx.createdAt || trx.date) : "";
+
+  useEffect(() => {
+    const customerId = trx?.customerId;
+    if (!customerId) {
+      setCustomerPoints(null);
+      return undefined;
+    }
+    let cancelled = false;
+    api.get(`/customers/${customerId}`)
+      .then(({ data }) => {
+        if (!cancelled) setCustomerPoints(Number(data?.points) || 0);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerPoints(null);
+      });
+    return () => { cancelled = true; };
+  }, [trx?.customerId]);
+
   const lines = trx ? buildPaidReceiptLines({
     trx,
     printCount,
@@ -63,6 +84,7 @@ export const ReceiptDialog = ({ trx, onClose }) => {
     paidAtText: fmtDate(trx.paidAt || trx.date),
     currency: rp,
     itemName,
+    customerPoints,
   }) : [];
 
   const handlePrint = async () => {
@@ -92,6 +114,12 @@ export const ReceiptDialog = ({ trx, onClose }) => {
           cashGiven: trx.cashGiven,
           totalPaid: trx.totalPaid,
           change: trx.change,
+          promoCode: trx.promoCode,
+          promoDiscount: trx.promoDiscount,
+          pointsRedeemed: trx.pointsRedeemed,
+          pointsDiscount: trx.pointsDiscount,
+          customerId: trx.customerId,
+          customerPoints,
           platform: trx.platform,
           profile: {
             nama_usaha: profile.app_name,

@@ -203,6 +203,23 @@ function paymentLines(data) {
   lines.push(
     { type: "text", text: "--------------------------------" },
     { type: "text", text: formatLine(`Subtotal ${itemCount} Produk`, formatCurrency(subtotal)) },
+  );
+  // Informasi promo (beserta namanya) dan penukaran poin ditampilkan sebagai
+  // baris pengurang tepat di atas "Total" agar nominal total mudah ditelusuri.
+  const promoDiscount = Number(data.promoDiscount) || 0;
+  const pointsDiscount = Number(data.pointsDiscount) || 0;
+  if (promoDiscount > 0) {
+    lines.push(...formatItemLines(`Promo ${data.promoCode ? data.promoCode : "Diskon"}`, `-${formatCurrency(promoDiscount)}`)
+      .map((text) => ({ type: "text", text })));
+  }
+  if (pointsDiscount > 0) {
+    const redeemed = Number(data.pointsRedeemed) || 0;
+    lines.push(...formatItemLines(
+      redeemed > 0 ? `Poin ditukar ${redeemed}` : "Poin ditukar",
+      `-${formatCurrency(pointsDiscount)}`,
+    ).map((text) => ({ type: "text", text })));
+  }
+  lines.push(
     { type: "text", text: formatLine("Total", formatCurrency(total)), bold: true },
     // Split: baris "Total" di atas sudah final, jadi cukup rincian metode + kembalian
     // (tanpa "Bayar Split"/"Total Bayar" yang nilainya sama persis dengan "Total").
@@ -216,6 +233,19 @@ function paymentLines(data) {
     ...(isCash
       ? [{ type: "text", text: formatLine("Kembalian", formatCurrency(changeDue)) }]
       : []),
+  );
+  // Rincian poin pelanggan: poin yang diperoleh (1 poin / Rp10.000, sesuai
+  // trigger loyalitas) dan saldo poin terbaru bila datanya tersedia.
+  const pointsEarned = Math.floor((Number(total) || 0) / 10000);
+  if (data.customerId || data.customerName) {
+    if (pointsEarned > 0) {
+      lines.push({ type: "text", text: formatLine(`Poin didapat`, String(pointsEarned)) });
+    }
+    if (data.customerPoints != null) {
+      lines.push({ type: "text", text: formatLine("Saldo poin", String(data.customerPoints)) });
+    }
+  }
+  lines.push(
     { type: "text", text: "================================" },    
     { type: "center", text: RECEIPT_FOOTER },    
     { type: "blank", text: "" },
