@@ -35,12 +35,17 @@ const targetValueText = (item) => {
 // Baris ringkasan target: nama target lalu status + capaian/target aktual.
 const targetSummaryLines = (items) => {
   const lines = [];
+  const inner = LINE_WIDTH - 4;
   items.forEach((item) => {
-    wrap(`* ${item?.name || "Target"}`, LINE_WIDTH - 4).forEach((text) => {
-      lines.push({ text, align: "left" });
+    // Nama target diratakan tengah di dalam lebar kotak dan dicetak tebal
+    // (bold) bila didukung formatter struk. Prefix lama "* " dihilangkan.
+    wrap(item?.name || "Target", inner).forEach((text) => {
+      const name = String(text);
+      const left = Math.max(0, Math.floor((inner - name.length) / 2));
+      lines.push({ text: `${" ".repeat(left)}${name}`, align: "left", bold: true });
     });
     const status = item?.achieved_flag ? "TERCAPAI" : "BELUM TERCAPAI";
-    wrap(`${status} ${targetValueText(item)}`, LINE_WIDTH - 4).forEach((text) => {
+    wrap(`${status} ${targetValueText(item)}`, inner).forEach((text) => {
       lines.push({ text, align: "left" });
     });
   });
@@ -195,13 +200,18 @@ export function buildWaiterShiftReportLines(shift, { reprint = false } = {}) {
   );
   if (Array.isArray(results.target_items) && results.target_items.length) {
     targetSummaryLines(results.target_items).forEach((line) => {
-      lines.push({ text: `| ${line.text.padEnd(LINE_WIDTH - 4)} |`, align: "center" });
+      lines.push({
+        text: `| ${line.text.padEnd(LINE_WIDTH - 4)} |`,
+        align: "center",
+        ...(line.bold ? { bold: true } : {}),
+      });
     });
-    lines.push({ text: `+${"-".repeat(LINE_WIDTH - 2)}+`, align: "center" });
+  } else {
+    // Tanpa daftar target, tetap tampilkan status agar kotak tidak kosong.
+    wrap(results.target_sales_status || "-", LINE_WIDTH - 4).forEach((text) => {
+      lines.push({ text: `| ${text.padEnd(LINE_WIDTH - 4)} |`, align: "center", bold: true });
+    });
   }
-  wrap(results.target_sales_status || "-", LINE_WIDTH - 4).forEach((text) => {
-    lines.push({ text: `| ${text.padEnd(LINE_WIDTH - 4)} |`, align: "center", bold: true });
-  });
   lines.push(
     { text: `+${"-".repeat(LINE_WIDTH - 2)}+`, align: "center" },
     { text: "", align: "left" },

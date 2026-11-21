@@ -90,7 +90,7 @@ describe("waiter shift report printer", () => {
       .toThrow("Data laporan shift pelayan tidak valid.");
   });
 
-  it("prints every target with its status and achieved/target values", () => {
+  it("prints every target name centered/bold with its status and achieved/target values", () => {
     const withTargets = {
       ...shift,
       results: {
@@ -102,23 +102,33 @@ describe("waiter shift report printer", () => {
         ],
       },
     };
-    const lines = buildWaiterShiftReportLines(withTargets).map(({ text }) => text);
+    const built = buildWaiterShiftReportLines(withTargets);
+    const texts = built.map(({ text }) => text);
 
-    expect(lines.some((text) => text.includes("* Paket Kopi"))).toBe(true);
-    expect(lines.some((text) => text.includes("TERCAPAI 70/70"))).toBe(true);
-    expect(lines.some((text) => text.includes("* Omzet Tim"))).toBe(true);
-    // Nilai omzet panjang, jadi status dan capaian membungkus ke baris berikutnya.
-    expect(lines.some((text) => text.includes("BELUM TERCAPAI"))).toBe(true);
-    expect(lines.some((text) => text.includes("Rp150.000/400.000"))).toBe(true);
-    // Setiap baris ringkasan target dibungkus kotak dan tetap dalam lebar struk.
-    expect(lines.filter((text) => text.startsWith("| *")).every((text) => text.endsWith(" |"))).toBe(true);
-    expect(withTargets.results.target_items.length).toBeGreaterThan(0);
-    expect(buildWaiterShiftReportLines(withTargets).every(({ text }) => Array.from(text).length <= 32)).toBe(true);
+    // Nama target rata tengah di dalam kotak, dicetak tebal, tanpa prefix "*".
+    const nameLine = built.find(({ text }) => text.includes("Paket Kopi"));
+    expect(nameLine.bold).toBe(true);
+    expect(nameLine.text.startsWith("| ") && nameLine.text.endsWith(" |")).toBe(true);
+    const inner = nameLine.text.slice(2, -2);
+    const lead = inner.length - inner.trimStart().length;
+    const trail = inner.length - inner.trimEnd().length;
+    expect(Math.abs(lead - trail)).toBeLessThanOrEqual(1);
+    expect(built.find(({ text }) => text.includes("Omzet Tim")).bold).toBe(true);
+    expect(texts.some((text) => text.includes("* "))).toBe(false);
+
+    // Baris capaian tetap seperti sekarang (format tidak berubah).
+    expect(texts.some((text) => text.includes("TERCAPAI 70/70") && text.startsWith("| ") && text.endsWith(" |"))).toBe(true);
+    expect(texts.some((text) => text.includes("Rp150.000/400.000"))).toBe(true);
+    // Baris status ringkasan di bawah kotak sudah dihapus: "BELUM TERCAPAI"
+    // hanya muncul sekali (baris capaian target), bukan dua kali.
+    expect(texts.filter((text) => text.includes("BELUM TERCAPAI"))).toHaveLength(1);
+    expect(built.every(({ text }) => Array.from(text).length <= 32)).toBe(true);
   });
 
-  it("keeps the legacy status-only box when target_items is not stored", () => {
+  it("falls back to the status-only box when target_items is not stored", () => {
     const lines = buildWaiterShiftReportLines(shift).map(({ text }) => text);
     expect(lines.some((text) => text.includes("* "))).toBe(false);
+    expect(lines.some((text) => text.includes("BELUM TERCAPAI") && text.startsWith("|") && text.endsWith("|"))).toBe(true);
     expect(lines.some((text) => text === `+${"-".repeat(30)}+`)).toBe(true);
   });
 
