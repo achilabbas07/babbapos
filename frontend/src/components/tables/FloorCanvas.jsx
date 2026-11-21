@@ -180,8 +180,10 @@ export const FloorCanvas = ({ tables, positions, setPositions, editing, onTileCl
   const [ghost, setGhost] = useState(null);
   const { cell, tile } = useFloorSizes(canvasRef);
 
-  const cols = Math.max(10, ...tables.map((t) => (positions[t.id]?.x ?? 0) + 2));
-  const rows = Math.max(4, ...tables.map((t) => (positions[t.id]?.y ?? 0) + 2));
+  // Koordinat kini bebas (bisa pecahan), jadi kolom/baris dibulatkan ke atas
+  // agar ukuran kanvas tetap bilangan bulat dan meja di tepi tidak terpotong.
+  const cols = Math.ceil(Math.max(10, ...tables.map((t) => (positions[t.id]?.x ?? 0) + 2)));
+  const rows = Math.ceil(Math.max(4, ...tables.map((t) => (positions[t.id]?.y ?? 0) + 2)));
 
   const down = useCallback((e, t) => {
     if (!editing) return;
@@ -205,8 +207,10 @@ export const FloorCanvas = ({ tables, positions, setPositions, editing, onTileCl
     setGhost(null);
     if (!d.moved) return onTileClick(t);
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.round((e.clientX - rect.left - d.dx - PAD) / cell));
-    const y = Math.max(0, Math.round((e.clientY - rect.top - d.dy - PAD) / cell));
+    // Posisi bebas (tanpa snap ke grid): koordinat pecahan langsung dipakai,
+    // sehingga meja bisa diletakkan di mana saja tanpa melompat per 1 kotak.
+    const x = Math.max(0, Math.min(60, (e.clientX - rect.left - d.dx - PAD) / cell));
+    const y = Math.max(0, Math.min(60, (e.clientY - rect.top - d.dy - PAD) / cell));
     setPositions((prev) => {
       const next = { ...prev };
       const other = tables.find((o) => o.id !== d.id && next[o.id]?.x === x && next[o.id]?.y === y);

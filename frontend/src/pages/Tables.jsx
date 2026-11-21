@@ -70,7 +70,7 @@ export default function Tables() {
 
   const saveLayout = async () => {
     try {
-      await api.put("/tables/layout", Object.entries(positions).map(([id, p]) => ({ id, ...p })));
+      await api.put("/tables/layout", Object.entries(positions).map(([id, p]) => ({ id, x: Math.round(p.x), y: Math.round(p.y) })));
       toast.success("Layout meja tersimpan");
       setEditing(false);
       load();
