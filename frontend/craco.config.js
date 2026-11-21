@@ -1,7 +1,26 @@
 // craco.config.js
 const path = require("path");
 const { GenerateSW } = require("workbox-webpack-plugin");
-require("dotenv").config();
+
+// Load .env files in the SAME precedence order react-scripts uses, so that
+// environment-specific values (e.g. .env.production) win over the shared .env.
+// A plain `require("dotenv").config()` only loads .env and, because dotenv never
+// overrides already-set variables, it would shadow .env.production and bake the
+// local dev backend URL into production/Android builds.
+const dotenv = require("dotenv");
+const dotenvExpand = require("dotenv-expand");
+const envDir = __dirname;
+const nodeEnv = process.env.NODE_ENV || "development";
+const dotenvFiles = [
+  `.env.${nodeEnv}.local`,
+  // .env.local is excluded for tests so results are reproducible for everyone.
+  nodeEnv !== "test" && ".env.local",
+  `.env.${nodeEnv}`,
+  ".env",
+].filter(Boolean);
+dotenvFiles.forEach((file) => {
+  dotenvExpand(dotenv.config({ path: path.join(envDir, file) }));
+});
 
 // Check if we're in development/preview mode (not production build)
 // Craco sets NODE_ENV=development for start, NODE_ENV=production for build

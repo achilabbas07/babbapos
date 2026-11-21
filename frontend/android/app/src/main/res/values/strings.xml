@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">BabbaPOS</string>
-    <string name="title_activity_main">BabbaPOS</string>
+    <string name="app_name">Warkop Babba POS</string>
+    <string name="title_activity_main">Warkop Babba POS</string>
     <string name="package_name">com.warkopbabba.pos</string>
     <string name="custom_url_scheme">com.warkopbabba.pos</string>
 </resources>

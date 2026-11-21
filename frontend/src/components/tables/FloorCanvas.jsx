@@ -3,9 +3,9 @@ import { Armchair, Store } from "lucide-react";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { fmtTime } from "@/lib/api";
 
-export const CELL = 132;
-const PAD = 20;
-const TILE = 120;
+export const CELL = 156;
+const PAD = 26;
+const TILE = 132;
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 // Ukuran sel & kartu dibaca dari CSS (`.floor-canvas`), sehingga denah meja
@@ -73,19 +73,19 @@ const Tile = ({ t, editing }) => {
 
   if (busy) {
     return (
-      <div className={`flex h-full w-full min-w-0 flex-col px-1.5 py-1.5 ${s.text}`}>
-        <p data-testid={`table-tile-customer-${t.id}`} className="w-full min-w-0 max-w-full truncate text-xs font-bold text-slate-700 sm:text-sm">
+      <div className={`flex h-full w-full min-w-0 flex-col gap-1 px-2.5 py-2 ${s.text}`}>
+        <p data-testid={`table-tile-customer-${t.id}`} className="w-full min-w-0 max-w-full truncate text-[13px] font-bold leading-tight text-slate-700 sm:text-sm">
           {od.customerName?.trim() || "UMUM"}
         </p>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1">
           <Icon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={2.2} />
-          <p className="mt-0.5 w-full min-w-0 max-w-full truncate text-xs font-bold sm:text-sm">{t.name}</p>
+          <p className="w-full min-w-0 max-w-full truncate text-[13px] font-bold leading-tight sm:text-sm">{t.name}</p>
         </div>
-        <div className="mt-auto flex w-full items-end justify-between gap-1">
-          <p data-testid={`table-tile-time-${t.id}`} className="truncate text-left font-mono text-[10px] sm:text-xs">
+        <div className="mt-auto flex w-full items-end justify-between gap-1.5">
+          <p data-testid={`table-tile-time-${t.id}`} className="truncate text-left font-mono text-[10px] leading-tight text-muted-foreground sm:text-xs">
             {fmtTime(od.startTime)}
           </p>
-          <p className="shrink-0 text-right text-xs font-bold sm:text-sm">{shortRp(od.total || 0)}</p>
+          <p className="shrink-0 text-right text-sm font-bold leading-tight sm:text-base">{shortRp(od.total || 0)}</p>
         </div>
       </div>
     );
@@ -95,30 +95,30 @@ const Tile = ({ t, editing }) => {
   // kotak berlapis (nested container) di dalam kartu utama -> bersih & minimalis.
   if (isPaid) {
     return (
-      <div className="relative flex h-full w-full min-w-0 flex-col px-1.5 py-1.5">
+      <div className="relative flex h-full w-full min-w-0 flex-col gap-1 px-2.5 py-2">
         <span className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-emerald-400/70" aria-hidden="true" />
         <span
           data-testid={`table-tile-paid-badge-${t.id}`}
-          className="absolute -left-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white shadow-sm"
+          className="absolute -left-1.5 -top-1.5 z-10 flex items-center gap-0.5 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white shadow-sm"
         >
           <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
           </svg>
           LUNAS
         </span>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1">
           <Icon className="h-5 w-5 text-emerald-600 sm:h-6 sm:w-6" strokeWidth={2.2} />
-          <p className="mt-0.5 w-full min-w-0 max-w-full truncate text-xs font-bold text-slate-700 sm:text-sm">{t.name}</p>
+          <p className="w-full min-w-0 max-w-full truncate text-[13px] font-bold leading-tight text-slate-700 sm:text-sm">{t.name}</p>
         </div>
         {od && (
-          <div className="mt-auto w-full min-w-0 border-t border-emerald-200 pt-1">
+          <div className="mt-auto w-full min-w-0 space-y-0.5 border-t border-emerald-200 pt-1.5">
             <p
               data-testid={`table-tile-paid-customer-${t.id}`}
-              className="w-full min-w-0 max-w-full truncate text-[10px] font-semibold text-slate-600 sm:text-xs"
+              className="w-full min-w-0 max-w-full truncate text-[10px] font-semibold leading-tight text-slate-600 sm:text-xs"
             >
               {`${od.customerName || od.customer_name || ""}`.trim() || "UMUM"}
             </p>
-            <p className="w-full text-right text-xs font-bold text-emerald-700 sm:text-sm">{shortRp(od.total || 0)}</p>
+            <p className="w-full text-right text-sm font-bold leading-tight text-emerald-700 sm:text-base">{shortRp(od.total || 0)}</p>
           </div>
         )}
       </div>
@@ -126,9 +126,9 @@ const Tile = ({ t, editing }) => {
   }
 
   return (
-    <div className={`w-full px-1 ${fixture ? "text-slate-500" : s.text}`}>
-      <Icon className="mx-auto h-6 w-6 sm:h-7 sm:w-7" strokeWidth={2.2} />
-      <p className="mt-0.5 truncate text-xs font-bold sm:text-sm">{t.name}</p>
+    <div className={`flex w-full flex-col items-center justify-center gap-1 px-2.5 py-2 ${fixture ? "text-slate-500" : s.text}`}>
+      <Icon className="h-6 w-6 sm:h-7 sm:w-7" strokeWidth={2.2} />
+      <p className="w-full truncate text-[13px] font-bold leading-tight sm:text-sm">{t.name}</p>
     </div>
   );
 };

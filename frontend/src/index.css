@@ -40,21 +40,21 @@ html {
 /* Denah meja: ukuran sel & kartu menyesuaikan lebar layar HP & tablet.
    Nilai juga dibaca JS (FloorCanvas) agar logika drag tetap sinkron. */
 .floor-canvas {
-    --floor-cell: 100px;
-    --floor-tile: 92px;
+    --floor-cell: 116px;
+    --floor-tile: 100px;
 }
 
 @media (min-width: 640px) {
     .floor-canvas {
-        --floor-cell: 112px;
-        --floor-tile: 102px;
+        --floor-cell: 132px;
+        --floor-tile: 112px;
     }
 }
 
 @media (min-width: 1024px) {
     .floor-canvas {
-        --floor-cell: 132px;
-        --floor-tile: 120px;
+        --floor-cell: 156px;
+        --floor-tile: 132px;
     }
 }
 
@@ -63,15 +63,15 @@ html {
    aturan min-width agar menang saat orientasi landscape. */
 @media (orientation: landscape) {
     .floor-canvas {
-        --floor-cell: 96px;
-        --floor-tile: 88px;
+        --floor-cell: 112px;
+        --floor-tile: 96px;
     }
 }
 
 @media (orientation: landscape) and (min-width: 900px) {
     .floor-canvas {
-        --floor-cell: 112px;
-        --floor-tile: 102px;
+        --floor-cell: 132px;
+        --floor-tile: 112px;
     }
 }
 
