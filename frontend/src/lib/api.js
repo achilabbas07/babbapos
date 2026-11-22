@@ -42,6 +42,15 @@ api.interceptors.response.use(
   }
 );
 
+// True bila request gagal karena gangguan jaringan (server tak terjangkau /
+// timeout), BUKAN karena respons bisnis dari server (4xx/5xx). Dipakai untuk
+// memisahkan "simpan ke antrean offline" dari error validasi biasa.
+export function isNetworkError(e) {
+  if (!e) return true;
+  if (e.response) return false; // server menjawab -> bukan kegagalan jaringan
+  return true; // "Network Error" / timeout / tanpa respons
+}
+
 export function errMsg(e) {
   const data = e?.response?.data;
   const detail = data?.error ?? data?.detail;

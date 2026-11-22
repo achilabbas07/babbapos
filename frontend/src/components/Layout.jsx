@@ -10,7 +10,9 @@ import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
 import { PrinterMappingDialog } from "@/components/settings/PrinterMappingDialog";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
+import { OfflineQueueBadge } from "@/components/OfflineQueueBadge";
 import { useOpenBillCount } from "@/hooks/useOpenBillCount";
+import { useQueueSync } from "@/hooks/useQueueSync";
 
 const Clock = () => {
   const [now, setNow] = useState(new Date());
@@ -268,6 +270,11 @@ export default function Layout() {
   const [printerOpen, setPrinterOpen] = useState(false);
   const { count: openBillCount } = useOpenBillCount(Boolean(user));
 
+  // Sinkronkan antrean transaksi offline begitu kembali online / saat masuk
+  // aplikasi dalam kondisi online. Murni efek samping latar; tidak menyentuh
+  // alur checkout POS maupun kalkulasi apa pun.
+  useQueueSync(Boolean(user));
+
   // Resolver badge angka per path menu. Saat ini hanya "Open Bill" yang
   // menampilkan jumlah bill aktif; jalur lain cukup mengembalikan 0.
   const badgeFor = (to) => (to === "/open-bills" ? openBillCount : 0);
@@ -359,6 +366,7 @@ export default function Layout() {
             <div className="hidden sm:block"><Clock /></div>
             <div className="flex items-center gap-3">
               <ConnectionStatus className="max-w-[7rem] sm:max-w-none" />
+              <OfflineQueueBadge />
               <button
                 data-testid="printer-settings-button"
                 type="button"

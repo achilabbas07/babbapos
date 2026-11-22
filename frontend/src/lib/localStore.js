@@ -1,4 +1,7 @@
 // Penyimpanan lokal terstruktur untuk Tahap 1 "Offline Read".
+// Juga menjadi fondasi Tahap 2 "Offline Queue": pembuat `client_request_id`
+// unik + CRUD dasar antrean transaksi persisten (belum dihubungkan ke alur
+// transaksi/checkout -- murni penyimpanan).
 //
 // Tujuan: meng-cache DATA MASTER (produk, stok, meja, pelanggan, pelayan,
 // markup ojol, dan varian per produk) agar halaman kasir tetap bisa menampilkan
@@ -210,4 +213,158 @@ export async function clearCache(key) {
   const okIdb = await idbDelete(key);
   const okLs = lsDelete(key);
   return okIdb || okLs;
+}
+
+// ===========================================================================
+// Tahap 2 -- FONDASI ANTREAN TRANSAKSI LOKAL (idempotency + queue)
+// ===========================================================================
+//
+// Bagian ini HANYA menyediakan penyimpanan. Ia TIDAK dipanggil oleh alur
+// transaksi/checkout/open bill, tidak mengubah payload yang dikirim ke server,
+// dan tidak mengubah backend/skema DB. Tujuannya: menyiapkan `client_request_id`
+// (kunci idempotensi) + antrean persisten yang bisa dipakai Tahap 2 nanti.
+
+// Status standar sebuah item antrean.
+export const QUEUE_STATUS = Object.freeze({
+  PENDING: "pending",
+  SYNCING: "syncing",
+  FAILED: "failed",
+});
+
+// Key penyimpanan antrean (satu collection berisi array item).
+export const TRANSACTION_QUEUE_KEY = "transaction-queue";
+
+// Pembuat `client_request_id` unik untuk idempotensi pengiriman transaksi.
+// Dipakai agar percobaan ulang (retry) tidak menghasilkan transaksi ganda.
+export function makeClientRequestId(prefix = "crq") {
+  const stamp = Date.now().toString(36);
+  let random;
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      random = crypto.randomUUID();
+    }
+  } catch {
+    random = null;
+  }
+  if (!random) {
+    random = `${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6)}`;
+  }
+  return `${prefix}-${stamp}-${random}`;
+}
+
+// Serialisasi read-modify-write antrean di dalam satu tab agar penambahan /
+// pembaruan bersamaan tidak saling menimpa.
+let queueChain = Promise.resolve();
+const withQueueLock = (fn) => {
+  const run = queueChain.then(fn, fn);
+  queueChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+};
+
+const readQueue = async () => {
+  const data = await readCacheData(TRANSACTION_QUEUE_KEY);
+  return Array.isArray(data) ? data : [];
+};
+
+const writeQueue = (list) => saveCache(TRANSACTION_QUEUE_KEY, list);
+
+// Ambil daftar antrean (selalu array, urut sesuai waktu penambahan).
+export async function getTransactionQueue() {
+  return readQueue();
+}
+
+// Ambil satu item antrean berdasarkan `client_request_id`.
+export async function getQueuedTransaction(clientRequestId) {
+  const queue = await readQueue();
+  return queue.find((item) => item.client_request_id === clientRequestId) ?? null;
+}
+
+// Jumlah item dalam antrean.
+export async function countTransactionQueue() {
+  const queue = await readQueue();
+  return queue.length;
+}
+
+// Tambah item antrean. `client_request_id` dihasilkan otomatis bila tidak
+// diberikan. Mengembalikan item yang tersimpan (atau null bila storage gagal).
+export async function enqueueTransaction(payload, meta = {}) {
+  return withQueueLock(async () => {
+    const queue = await readQueue();
+    const now = new Date().toISOString();
+    const item = {
+      client_request_id: meta.clientRequestId || makeClientRequestId(),
+      type: meta.type || "transaction",
+      payload: payload ?? null,
+      status: meta.status || QUEUE_STATUS.PENDING,
+      retryCount: Number.isInteger(meta.retryCount) ? meta.retryCount : 0,
+      createdAt: now,
+      updatedAt: now,
+      lastAttemptAt: null,
+      lastError: null,
+      nextAttemptAt: null,
+    };
+    const next = [...queue.filter((q) => q.client_request_id !== item.client_request_id), item];
+    const ok = await writeQueue(next);
+    return ok ? item : null;
+  });
+}
+
+// Perbarui sebagian field item antrean (status, retryCount, lastError, dst).
+export async function updateTransactionQueueItem(clientRequestId, patch = {}) {
+  return withQueueLock(async () => {
+    const queue = await readQueue();
+    const index = queue.findIndex((q) => q.client_request_id === clientRequestId);
+    if (index === -1) return null;
+    const updated = {
+      ...queue[index],
+      ...patch,
+      client_request_id: clientRequestId,
+      updatedAt: new Date().toISOString(),
+    };
+    const next = [...queue];
+    next[index] = updated;
+    const ok = await writeQueue(next);
+    return ok ? updated : null;
+  });
+}
+
+// Naikkan `retryCount` satu langkah + catat error percobaan terakhir.
+export async function incrementQueueRetry(clientRequestId, { error = null, nextAttemptAt = null } = {}) {
+  return withQueueLock(async () => {
+    const queue = await readQueue();
+    const index = queue.findIndex((q) => q.client_request_id === clientRequestId);
+    if (index === -1) return null;
+    const prev = queue[index];
+    const now = new Date().toISOString();
+    const updated = {
+      ...prev,
+      retryCount: (Number(prev.retryCount) || 0) + 1,
+      lastAttemptAt: now,
+      lastError: error == null ? prev.lastError ?? null : String(error),
+      nextAttemptAt: nextAttemptAt ?? prev.nextAttemptAt ?? null,
+      updatedAt: now,
+    };
+    const next = [...queue];
+    next[index] = updated;
+    const ok = await writeQueue(next);
+    return ok ? updated : null;
+  });
+}
+
+// Hapus item yang sudah sukses terkirim. Mengembalikan true bila ada yang dihapus.
+export async function removeTransactionQueueItem(clientRequestId) {
+  return withQueueLock(async () => {
+    const queue = await readQueue();
+    const next = queue.filter((q) => q.client_request_id !== clientRequestId);
+    if (next.length === queue.length) return false;
+    return writeQueue(next);
+  });
+}
+
+// Kosongkan seluruh antrean.
+export async function clearTransactionQueue() {
+  return withQueueLock(() => writeQueue([]));
 }

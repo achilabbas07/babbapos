@@ -303,11 +303,18 @@ class Transaction(BaseDocument):
     pointsDiscount: float = 0
     queueNumber: Optional[str] = None
     payments: List[dict] = Field(default_factory=list)
+    # Kunci idempotensi klien (mis. dari antrean offline). Boleh kosong agar
+    # transaksi lama / klien lama tetap kompatibel. Kolomnya unik di DB.
+    client_request_id: Optional[str] = None
 
     def to_mongo(self) -> dict:
         data = super().to_mongo()
         if data["queueNumber"] is not None:
             data["queueNumber"] = str(data["queueNumber"])
+        # Jangan sertakan kolom idempotensi saat kosong supaya alur transaksi
+        # normal tidak bergantung pada kolom baru ini (kompatibilitas mundur).
+        if not data.get("client_request_id"):
+            data.pop("client_request_id", None)
         return data
 
 

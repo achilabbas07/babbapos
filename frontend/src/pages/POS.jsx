@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { api, errMsg, errorCode, fmtDate, itemKey, itemName } from "@/lib/api";
-import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey } from "@/lib/localStore";
+import { api, errMsg, errorCode, fmtDate, itemKey, itemName, isNetworkError } from "@/lib/api";
+import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey, enqueueTransaction, makeClientRequestId } from "@/lib/localStore";
 import { ProductGrid } from "@/components/pos/ProductGrid";
 import { CartPanel } from "@/components/pos/CartPanel";
 import { PayDialog } from "@/components/pos/PayDialog";
@@ -272,6 +272,26 @@ export default function POS() {
     loadRefs();
   });
 
+  // Checkout offline: simpan transaksi ke antrean lokal untuk dikirim otomatis
+  // saat online kembali, lalu kosongkan keranjang seperti checkout normal.
+  // `clientRequestId` (kunci idempotensi) dipakai agar sinkronisasi nanti tidak
+  // menghasilkan transaksi ganda.
+  const enqueueOfflineCheckout = async ({ method, cashGiven, extra = {}, queueNumber = null, clientRequestId }) => {
+    const item = await enqueueTransaction(
+      { ...payload(), queueNumber, method, cashGiven, openBillId: order.billId, ...extra, client_request_id: clientRequestId },
+      { type: order.billId ? "open-bill-payment" : "direct-payment", clientRequestId },
+    );
+    setPayOpen(false);
+    if (!item) {
+      toast.error("Gagal menyimpan transaksi offline. Periksa penyimpanan perangkat lalu coba lagi.");
+      return;
+    }
+    toast.warning(
+      "Koneksi ke server terputus. Transaksi telah disimpan di antrean offline dan akan dikirim otomatis saat online kembali.",
+    );
+    reset();
+  };
+
   const pay = (method, cashGiven, extra = {}) => run(async () => {
     const blocked = waiterValidationMessage(user.role, order);
     if (blocked) {
@@ -279,8 +299,34 @@ export default function POS() {
       toast.error(blocked);
       return;
     }
-    const queueNumber = order.billId ? order.queueNumber : await getNextQueueNumber();
-    const { data } = await api.post("/transactions", { ...payload(), queueNumber, method, cashGiven, openBillId: order.billId, ...extra });
+    // Satu `client_request_id` (kunci idempotensi) per pembayaran, dipakai untuk
+    // payload online maupun bila harus masuk antrean offline.
+    const clientRequestId = makeClientRequestId();
+    // Nomor urut bill butuh Supabase (online). Saat offline/tanpa Supabase,
+    // checkout walk-in TIDAK digagalkan: transaksi masuk antrean lokal.
+    let queueNumber;
+    try {
+      queueNumber = order.billId ? order.queueNumber : await getNextQueueNumber();
+    } catch (queueError) {
+      if (!order.billId && isNetworkError(queueError)) {
+        await enqueueOfflineCheckout({ method, cashGiven, extra, clientRequestId });
+        return;
+      }
+      throw queueError;
+    }
+    const body = { ...payload(), queueNumber, method, cashGiven, openBillId: order.billId, ...extra, client_request_id: clientRequestId };
+    let data;
+    try {
+      ({ data } = await api.post("/transactions", body));
+    } catch (postError) {
+      // Gagal karena jaringan (BUKAN 4xx validasi bisnis) dan bukan pembayaran
+      // open bill -> simpan ke antrean offline untuk disinkronkan saat online.
+      if (!order.billId && isNetworkError(postError)) {
+        await enqueueOfflineCheckout({ method, cashGiven, extra, queueNumber, clientRequestId });
+        return;
+      }
+      throw postError;
+    }
     setPayOpen(false);
     setReceipt(data);
     toast.success(`Transaksi ${data.id} berhasil`);

@@ -120,10 +120,14 @@ create table if not exists transactions (
   "waiterId"    text references users(id) on delete set null,
   "shiftId"     text,
   "queueNumber" text,
-  payments      jsonb not null default '[]'::jsonb  -- rincian multi-pembayaran (split payment)
+  payments      jsonb not null default '[]'::jsonb, -- rincian multi-pembayaran (split payment)
+  client_request_id text                              -- kunci idempotensi (Tahap 2 antrean offline)
 );
 create index if not exists transactions_date_idx on transactions(date);
 create index if not exists transactions_customer_idx on transactions("customerId");
+create unique index if not exists transactions_client_request_id_uidx
+  on transactions (client_request_id)
+  where client_request_id is not null;
 
 create table if not exists master_suppliers (
   id            bigserial primary key,

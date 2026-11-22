@@ -190,6 +190,9 @@ class TransactionIn(OpenBillIn):
     promoCode: Optional[str] = None
     redeemPoints: bool = False
     discountPin: Optional[str] = None
+    # Kunci idempotensi opsional dari klien (mis. antrean offline). Bila diisi,
+    # permintaan ulang dengan nilai sama tidak membuat transaksi baru.
+    client_request_id: Optional[str] = None
 
 
 class PurchaseItemIn(BaseModel):
@@ -911,6 +914,15 @@ async def get_transaction(tid: str, _: User = Depends(STAFF)):
 
 @api.post("/transactions")
 async def create_transaction(body: TransactionIn, request: Request, user: User = Depends(STAFF)):
+    # Idempotensi (Tahap 2 antrean offline): bila `client_request_id` yang sama
+    # pernah diproses, kembalikan transaksi yang SUDAH tersimpan tanpa membuat
+    # transaksi/stok/pembayaran/jurnal baru. Kolomnya unik sehingga permintaan
+    # balapan (race) juga tidak bisa menduplikasi data.
+    client_request_id = (body.client_request_id or "").strip() or None
+    if client_request_id:
+        existing = await db.transactions.find_one({"client_request_id": client_request_id})
+        if existing:
+            return Transaction.from_mongo(existing)
     bill = OpenBill.from_mongo(await get_or_404("open_bills", body.openBillId, "Open bill")) if body.openBillId else None
     if body.partial and not bill:
         raise HTTPException(400, "Pisah bill membutuhkan open bill")
@@ -992,6 +1004,7 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         tableName=table["name"] if table else "",
         customerName=customer["name"] if customer else (body.customerName or (bill.customerName if bill else "")),
         payments=checkout_payments,
+        client_request_id=client_request_id,
     )
     checkout_lines = checkout_journal_lines(total, method, items, checkout_payments)
     checkout_codes = checkout_journal_account_codes(total, method, items, checkout_payments)
