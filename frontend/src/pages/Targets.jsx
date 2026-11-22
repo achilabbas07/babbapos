@@ -139,7 +139,7 @@ const AdminView = () => {
         </PageHeader>
         {targets.length === 0 ? <Empty testid="targets-empty" text="Belum ada target." /> : (
           <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-            <Table>
+            <Table className="android-table">
               <TableHeader><TableRow className="[&>th]:whitespace-nowrap"><TableHead>Target</TableHead><TableHead>Jenis</TableHead><TableHead>Item</TableHead><TableHead className="text-right">Nilai target</TableHead><TableHead>Periode</TableHead><TableHead>Berlaku untuk</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
                 {targets.map((t) => (

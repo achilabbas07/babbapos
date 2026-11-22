@@ -47,8 +47,172 @@ html {
     padding-bottom: calc(var(--sab) + 1.5rem);
 }
 
+/* Dialog/modal mengapung (Radix & modal kustom): beri ruang bawah sesuai inset
+   sistem dan batasi tinggi ke area aman (bukan hanya 90dvh) agar kotak dialog
+   tidak menembus status bar / navigation bar Android di layar pendek.
+   Di desktop (inset 0) hasilnya tetap 90dvh — tanpa perubahan tampilan. */
 .safe-dialog {
     padding-bottom: calc(var(--sab) + 1.5rem);
+    max-height: min(90dvh, calc(100dvh - var(--sat) - var(--sab) - 1.5rem));
+}
+
+/* --- Hook penyesuaian khusus aplikasi Android (Capacitor) ---
+   Class `app-native-android` ditambahkan di index.js lewat deteksi native
+   Capacitor, jadi aturan di bawah TIDAK pernah aktif di aplikasi web. */
+
+/* Kolom Pesanan (Android): tombol `Open Bill` & `Bayar` DIKUNCI rapat di bawah
+   panel lewat footer sticky (bottom:0), walau keranjang masih kosong. Tinggi
+   panel tetap dari layout web (md:h-[...] / md:min-h-[560px]); hanya tinggi
+   minimum desktop yang dilepas di Android agar panel tidak melampaui layar,
+   sementara daftar item (anchor [data-cart-part="list"]) menggulir internal
+   karena `flex: 1 1 auto` + `min-height: 0`. Jarak aman bawah tetap dari
+   `pb-safe` pada footer. Khusus Android; tampilan web tidak berubah. */
+.app-native-android .pos-cart-sticky .pos-cart-list {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+}
+
+.app-native-android [data-cart-part="footer"] {
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 10;
+    margin-top: auto !important;
+}
+
+/* Meja LUNAS (Android): rapikan jarak vertikal, padding, font, & line-height isi
+   kotak agar nama/status dan nominal (mis. 10k) tidak menempel/menembus garis
+   bawah. TANPA `overflow:hidden` supaya badge `LUNAS` (posisi -left-1.5/-top-1.5)
+   dan ring border hijau (box-shadow keluar) tidak terpotong. `min-width: 0`
+   membuat teks tetap muat di dalam kotak. Khusus Android. */
+.app-native-android .floor-tile-paid {
+    gap: 0.125rem;
+    padding: 0.25rem 0.375rem;
+    min-width: 0;
+}
+
+.app-native-android .floor-tile-paid > div:first-of-type {
+    min-height: 0;
+    gap: 0.125rem;
+}
+
+.app-native-android .floor-tile-paid > div:first-of-type svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+.app-native-android .floor-tile-paid > div:first-of-type p {
+    font-size: 0.6875rem;
+    line-height: 0.875rem;
+}
+
+.app-native-android .floor-tile-paid-status {
+    padding-top: 0.1875rem !important;
+    padding-bottom: 0.0625rem !important;
+    min-width: 0;
+}
+
+.app-native-android .floor-tile-paid-status > p:first-child {
+    font-size: 0.5625rem;
+    line-height: 0.75rem;
+}
+
+.app-native-android .floor-tile-paid-amount {
+    font-size: 0.6875rem !important;
+    line-height: 0.875rem !important;
+}
+
+/* Tabel Android: perkecil skala teks & padding kolom agar kolom paling kanan
+   (termasuk tombol Print Ulang) tetap muat tanpa terpotong. */
+.app-native-android .android-table {
+    font-size: 0.75rem;
+    line-height: 1rem;
+}
+
+.app-native-android .android-table th,
+.app-native-android .android-table td {
+    height: auto;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.6875rem;
+    line-height: 0.9375rem;
+}
+
+/* Teks kecil di dalam tabel Android (badge status, jam, tombol) ikut dipadatkan
+   agar kolom paling kanan termasuk tombol Print Ulang muat tanpa terpotong. */
+.app-native-android .android-table .text-xs {
+    font-size: 0.6875rem;
+    line-height: 0.9375rem;
+}
+
+.app-native-android .android-table .text-\[10px\] {
+    font-size: 0.5625rem;
+    line-height: 0.8125rem;
+}
+
+.app-native-android .android-table .h-9 {
+    height: 1.875rem;
+}
+
+.app-native-android .android-table .px-3 {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+}
+
+/* Target Sales Android: kartu & badge item lebih ringkas. */
+.app-native-android .android-targets-card {
+    padding: 1rem;
+}
+
+.app-native-android .android-targets-card .grid {
+    gap: 0.5rem;
+}
+
+.app-native-android .android-targets-bar {
+    padding: 0.5rem 0.625rem;
+    border-radius: 0.625rem;
+}
+
+.app-native-android .android-targets-bar .text-sm {
+    font-size: 0.75rem;
+    line-height: 1rem;
+}
+
+.app-native-android .android-targets-bar .text-base {
+    font-size: 0.875rem;
+    line-height: 1.15rem;
+}
+
+.app-native-android .android-targets-bar .text-xs {
+    font-size: 0.6875rem;
+    line-height: 0.9375rem;
+}
+
+.app-native-android .android-targets-bar .text-\[11px\] {
+    font-size: 0.625rem;
+    line-height: 0.875rem;
+}
+
+.app-native-android .android-targets-bar .text-\[10px\] {
+    font-size: 0.5625rem;
+    line-height: 0.8125rem;
+}
+
+.app-native-android .android-targets-bar .h-2\.5 {
+    height: 0.5rem;
+}
+
+/* Open Bill Android: minimal 3 kolom dalam 1 baris pada tablet 10". */
+.app-native-android .android-bills-grid {
+    gap: 0.75rem;
+}
+
+@media (min-width: 700px) {
+    .app-native-android .android-bills-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.app-native-android .android-bill-card {
+    padding: 1rem;
 }
 
 /* Denah meja: ukuran sel & kartu menyesuaikan lebar layar HP & tablet.
@@ -73,8 +237,8 @@ html {
 }
 
 /* Landscape (HP/tablet miring): rapatkan kartu agar lebih banyak meja terlihat
-   tanpa scroll berlebih. Portrait tetap memakai nilai di atas. Ditulis SETELAH
-   aturan min-width agar menang saat orientasi landscape. */
+    tanpa scroll berlebih. Portrait tetap memakai nilai di atas. Ditulis SETELAH
+    aturan min-width agar menang saat orientasi landscape. */
 @media (orientation: landscape) {
     .floor-canvas {
         --floor-cell: 112px;
@@ -87,6 +251,65 @@ html {
         --floor-cell: 132px;
         --floor-tile: 112px;
     }
+}
+
+/* Denah Meja khusus Android: lebih ringkas (ukuran kartu + jarak antar kartu,
+   karena satuan grid diturunkan dari --floor-cell) agar lebih banyak meja muat
+   nyaman di tablet 10". Selector lebih spesifik dari aturan `.floor-canvas` di
+   atas, dan hanya aktif saat class `app-native-android` ada (aplikasi Android). */
+.app-native-android .floor-canvas {
+    --floor-cell: 104px;
+    --floor-tile: 88px;
+}
+
+@media (min-width: 1024px) {
+    .app-native-android .floor-canvas {
+        --floor-cell: 132px;
+        --floor-tile: 112px;
+    }
+}
+
+@media (orientation: landscape) {
+    .app-native-android .floor-canvas {
+        --floor-cell: 100px;
+        --floor-tile: 84px;
+    }
+}
+
+/* Isi kotak meja "Terisi" khusus Android: perkecil ikon, teks, dan jarak agar
+   jam order & nilai pesanan (mis. 07.06 / 11k) tetap rapi di dalam batas kotak
+   saat ukuran meja diperkecil di Android, tanpa keluar/menumpuk garis bawah.
+   `overflow:hidden` memastikan tidak ada teks yang menembus garis batas kartu. */
+.app-native-android .floor-tile-occupied {
+    gap: 0.125rem;
+    padding: 0.3125rem 0.375rem;
+    overflow: hidden;
+}
+
+.app-native-android .floor-tile-occupied svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+.app-native-android .floor-tile-name {
+    font-size: 0.6875rem;
+    line-height: 0.9375rem;
+}
+
+.app-native-android .floor-tile-status {
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 0;
+}
+
+.app-native-android .floor-tile-time {
+    font-size: 0.5625rem;
+    line-height: 0.75rem;
+}
+
+.app-native-android .floor-tile-amount {
+    font-size: 0.75rem;
+    line-height: 0.9375rem;
 }
 
 code, .font-mono {

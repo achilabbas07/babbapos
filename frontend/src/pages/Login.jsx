@@ -102,7 +102,7 @@ export default function Login() {
   if (user) return <Navigate to="/pos" replace />;
 
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[1fr_1.1fr]">
+    <div className="grid min-h-dvh pb-safe pt-safe lg:grid-cols-[1fr_1.1fr] lg:pb-0 lg:pt-0">
       <div
         className="relative hidden overflow-hidden bg-slate-900 lg:block"
         style={{ backgroundImage: "url('/bg-warkop.jpg')", backgroundSize: "cover", backgroundPosition: "center" }}
@@ -116,13 +116,13 @@ export default function Login() {
           </p>
         </div>
       </div>
-      <div className="flex items-center justify-center px-6 py-12">
+      <div className="flex items-center justify-center px-5 py-8 sm:px-6 sm:py-12">
         <div className="w-full max-w-md fade-up">
           <div className="mb-8 flex items-center gap-3">
-            <BrandLogo url={profile.logo_url} className="h-11 w-11" testid="login-brand-logo" />
+            <BrandLogo url={profile.logo_url} className="h-10 w-10 sm:h-11 sm:w-11" testid="login-brand-logo" />
             <div className="min-w-0">
-              <p data-testid="login-brand-name" className="truncate text-xl font-bold">{appName}</p>
-              <p className="text-sm text-muted-foreground">
+              <p data-testid="login-brand-name" className="truncate text-lg font-bold sm:text-xl">{appName}</p>
+              <p className="text-xs text-muted-foreground sm:text-sm">
                 {selected ? "Masukkan PIN untuk melanjutkan" : "Pilih pengguna untuk masuk"}
               </p>
             </div>

@@ -34,9 +34,9 @@ export default function OpenBills() {
     <div>
       <PageHeader title="Open Bill" subtitle="Pesanan tersimpan yang belum dibayar. Lanjutkan untuk menambah item atau membayar." />
       {bills.length === 0 ? <Empty testid="open-bills-empty" text="Tidak ada open bill." /> : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="android-bills-grid grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {bills.map((b) => (
-            <div key={b.id} data-testid={`open-bill-${b.id}`} className="flex flex-col rounded-2xl border border-border bg-card p-5">
+            <div key={b.id} data-testid={`open-bill-${b.id}`} className="android-bill-card flex flex-col rounded-2xl border border-border bg-card p-5">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="font-mono text-sm text-primary">{b.id}</p>

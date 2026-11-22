@@ -91,19 +91,19 @@ const Tile = ({ t, editing }) => {
 
   if (busy) {
     return (
-      <div className={`flex h-full w-full min-w-0 flex-col gap-1 px-2.5 py-2 ${s.text}`}>
+      <div className={`floor-tile-occupied flex h-full w-full min-w-0 flex-col gap-1 px-2.5 py-2 ${s.text}`}>
         <p data-testid={`table-tile-customer-${t.id}`} className="w-full min-w-0 max-w-full truncate text-[13px] font-bold leading-tight text-slate-700 sm:text-sm">
           {od.customerName?.trim() || "UMUM"}
         </p>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1">
           <Icon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={2.2} />
-          <p className="w-full min-w-0 max-w-full truncate text-[13px] font-bold leading-tight sm:text-sm">{t.name}</p>
+          <p className="floor-tile-name w-full min-w-0 max-w-full truncate text-[13px] font-bold leading-tight sm:text-sm">{t.name}</p>
         </div>
-        <div className="mt-auto flex w-full items-end justify-between gap-1.5">
-          <p data-testid={`table-tile-time-${t.id}`} className="truncate text-left font-mono text-[10px] leading-tight text-muted-foreground sm:text-xs">
+        <div className="floor-tile-status mt-auto flex w-full items-end justify-between gap-1.5">
+          <p data-testid={`table-tile-time-${t.id}`} className="floor-tile-time truncate text-left font-mono text-[10px] leading-tight text-muted-foreground sm:text-xs">
             {fmtTime(od.startTime)}
           </p>
-          <p className="shrink-0 text-right text-sm font-bold leading-tight sm:text-base">{shortRp(od.total || 0)}</p>
+          <p className="floor-tile-amount shrink-0 text-right text-sm font-bold leading-tight sm:text-base">{shortRp(od.total || 0)}</p>
         </div>
       </div>
     );
@@ -113,7 +113,7 @@ const Tile = ({ t, editing }) => {
   // kotak berlapis (nested container) di dalam kartu utama -> bersih & minimalis.
   if (isPaid) {
     return (
-      <div className="relative flex h-full w-full min-w-0 flex-col gap-1 px-2.5 py-2">
+      <div className="floor-tile-paid relative flex h-full w-full min-w-0 flex-col gap-1 px-2.5 py-2">
         <span className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-emerald-400/70" aria-hidden="true" />
         <span
           data-testid={`table-tile-paid-badge-${t.id}`}
@@ -129,14 +129,14 @@ const Tile = ({ t, editing }) => {
           <p className="w-full min-w-0 max-w-full truncate text-[13px] font-bold leading-tight text-slate-700 sm:text-sm">{t.name}</p>
         </div>
         {od && (
-          <div className="mt-auto w-full min-w-0 space-y-0.5 border-t border-emerald-200 pt-1.5">
+          <div className="floor-tile-paid-status mt-auto w-full min-w-0 space-y-0.5 border-t border-emerald-200 pt-1.5">
             <p
               data-testid={`table-tile-paid-customer-${t.id}`}
               className="w-full min-w-0 max-w-full truncate text-[10px] font-semibold leading-tight text-slate-600 sm:text-xs"
             >
               {`${od.customerName || od.customer_name || ""}`.trim() || "UMUM"}
             </p>
-            <p className="w-full text-right text-sm font-bold leading-tight text-emerald-700 sm:text-base">{shortRp(od.total || 0)}</p>
+            <p className="floor-tile-paid-amount w-full text-right text-sm font-bold leading-tight text-emerald-700 sm:text-base">{shortRp(od.total || 0)}</p>
           </div>
         )}
       </div>
@@ -145,7 +145,7 @@ const Tile = ({ t, editing }) => {
 
   return (
     <div className={`flex w-full flex-col items-center justify-center gap-1 px-2.5 py-2 ${fixture ? "text-slate-500" : s.text}`}>
-      <Icon className="h-6 w-6 sm:h-7 sm:w-7" strokeWidth={2.2} />
+      <Icon className="h-6 w-6 sm:h-7 sm:w-6" strokeWidth={2.2} />
       <p className="w-full truncate text-[13px] font-bold leading-tight sm:text-sm">{t.name}</p>
     </div>
   );

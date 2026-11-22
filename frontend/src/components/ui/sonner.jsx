@@ -10,6 +10,8 @@ const Toaster = ({
     <Sonner
       theme={theme}
       className="toaster group"
+      mobileOffset={{ top: "calc(env(safe-area-inset-top, 0px) + 0.75rem)" }}
+      offset={{ top: "1rem" }}
       toastOptions={{
         classNames: {
           toast:

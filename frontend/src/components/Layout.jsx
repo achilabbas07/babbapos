@@ -385,7 +385,7 @@ export default function Layout() {
             {flatItems.map((n) => <NavItem key={n.to} {...n} prefix="mobile-nav" badge={badgeFor(n.to)} />)}
           </nav>
         </header>
-        <main className="min-w-0 flex-1 px-3 pt-4 pb-safe sm:px-5 lg:px-6">
+        <main className="min-w-0 flex-1 px-3 pt-3 pb-safe sm:px-5 sm:pt-4 lg:px-6">
           <ShiftGate><Outlet /></ShiftGate>
         </main>
       </div>

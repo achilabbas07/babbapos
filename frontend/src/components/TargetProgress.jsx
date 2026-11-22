@@ -20,7 +20,7 @@ const typeChip = (item) => {
 };
 
 export const TargetBar = ({ item, testid }) => (
-  <div data-testid={testid} className="min-w-0 rounded-xl border border-border/60 bg-background/40 p-3">
+  <div data-testid={testid} className="android-targets-bar min-w-0 rounded-xl border border-border/60 bg-background/40 p-3">
     <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
       <span className="flex min-w-0 items-center gap-1.5 font-medium">
         <Target className="h-3.5 w-3.5 shrink-0 text-primary" />
@@ -46,7 +46,7 @@ export const TargetBar = ({ item, testid }) => (
 );
 
 export const ProgressCard = ({ p, children }) => (
-  <div data-testid={`target-progress-${p.waiterId}`} className="h-full min-w-0 rounded-2xl border border-border bg-card p-5 shadow-sm">
+  <div data-testid={`target-progress-${p.waiterId}`} className="android-targets-card h-full min-w-0 rounded-2xl border border-border bg-card p-5 shadow-sm">
     <div className="mb-4 flex items-start justify-between gap-3">
       <div>
         <p className="font-semibold">{p.waiterName}</p>

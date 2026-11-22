@@ -29,7 +29,7 @@ export default function Shifts() {
       <DateRangeFilter from={range.from} to={range.to} onChange={setRange} testidPrefix="shifts-date-filter" />
       {list.length === 0 ? <Empty testid="shifts-empty" text="Belum ada shift." /> : (
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-          <Table>
+          <Table className="android-table">
             <TableHeader>
               <TableRow className="[&>th]:whitespace-nowrap">
                 <TableHead>Shift</TableHead><TableHead>Kasir</TableHead><TableHead>Waktu</TableHead><TableHead className="text-right">Kas awal</TableHead>

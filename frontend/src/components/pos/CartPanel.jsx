@@ -53,11 +53,6 @@ const OrderOptions = ({ order, setOrder, tables, customers, waiters, canPay, wai
           onChange={(v) => set({ customerId: v, customerName: v === "none" ? "" : customers.find((c) => c.id === v)?.name || "" })}
         />
       </div>
-      {waiterRequired && (
-        <p data-testid="order-waiter-required-note" className="text-[11px] text-amber-600">
-          Nama pelayan wajib dipilih untuk transaksi Kasir/Admin.
-        </p>
-      )}
       <div className="grid grid-cols-2 gap-2">
         <input data-testid="order-customer-name-input" value={order.customerName} onChange={(e) => set({ customerName: e.target.value })}
           placeholder={order.type === "Ojek Online" ? "Nama / No. order" : "Nama pemesan"} className={inputCls} />
@@ -124,16 +119,16 @@ export const CartPanel = ({ order, setOrder, tables, customers, waiters, waiterR
   const count = cart.reduce((s, i) => s + i.qty, 0);
 
   return (
-    <aside data-testid="cart-panel" className="flex flex-col rounded-2xl border border-border bg-card shadow-sm md:sticky md:top-[calc(var(--sat)_+_5.5rem)] md:h-[calc(100dvh_-_var(--sat)_-_6.5rem)] md:min-h-[560px]">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+    <aside data-testid="cart-panel" className="pos-cart-sticky flex flex-col rounded-2xl border border-border bg-card shadow-sm md:sticky md:top-[calc(var(--sat)_+_5.5rem)] md:h-[calc(100dvh_-_var(--sat)_-_6.5rem)] md:min-h-[560px]">
+      <div data-cart-part="head" className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <p className="text-sm font-semibold">
           Pesanan {order.billId && <span data-testid="cart-bill-id" className="font-mono text-primary">#{order.billId}</span>}
           <span data-testid="cart-count" className="ml-2 text-xs font-normal text-muted-foreground">{cart.length} menu · {count} item</span>
         </p>
         {(cart.length > 0 || order.billId) && <button data-testid="cart-reset-button" onClick={onReset} className="text-xs text-muted-foreground hover:text-foreground">Pesanan baru</button>}
       </div>
-      <div className="border-b border-border px-4 py-2.5"><OrderOptions order={order} setOrder={setOrder} tables={tables} customers={customers} waiters={waiters} canPay={canPay} waiterRequired={waiterRequired} /></div>
-      <div data-testid="cart-list" className="min-h-[312px] flex-1 space-y-1.5 overflow-y-auto px-3 py-2.5">
+      <div data-cart-part="controls" className="pos-cart-controls border-b border-border px-4 py-2.5"><OrderOptions order={order} setOrder={setOrder} tables={tables} customers={customers} waiters={waiters} canPay={canPay} waiterRequired={waiterRequired} /></div>
+      <div data-testid="cart-list" data-cart-part="list" className="pos-cart-list min-h-[312px] flex-1 space-y-1.5 overflow-y-auto px-3 py-2.5">
         {cart.length === 0 ? (
           <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">
             <div><ShoppingBag className="mx-auto mb-2 h-7 w-7" />Ketuk menu untuk menambahkan</div>
@@ -142,7 +137,7 @@ export const CartPanel = ({ order, setOrder, tables, customers, waiters, waiterR
           cart.map((i) => <CartLine key={i.key} item={i} price={priceOf(i)} locked={isLocked(i)} currentWaiterId={order.waiterId} onQty={(d) => onQty(i.key, d)} onNotes={(v) => notes(i.key, v)} onRemove={() => onRemove(i.key)} />)
         )}
       </div>
-      <div className="space-y-2.5 border-t border-border px-4 pt-3 pb-safe">
+      <div data-cart-part="footer" className="pos-cart-footer space-y-2.5 border-t border-border px-4 pt-3 pb-safe">
         <div className="flex items-baseline justify-between">
           <span className="text-sm text-muted-foreground">Total {order.type === "Ojek Online" && <span className="text-xs text-primary">(harga Ojol)</span>}</span>
           <span data-testid="cart-total" className="font-mono text-xl font-bold text-primary">{rp(total)}</span>
