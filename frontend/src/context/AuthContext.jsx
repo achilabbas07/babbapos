@@ -9,12 +9,12 @@ const AuthCtx = createContext(null);
 const validCachedUser = (u) =>
   Boolean(u && u.id && u.role && u.name);
 
-// True bila error benar-benar masalah jaringan (server tak terjangkau),
-// BUKAN penolakan autentikasi dari server (mis. 401/403).
-const isNetworkError = (error) => {
-  if (!error) return true;
-  if (error.response) return false; // server menjawab -> bukan error jaringan
-  return true; // "Network Error" / timeout / tanpa response
+// HANYA 401/403 yang berarti server benar-benar MENOLAK token. Semua kegagalan
+// lain (offline, timeout, 502/503 gateway, backend tidur) = gangguan sementara,
+// sehingga sesi lokal yang tersimpan TIDAK boleh ikut dihapus.
+const isAuthRejection = (error) => {
+  const status = error?.response?.status;
+  return status === 401 || status === 403;
 };
 
 export function AuthProvider({ children }) {
@@ -30,7 +30,19 @@ export function AuthProvider({ children }) {
       return undefined;
     }
 
-    api.get("/auth/me")
+    // 1) Restore optimistis dari cache lokal LEBIH DULU. Saat halaman di-refresh
+    //    dalam kondisi offline, sesi langsung dipulihkan tanpa menunggu jaringan
+    //    (tidak nyangkut di "Memuat..." dan tidak jatuh ke layar pilih pengguna).
+    //    Profil lokal ini hanya untuk tampilan; token tetap diverifikasi ke
+    //    server pada langkah 2 sehingga tidak ada hak akses backend tambahan.
+    readCacheData(SESSION_USER_KEY).then((cached) => {
+      if (active && validCachedUser(cached)) {
+        setUser(cached);
+      }
+    });
+
+    // 2) Verifikasi ke server = sumber kebenaran saat online.
+    api.get("/auth/me", { timeout: 15000 })
       .then(({ data }) => {
         if (!active) return;
         setUser(data);
@@ -39,26 +51,20 @@ export function AuthProvider({ children }) {
       })
       .catch((error) => {
         if (!active) return;
-        if (isNetworkError(error)) {
-          // Offline / jaringan gagal: jangan tendang user ke /login. Pakai
-          // profil sesi terakhir yang tersimpan agar tetap bisa memakai cache
-          // Tahap 1 (menu/meja/pelanggan). Token TIDAK diubah.
-          readCacheData(SESSION_USER_KEY).then((cached) => {
-            if (!active) return;
-            if (validCachedUser(cached)) {
-              setUser(cached);
-              console.warn("POS session restored from local cache (offline).");
-            } else {
-              setUser(false);
-            }
-          });
+        if (isAuthRejection(error)) {
+          // Token benar-benar ditolak (401/403): sesi memang tidak valid.
+          clearCache(SESSION_USER_KEY);
+          setUser(false);
+          console.error("Failed to restore POS session", error);
           return;
         }
-        // 401/403 (token ditolak): sesi memang tidak valid. api.js sudah
-        // membersihkan token untuk 401; bersihkan profil lokal juga.
-        clearCache(SESSION_USER_KEY);
-        setUser(false);
-        console.error("Failed to restore POS session", error);
+        // Offline / timeout / server sementara: jangan tendang user. Pakai
+        // profil sesi lokal bila ada agar cache Tahap 1 tetap bisa dipakai.
+        // Bila tidak ada profil lokal, barulah kembali ke layar pilih pengguna.
+        readCacheData(SESSION_USER_KEY).then((cached) => {
+          if (!active) return;
+          if (!validCachedUser(cached)) setUser(false);
+        });
       });
 
     const onLogout = () => {
