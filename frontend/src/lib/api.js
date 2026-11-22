@@ -42,12 +42,35 @@ api.interceptors.response.use(
   }
 );
 
+export const NETWORK_ERROR_MESSAGE =
+  "Tidak dapat terhubung ke server POS. Periksa koneksi internet dan coba lagi.";
+
+// Deteksi kegagalan jaringan "gaya fetch". Panggilan `fetch()` yang gagal
+// (offline / DNS / CORS / server tak terjangkau) TIDAK mengembalikan HTTP
+// response, melainkan melempar `TypeError` dengan pesan:
+//   - "Failed to fetch"      -> Chromium/Firefox (juga klien Supabase, yang
+//                               membungkusnya jadi { message: "TypeError: Failed to fetch" })
+//   - "Load failed"          -> Safari/WebKit
+//   - "fetch failed"         -> Node/undici
+// Error seperti ini tidak punya `response`, jadi harus dikenali sebagai
+// gangguan jaringan — bukan error validasi bisnis dari server (4xx/5xx).
+export function isFetchNetworkError(e) {
+  if (!e || e.response) return false; // server menjawab -> bukan kegagalan jaringan
+  const name = String(e.name || "");
+  const message = String(e.message || "");
+  if (name === "TypeError" && /load failed|failed to fetch|fetch failed/i.test(message)) return true;
+  return /load failed|failed to fetch|fetch failed/i.test(message);
+}
+
 // True bila request gagal karena gangguan jaringan (server tak terjangkau /
-// timeout), BUKAN karena respons bisnis dari server (4xx/5xx). Dipakai untuk
-// memisahkan "simpan ke antrean offline" dari error validasi biasa.
+// timeout / perangkat offline), BUKAN karena respons bisnis dari server
+// (4xx/5xx). Dipakai untuk memisahkan "simpan ke antrean offline" dari error
+// validasi biasa.
 export function isNetworkError(e) {
   if (!e) return true;
   if (e.response) return false; // server menjawab -> bukan kegagalan jaringan
+  if (isFetchNetworkError(e)) return true; // TypeError: Failed to fetch, dll.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true; // perangkat offline
   return true; // "Network Error" / timeout / tanpa respons
 }
 
@@ -56,9 +79,10 @@ export function errMsg(e) {
   const detail = data?.error ?? data?.detail;
   const stage = typeof data?.stage === "string" ? ` (${data.stage})` : "";
   if (detail == null) {
-    if (e?.message === "Network Error") {
-      return "Tidak dapat terhubung ke server POS. Periksa koneksi internet dan coba lagi.";
-    }
+    // Kegagalan jaringan apa pun (termasuk `TypeError: Failed to fetch` dari
+    // klien Supabase / fetch) ditampilkan dengan pesan ramah, bukan pesan
+    // teknis mentah.
+    if (e?.message === "Network Error" || isFetchNetworkError(e)) return NETWORK_ERROR_MESSAGE;
     return e?.message || "Terjadi kesalahan. Silakan coba lagi.";
   }
   if (typeof detail === "string") return `${detail}${stage}`;

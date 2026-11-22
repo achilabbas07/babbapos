@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { api, errMsg, errorCode, fmtDate, itemKey, itemName, isNetworkError } from "@/lib/api";
+import { api, errMsg, errorCode, fmtDate, itemKey, itemName, isNetworkError, isFetchNetworkError, NETWORK_ERROR_MESSAGE } from "@/lib/api";
 import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey, enqueueTransaction, makeClientRequestId } from "@/lib/localStore";
 import { ProductGrid } from "@/components/pos/ProductGrid";
 import { CartPanel } from "@/components/pos/CartPanel";
@@ -248,6 +248,11 @@ export default function POS() {
         p_item_ids: itemIds,
       });
       if (error) {
+        // Offline / fetch gagal: tiket sudah tercetak, jadi jangan tampilkan
+        // pesan teknis `TypeError: Failed to fetch`.
+        if (isFetchNetworkError(error)) {
+          throw new Error(`Tiket tercetak, tetapi status cetak belum tersimpan: ${NETWORK_ERROR_MESSAGE}`);
+        }
         throw new Error(`Tiket tercetak, tetapi status cetak gagal disimpan: ${error.message}`);
       }
       toast.success("Pesanan dapur tercetak otomatis.");
