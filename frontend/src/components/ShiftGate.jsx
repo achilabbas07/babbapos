@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { LockOpen, LogOut } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, rp } from "@/lib/api";
+import { activeShiftCacheKey, readCache, saveCache } from "@/lib/localStore";
 
 const ShiftCtx = createContext({ shift: null, refresh: () => {} });
 export const useShift = () => useContext(ShiftCtx);
@@ -90,14 +91,38 @@ export const ShiftGate = ({ children }) => {
   const { user } = useAuth();
   const url = user.role === "waiter" ? "/waiter-shifts/current" : "/shifts/current";
   const required = user.role !== "admin";
+  const cacheKey = activeShiftCacheKey(url);
   const [state, setState] = useState({ loaded: false, shift: null });
 
   const refresh = useCallback(() => {
-    api.get(url).then((r) => setState({ loaded: true, shift: r.data.shift })).catch((e) => toast.error(errMsg(e)));
-  }, [url]);
+    let active = true;
+    api.get(url).then((r) => {
+      if (!active) return;
+      setState({ loaded: true, shift: r.data.shift });
+      // Simpan (termasuk `shift: null`) supaya hasil "tidak ada shift terbuka"
+      // juga bisa dipakai saat offline.
+      saveCache(cacheKey, r.data.shift ?? null);
+    }).catch((e) => {
+      if (!active) return;
+      // Gagal memuat dari server (offline / gangguan jaringan): pakai cache
+      // shift terakhir bila ada. Jika belum ada cache sama sekali, tetap
+      // hentikan status loading agar halaman tidak menggantung di
+      // "Memuat shift..." selamanya.
+      readCache(cacheKey).then((record) => {
+        if (!active) return;
+        if (record) {
+          setState({ loaded: true, shift: record.data ?? null });
+        } else {
+          setState({ loaded: true, shift: null });
+          toast.error(errMsg(e));
+        }
+      });
+    });
+    return () => { active = false; };
+  }, [url, cacheKey]);
 
   useEffect(() => {
-    refresh();
+    return refresh();
   }, [refresh]);
 
   if (!state.loaded) return <p className="py-20 text-center text-sm text-muted-foreground">Memuat shift...</p>;

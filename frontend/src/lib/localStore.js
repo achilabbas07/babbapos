@@ -36,6 +36,13 @@ export const variantsCacheKey = (productId) => `menu-variants:${productId}`;
 // "pos_token" dan validitasnya tetap diverifikasi ke server saat online.
 export const SESSION_USER_KEY = "session-user";
 
+// Cache shift aktif untuk fallback saat offline. Dibedakan per endpoint supaya
+// shift KASIR ("/shifts/current") dan shift PELAYAN ("/waiter-shifts/current")
+// tidak pernah tertukar. Data `shift` boleh null (artinya memang tak ada shift
+// terbuka) -- dibaca via `readCache` agar "ada record" vs "belum ada record"
+// tetap bisa dibedakan.
+export const activeShiftCacheKey = (endpoint) => `active-shift:${endpoint}`;
+
 const hasIndexedDB = () => {
   try {
     return typeof indexedDB !== "undefined" && indexedDB !== null;
