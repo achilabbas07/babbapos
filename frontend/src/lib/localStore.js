@@ -31,6 +31,11 @@ export const CACHE_KEYS = Object.freeze({
 // Key varian per produk -> "menu-variants:<product_id>".
 export const variantsCacheKey = (productId) => `menu-variants:${productId}`;
 
+// Cache profil sesi (id/nama/role user) untuk fallback saat offline. TIDAK
+// pernah menyimpan token atau PIN -- token tetap hanya di localStorage
+// "pos_token" dan validitasnya tetap diverifikasi ke server saat online.
+export const SESSION_USER_KEY = "session-user";
+
 const hasIndexedDB = () => {
   try {
     return typeof indexedDB !== "undefined" && indexedDB !== null;
