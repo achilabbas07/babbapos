@@ -60,16 +60,36 @@ html {
    Class `app-native-android` ditambahkan di index.js lewat deteksi native
    Capacitor, jadi aturan di bawah TIDAK pernah aktif di aplikasi web. */
 
-/* Kolom Pesanan (Android): tombol `Open Bill` & `Bayar` DIKUNCI rapat di bawah
-   panel lewat footer sticky (bottom:0), walau keranjang masih kosong. Tinggi
-   panel tetap dari layout web (md:h-[...] / md:min-h-[560px]); hanya tinggi
-   minimum desktop yang dilepas di Android agar panel tidak melampaui layar,
-   sementara daftar item (anchor [data-cart-part="list"]) menggulir internal
-   karena `flex: 1 1 auto` + `min-height: 0`. Jarak aman bawah tetap dari
-   `pb-safe` pada footer. Khusus Android; tampilan web tidak berubah. */
+/* Kolom Pesanan (Android, layar tablet/desktop >= 768px): tinggi panel dibuat
+   MENJANGKAU LEBIH KE BAWAH memakai `100dvh` — dari offset atas sticky
+   (`--sat + 5.5rem`) sampai tepat di atas tombol navigasi bawah Android
+   (dikurangi `--sab`). `min-h-[560px]` desktop dilepas agar panel tidak
+   melampaui layar pendek. Daftar item (anchor [data-cart-part="list"])
+   menggulir internal karena `flex: 1 1 auto` + `min-height: 0`, sehingga tombol
+   `Open Bill` & `Bayar` tetap terkunci di bagian bawah panel (footer sticky +
+   `margin-top: auto`), walau keranjang masih kosong. Khusus Android; tampilan
+   web TIDAK berubah. */
+@media (min-width: 768px) {
+    .app-native-android .pos-cart-sticky {
+        height: calc(100dvh - var(--sat) - 5.5rem - var(--sab) - 0.375rem) !important;
+        max-height: calc(100dvh - var(--sat) - 5.5rem - var(--sab) - 0.375rem) !important;
+        min-height: 0 !important;
+    }
+}
+
+/* Daftar item pesanan (Android): beri tinggi minimum setara ~5 baris item
+   (±15rem ≈ 240px, dalam rentang wajar 14–16rem) agar area daftar lega.
+   `flex: 1 1 auto` membuatnya tumbuh mengisi sisa ruang panel, namun dapat
+   menyusut & menggulir saat item ke-6 dan seterusnya. Scroll internal +
+   momentum halus untuk WebView Android. Footer (Open Bill/Bayar) tetap di
+   dasar panel karena `margin-top: auto` + sticky pada [data-cart-part=footer].
+   Khusus Android; tampilan web TIDAK berubah. */
 .app-native-android .pos-cart-sticky .pos-cart-list {
     flex: 1 1 auto !important;
-    min-height: 0 !important;
+    min-height: 15rem !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 
 .app-native-android [data-cart-part="footer"] {

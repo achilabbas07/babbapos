@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, errorCode, fmtDate, itemKey, itemName } from "@/lib/api";
+import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey } from "@/lib/localStore";
 import { ProductGrid } from "@/components/pos/ProductGrid";
 import { CartPanel } from "@/components/pos/CartPanel";
 import { PayDialog } from "@/components/pos/PayDialog";
@@ -58,18 +59,46 @@ export default function POS() {
   const [variantFor, setVariantFor] = useState(null);
   const [ojolMarkup, setOjolMarkup] = useState(() => resolveOjolMarkupPercent());
 
+  // Muat data master dengan dukungan cache lokal (Tahap 1 Offline Read).
+  // - Fetch berhasil  -> state diperbarui seperti biasa + hasilnya di-cache.
+  // - Fetch gagal      -> pakai data cache terakhir bila ada (halaman tetap
+  //   menampilkan menu/varian/meja/pelanggan/pelayan tanpa error kosong).
+  // Tidak mengubah alur transaksi/checkout: hanya baca/tulis cache lokal.
   const loadRefs = useCallback(async () => {
-    try {
-      const [p, t, c, w, m] = await Promise.all([api.get("/products"), api.get("/tables"), api.get("/customers"), api.get("/users/waiters"), api.get("/settings/ojol-markup").catch(() => null)]);
-      setProducts(p.data);
-      api.get("/products/stock").then((r) => setStock(r.data)).catch(() => {});
-      setTables(t.data);
-      setCustomers(c.data);
-      setWaiters(w.data);
-      if (m?.data?.markup_percent != null) setOjolMarkup(resolveOjolMarkupPercent(m.data.markup_percent));
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
+    let firstError = null;
+    const loadOne = async (cacheKey, request, apply, { silent = false } = {}) => {
+      try {
+        const res = await request();
+        const data = res?.data;
+        apply(data);
+        saveCache(cacheKey, data);
+        return true;
+      } catch (e) {
+        const cached = await readCacheData(cacheKey);
+        if (cached != null) {
+          apply(cached);
+          return true;
+        }
+        if (!silent && !firstError) firstError = e;
+        return false;
+      }
+    };
+
+    const results = await Promise.all([
+      loadOne(CACHE_KEYS.PRODUCTS, () => api.get("/products"), setProducts),
+      loadOne(CACHE_KEYS.TABLES, () => api.get("/tables"), setTables),
+      loadOne(CACHE_KEYS.CUSTOMERS, () => api.get("/customers"), setCustomers),
+      loadOne(CACHE_KEYS.WAITERS, () => api.get("/users/waiters"), setWaiters),
+      // Stok & markup bersifat pelengkap: gagal tanpa cache tidak perlu toast.
+      loadOne(CACHE_KEYS.PRODUCTS_STOCK, () => api.get("/products/stock"), setStock, { silent: true }),
+      loadOne(
+        CACHE_KEYS.OJOL_MARKUP,
+        () => api.get("/settings/ojol-markup"),
+        (data) => { if (data?.markup_percent != null) setOjolMarkup(resolveOjolMarkupPercent(data.markup_percent)); },
+        { silent: true },
+      ),
+    ]);
+    if (results.some((ok) => !ok) && firstError) toast.error(errMsg(firstError));
   }, []);
 
   useEffect(() => {
@@ -123,14 +152,25 @@ export default function POS() {
   }, [order.waiterId, order.waiterName]);
   const variantsOf = (p) => variants.filter((v) => v.pid === p.id);
   const add = useCallback(async (p) => {
+    const cacheKey = variantsCacheKey(p.id);
+    let data;
     try {
-      const { data } = await api.get("/menu-variants", { params: { product_id: p.id } });
-      setVariants((vs) => [...vs.filter((v) => v.pid !== p.id), ...data.map((v) => ({ ...v, pid: p.id }))]);
-      if (data.length) setVariantFor(p);
-      else addLine(p, null);
+      const res = await api.get("/menu-variants", { params: { product_id: p.id } });
+      data = res.data;
+      saveCache(cacheKey, data); // simpan varian produk untuk mode offline
     } catch (e) {
-      toast.error(errMsg(e));
+      // Fallback offline: pakai varian terakhir dari cache bila tersedia.
+      const cached = await readCacheData(cacheKey);
+      if (cached == null) {
+        toast.error(errMsg(e));
+        return;
+      }
+      data = cached;
     }
+    const rows = Array.isArray(data) ? data : [];
+    setVariants((vs) => [...vs.filter((v) => v.pid !== p.id), ...rows.map((v) => ({ ...v, pid: p.id }))]);
+    if (rows.length) setVariantFor(p);
+    else addLine(p, null);
   }, [addLine]);
 
   const reset = () => {

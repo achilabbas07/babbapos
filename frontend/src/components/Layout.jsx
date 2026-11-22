@@ -9,6 +9,7 @@ import { NAV_GROUPS, OPERATIONAL_REPORTS_GROUP_ID, filterNavItemsByRole } from "
 import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
 import { PrinterMappingDialog } from "@/components/settings/PrinterMappingDialog";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { useOpenBillCount } from "@/hooks/useOpenBillCount";
 
 const Clock = () => {
@@ -357,6 +358,7 @@ export default function Layout() {
             <div className="md:hidden"><Brand /></div>
             <div className="hidden sm:block"><Clock /></div>
             <div className="flex items-center gap-3">
+              <ConnectionStatus className="max-w-[7rem] sm:max-w-none" />
               <button
                 data-testid="printer-settings-button"
                 type="button"
