@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, UploadCloud } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Trash2, UploadCloud, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useTransactionQueue } from "@/hooks/useTransactionQueue";
+import { removeTransactionQueueItem } from "@/lib/localStore";
 import { syncTransactionQueue } from "@/lib/queueSync";
 import {
   QUEUE_BADGE_STATE,
@@ -17,8 +18,10 @@ import {
 // Menempel di samping indikator koneksi di header. Hanya MEMBACA antrean
 // (`getTransactionQueue`) dan bendera sync dari `queueSync.js`; satu-satunya
 // aksi adalah memanggil `syncTransactionQueue()` yang sudah ada ketika kasir
-// menekan "Sinkronkan Sekarang". Tidak ada perubahan pada alur `pay()`,
-// kalkulasi harga/diskon/pembayaran/HPP, backend, atau skema DB.
+// menekan "Sinkronkan Sekarang" (dan `removeTransactionQueueItem()` untuk tombol
+// "Hapus" item antrean). Tidak ada perubahan pada alur `pay()`, `queueSync.js`,
+// `offlineOpenBills.js`, kalkulasi harga/diskon/pembayaran/HPP, backend, atau
+// skema DB.
 //
 //   - syncing -> "Menyinkronkan..." (biru, ikon berputar)
 //   - failed  -> "Gagal: N"          (merah, butuh perhatian)
@@ -28,6 +31,9 @@ export function OfflineQueueBadge({ className = "" }) {
   const { items, summary, refresh } = useTransactionQueue(true);
   const [open, setOpen] = useState(false);
   const [manualSync, setManualSync] = useState(false);
+  // Konfirmasi inline (2 langkah) + penanda "sedang menghapus" per item.
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   if (!summary.visible) return null;
 
@@ -48,6 +54,23 @@ export function OfflineQueueBadge({ className = "" }) {
       // Best-effort: kegagalan sync tidak boleh menggagalkan UI.
     } finally {
       setManualSync(false);
+      refresh();
+    }
+  };
+
+  // Hapus satu item dari antrean secara lokal (mis. item `failed` / transaksi
+  // uji yang menggantung). Tidak menyentuh server; hanya membersihkan antrean
+  // lalu memperbarui badge + popover. Item `syncing` tidak boleh dihapus.
+  const removeItem = async (clientRequestId) => {
+    if (!clientRequestId || deletingId) return;
+    setDeletingId(clientRequestId);
+    try {
+      await removeTransactionQueueItem(clientRequestId);
+    } catch {
+      // Best-effort: kegagalan hapus tidak boleh menggagalkan UI.
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
       refresh();
     }
   };
@@ -91,6 +114,9 @@ export function OfflineQueueBadge({ className = "" }) {
             {rows.map((item) => {
               const info = queueItemSummary(item);
               const failed = item.status === "failed";
+              const syncing = item.status === "syncing";
+              const confirming = confirmDeleteId === item.client_request_id;
+              const deleting = deletingId === item.client_request_id;
               return (
                 <li
                   key={item.client_request_id}
@@ -102,24 +128,67 @@ export function OfflineQueueBadge({ className = "" }) {
                     <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
                       {formatQueueTime(item.createdAt)}
                     </span>
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                        failed
-                          ? "bg-destructive/10 text-destructive"
-                          : item.status === "syncing"
-                            ? "bg-sky-500/10 text-sky-600"
-                            : "bg-amber-500/10 text-amber-600"
-                      }`}
-                    >
-                      {item.status === "syncing" ? (
-                        <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                      ) : failed ? (
-                        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                    <div className="flex items-center gap-1">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          failed
+                            ? "bg-destructive/10 text-destructive"
+                            : syncing
+                              ? "bg-sky-500/10 text-sky-600"
+                              : "bg-amber-500/10 text-amber-600"
+                        }`}
+                      >
+                        {syncing ? (
+                          <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                        ) : failed ? (
+                          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                        ) : (
+                          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                        )}
+                        {queueItemStatusLabel(item.status)}
+                      </span>
+                      {confirming ? (
+                        <>
+                          <button
+                            type="button"
+                            data-testid="offline-queue-item-delete-confirm"
+                            aria-label="Hapus item antrean ini"
+                            disabled={deleting}
+                            onClick={() => removeItem(item.client_request_id)}
+                            className="inline-flex items-center gap-0.5 rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
+                          >
+                            {deleting ? (
+                              <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                            ) : (
+                              <Trash2 className="h-3 w-3" aria-hidden="true" />
+                            )}
+                            Hapus
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="offline-queue-item-delete-cancel"
+                            aria-label="Batal hapus item antrean"
+                            disabled={deleting}
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="inline-flex items-center rounded border border-border p-0.5 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                          >
+                            <X className="h-3 w-3" aria-hidden="true" />
+                          </button>
+                        </>
                       ) : (
-                        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                        <button
+                          type="button"
+                          data-testid="offline-queue-item-delete"
+                          aria-label="Hapus item antrean"
+                          title="Hapus item dari antrean"
+                          disabled={syncing}
+                          onClick={() => setConfirmDeleteId(item.client_request_id)}
+                          className="inline-flex items-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
                       )}
-                      {queueItemStatusLabel(item.status)}
-                    </span>
+                    </div>
                   </div>
                   <div className="mt-1 flex items-baseline justify-between gap-2">
                     <span className="text-xs">{info.summary}</span>
