@@ -5,6 +5,8 @@ import { PlusCircle, CreditCard, Split, Merge, MoveRight, Printer, ChefHat, Ban,
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, errorCode, fmtDate, fmtTime, itemKey, itemName, rp } from "@/lib/api";
+import { openBillCacheKey } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { STATUS } from "@/components/tables/FloorCanvas";
 import { PayDialog } from "@/components/pos/PayDialog";
 import { SplitBillDialog } from "@/components/tables/SplitBillDialog";
@@ -66,8 +68,18 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
     const controller = new AbortController();
     setBill(null);
     if (table?.status === "occupied" && billId) {
-      api.get(`/open-bills/${billId}`, { signal: controller.signal })
-        .then((r) => setBill(r.data))
+      // Fallback cache offline: bila detail bill gagal karena jaringan, pakai
+      // salinan terakhir dari cache lokal agar ringkasan bill tetap tampil
+      // (tanpa error "tidak ada jaringan").
+      loadWithCache(openBillCacheKey(billId), async () => (await api.get(`/open-bills/${billId}`, { signal: controller.signal })).data)
+        .then(({ data, canceled, error }) => {
+          if (canceled) return;
+          if (data?.id) {
+            setBill(data);
+            return;
+          }
+          if (error && !controller.signal.aborted) toast.error(errMsg(error));
+        })
         .catch((e) => {
           if (!controller.signal.aborted) toast.error(errMsg(e));
         });

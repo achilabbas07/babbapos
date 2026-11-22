@@ -49,6 +49,11 @@ export const CACHE_KEYS = Object.freeze({
 // Key varian per produk -> "menu-variants:<product_id>".
 export const variantsCacheKey = (productId) => `menu-variants:${productId}`;
 
+// Key cache detail Open Bill -> "open-bill:<bill_id>". Dipakai sebagai fallback
+// baca saat perangkat offline / fetch gagal jaringan, sehingga keranjang POS
+// masih bisa dibuka untuk menambah item atau melanjutkan pesanan.
+export const openBillCacheKey = (billId) => `open-bill:${billId}`;
+
 // Cache profil sesi (id/nama/role user) untuk fallback saat offline. TIDAK
 // pernah menyimpan token atau PIN -- token tetap hanya di localStorage
 // "pos_token" dan validitasnya tetap diverifikasi ke server saat online.

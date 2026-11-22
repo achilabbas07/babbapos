@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, errorCode, fmtDate, itemKey, itemName, isNetworkError, isFetchNetworkError, NETWORK_ERROR_MESSAGE } from "@/lib/api";
-import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey, enqueueTransaction, makeClientRequestId } from "@/lib/localStore";
+import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey, openBillCacheKey, enqueueTransaction, makeClientRequestId, countTransactionQueue } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { ProductGrid } from "@/components/pos/ProductGrid";
 import { CartPanel } from "@/components/pos/CartPanel";
 import { PayDialog } from "@/components/pos/PayDialog";
@@ -29,6 +30,18 @@ const getNextQueueNumber = async () => {
     throw new Error("Supabase tidak mengembalikan nomor urut bill.");
   }
   return queueNumber;
+};
+
+// Fallback nomor urut saat server/Supabase tak terjangkau (offline). Nomor ini
+// HANYA dipakai untuk bill yang disimpan ke antrean offline; saat antrean
+// dikirim ulang, server tetap memberi nomor otoritatifnya sendiri. Bertambah
+// lokal (Timestamp dibagi 1000) agar tidak pernah kembali ke nilai yang sudah
+// pernah terpakai selama sesi berjalan.
+let localQueueSeq = 0;
+const getLocalQueueNumber = () => {
+  const base = Math.floor(Date.now() / 1000);
+  localQueueSeq = Math.max(base, localQueueSeq + 1);
+  return localQueueSeq;
 };
 
 const createItemId = () => {
@@ -110,7 +123,16 @@ export default function POS() {
     const billId = params.get("bill");
     const tableId = params.get("table");
     if (billId) {
-      api.get(`/open-bills/${billId}`, { signal: controller.signal }).then(({ data }) => {
+      // Fallback cache offline: bila detail bill gagal karena jaringan, pakai
+      // salinan terakhir dari cache lokal supaya keranjang tetap bisa dibuka
+      // untuk menambah item / melanjutkan pesanan tanpa error "tidak ada jaringan".
+      loadWithCache(openBillCacheKey(billId), async () => (await api.get(`/open-bills/${billId}`, { signal: controller.signal })).data)
+        .then(({ data, canceled, error }) => {
+        if (canceled) return;
+        if (!data?.id) {
+          if (error && !controller.signal.aborted) toast.error(errMsg(error));
+          return;
+        }
         const billItems = data.items_json.map((i) => {
           const id = i.id || createItemId();
           // `waiterId`/`waiterName` per item dipertahankan agar batch order lama
@@ -126,9 +148,9 @@ export default function POS() {
         setCart(billItems);
         setSaved(Object.fromEntries(billItems.map((i) => [i.key, i.qty])));
         setAuthPin(null);
-      }).catch((e) => {
-        if (!controller.signal.aborted) toast.error(errMsg(e));
-      });
+        }).catch((e) => {
+          if (!controller.signal.aborted) toast.error(errMsg(e));
+        });
     } else if (tableId) {
       setOrder((o) => ({ ...o, type: "Dine In", tableId }));
     }
@@ -261,20 +283,68 @@ export default function POS() {
     }
   };
 
+  // Terapkan data bill ke state + cache lokal (dipakai baik saat online maupun
+  // fallback offline) lalu cetak tiket dapur.
+  const playSaveResponse = async (data) => {
+    const kitchenItems = (data.items_json || []).map((i) => ({
+      ...i, is_printed: false, key: cartItemKey({ ...i, id: i.id || createItemId() }),
+    }));
+    if (data.id) saveCache(openBillCacheKey(data.id), data);
+    toast.success(`Open bill ${data.id} tersimpan`);
+    await autoPrintKitchenTicket(
+      { ...data, items_json: kitchenItems },
+      { tableName: tables.find((table) => table.id === data.tableId)?.name },
+    );
+    notifyOpenBillsChanged();
+    reset();
+    loadRefs();
+  };
+
   const saveBill = () => run(async () => {
     const blocked = waiterValidationMessage(user.role, order);
     if (blocked) {
       toast.error(blocked);
       return;
     }
-    const body = payload();
-    if (!order.billId) body.queueNumber = await getNextQueueNumber();
-    const { data } = order.billId ? await api.put(`/open-bills/${order.billId}`, body) : await api.post("/open-bills", body);
-    toast.success(`Open bill ${data.id} tersimpan`);
-    await autoPrintKitchenTicket(data, { tableName: tables.find((table) => table.id === data.tableId)?.name });
-    notifyOpenBillsChanged();
-    reset();
-    loadRefs();
+    const billId = order.billId;
+    const clientRequestId = makeClientRequestId();
+    const body = { ...payload(), client_request_id: clientRequestId };
+    if (!billId) {
+      try {
+        body.queueNumber = await getNextQueueNumber();
+      } catch (queueError) {
+        if (isNetworkError(queueError)) body.queueNumber = getLocalQueueNumber();
+        else throw queueError;
+      }
+    }
+    try {
+      const { data } = billId ? await api.put(`/open-bills/${billId}`, body) : await api.post("/open-bills", body);
+      await playSaveResponse(data);
+    } catch (saveError) {
+      if (!isNetworkError(saveError)) throw saveError;
+      // Gagal jaringan: simpan aksi ke antrean persisten (Tahap 2), lengkap
+      // dengan `client_request_id`, agar dikirim ulang otomatis saat online.
+      // Payload TIDAK menyertakan `billId` (menghindari kunci idempoten server).
+      const queueBody = { ...body };
+      const meta = billId
+        ? { type: "open-bill-update", clientRequestId }
+        : { type: "open-bill-create", clientRequestId };
+      if (billId) queueBody.billId = billId;
+      const item = await enqueueTransaction(queueBody, meta);
+      if (!item) {
+        toast.error("Gagal menyimpan Open Bill ke antrean offline. Periksa penyimpanan perangkat lalu coba lagi.");
+        return;
+      }
+      if (billId && order.queueNumber != null) {
+        saveCache(openBillCacheKey(billId), { ...(await readCacheData(openBillCacheKey(billId)) || {}), id: billId, queueNumber: order.queueNumber, items_json: body.items });
+      }
+      const pending = await countTransactionQueue();
+      toast.warning(
+        `Koneksi terputus. Open Bill disimpan di antrean offline${pending ? ` (${pending} antrean)` : ""}; akan dikirim otomatis saat online kembali.`,
+      );
+      reset();
+      loadRefs();
+    }
   });
 
   // Checkout offline: simpan transaksi ke antrean lokal untuk dikirim otomatis

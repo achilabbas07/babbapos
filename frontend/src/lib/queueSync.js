@@ -126,8 +126,26 @@ export async function syncTransactionQueue() {
       }
 
       try {
-        const body = { ...item.payload, client_request_id: clientRequestId };
-        await api.post("/transactions", body);
+        const body = { ...item.payload };
+        // Item Open Bill offline dikirim ke endpoint Open Bill (bukan
+        // /transactions). Tipe item dibawa di payload oleh POS.jsx:
+        //   - "open-bill-create" -> POST /open-bills   (bill baru)
+        //   - "open-bill-update" -> PUT  /open-bills/{id} (tambah/ubah item)
+        // Tipe lain (pembayaran/transaksi) tetap memakai POST /transactions
+        // dengan `client_request_id` seperti sebelumnya (tidak diubah).
+        if (body.type === "open-bill-create") {
+          delete body.type;
+          delete body.client_request_id;
+          await api.post("/open-bills", body);
+        } else if (body.type === "open-bill-update" && body.billId) {
+          const billId = body.billId;
+          delete body.type;
+          delete body.client_request_id;
+          delete body.billId;
+          await api.put(`/open-bills/${billId}`, body);
+        } else {
+          await api.post("/transactions", { ...body, client_request_id: clientRequestId });
+        }
         await removeTransactionQueueItem(clientRequestId);
         result.sent += 1;
       } catch (error) {
