@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { PlusCircle, CreditCard, Split, Merge, MoveRight, Printer, ChefHat, Ban, Eraser, CalendarClock, Clock } from "lucide-react";
+import { PlusCircle, CreditCard, Split, Merge, MoveRight, Printer, ChefHat, Ban, Eraser, CalendarClock, Clock, CloudOff } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, errorCode, fmtDate, fmtTime, itemKey, itemName, rp } from "@/lib/api";
@@ -52,7 +52,7 @@ const BillSummary = ({ bill }) => (
   </div>
 );
 
-export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid }) => {
+export const TableDetailDialog = ({ table, tables, offlineBill = null, onClose, onChanged, onPaid }) => {
   const { user } = useAuth();
   const nav = useNavigate();
   const [bill, setBill] = useState(null);
@@ -63,11 +63,15 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
   const isAdmin = user.role === "admin";
   const canPay = user.role !== "waiter";
   const billId = table?.orderData?.openBillId;
+  // Bill yang masih mengantre di antrean offline: server belum punya barisnya,
+  // jadi ringkasan ditampilkan dari data antrean (bukan hasil GET).
+  const isOfflineBill = Boolean(offlineBill);
+  const displayBill = offlineBill || bill;
 
   useEffect(() => {
     const controller = new AbortController();
     setBill(null);
-    if (table?.status === "occupied" && billId) {
+    if (table?.status === "occupied" && billId && !isOfflineBill) {
       // Fallback cache offline: bila detail bill gagal karena jaringan, pakai
       // salinan terakhir dari cache lokal agar ringkasan bill tetap tampil
       // (tanpa error "tidak ada jaringan").
@@ -85,7 +89,7 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
         });
     }
     return () => controller.abort();
-  }, [table?.id, table?.status, billId]);
+  }, [table?.id, table?.status, billId, isOfflineBill]);
 
   const run = async (fn, msg) => {
     try {
@@ -150,19 +154,26 @@ export const TableDetailDialog = ({ table, tables, onClose, onChanged, onPaid })
             </DialogTitle>
           </DialogHeader>
 
-          {table?.status === "occupied" && (bill ? (
+          {table?.status === "occupied" && (displayBill ? (
             <div className="space-y-4">
-              <BillSummary bill={bill} />
+              {isOfflineBill && (
+                <div data-testid="table-detail-offline-notice" className="flex items-start gap-2 rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>Bill ini belum tersimpan di server (menunggu koneksi). Anda masih bisa menambah item ke antrean.</span>
+                </div>
+              )}
+              <BillSummary bill={displayBill} />
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                <Action testid="action-add-order" icon={PlusCircle} label="Tambah Pesanan" onClick={() => nav(`/pos?bill=${bill.id}`)} />
-                {canPay && <Action testid="action-pay" icon={CreditCard} label="Bayar" tone="bg-primary text-primary-foreground border-primary hover:bg-primary/90" onClick={() => setPay({ items: bill.items_json, partial: false })} />}
-                {canPay && <Action testid="action-split" icon={Split} label="Pisah Bill" onClick={() => setMode("split")} />}
-                <Action testid="action-merge" icon={Merge} label="Gabung Meja" onClick={() => setMode("merge")} />
-                <Action testid="action-move" icon={MoveRight} label="Pindah Meja" onClick={() => setMode("move")} />
-                <Action testid="action-print-bill" icon={Printer} label="Cetak Bill" onClick={() => setMode("printBill")} />
-                <Action testid="action-print-kitchen" icon={ChefHat} label="Cetak Dapur" lock={!isAdmin}
-                  onClick={() => setMode(isAdmin ? "printKitchen" : "pinKitchen")} />
-                <Action testid="action-void" icon={Ban} label="Void" lock={!isAdmin} tone="text-destructive hover:border-destructive" onClick={() => setMode("void")} />
+                <Action testid="action-add-order" icon={PlusCircle} label="Tambah Pesanan"
+                  onClick={() => nav(isOfflineBill ? `/pos?offline-bill=${offlineBill.id}` : `/pos?bill=${bill.id}`)} />
+                {!isOfflineBill && canPay && <Action testid="action-pay" icon={CreditCard} label="Bayar" tone="bg-primary text-primary-foreground border-primary hover:bg-primary/90" onClick={() => setPay({ items: bill.items_json, partial: false })} />}
+                {!isOfflineBill && canPay && <Action testid="action-split" icon={Split} label="Pisah Bill" onClick={() => setMode("split")} />}
+                {!isOfflineBill && <Action testid="action-merge" icon={Merge} label="Gabung Meja" onClick={() => setMode("merge")} />}
+                {!isOfflineBill && <Action testid="action-move" icon={MoveRight} label="Pindah Meja" onClick={() => setMode("move")} />}
+                {!isOfflineBill && <Action testid="action-print-bill" icon={Printer} label="Cetak Bill" onClick={() => setMode("printBill")} />}
+                {!isOfflineBill && <Action testid="action-print-kitchen" icon={ChefHat} label="Cetak Dapur" lock={!isAdmin}
+                  onClick={() => setMode(isAdmin ? "printKitchen" : "pinKitchen")} />}
+                {!isOfflineBill && <Action testid="action-void" icon={Ban} label="Void" lock={!isAdmin} tone="text-destructive hover:border-destructive" onClick={() => setMode("void")} />}
               </div>
             </div>
           ) : <p className="py-10 text-center text-sm text-muted-foreground">Memuat pesanan...</p>)}

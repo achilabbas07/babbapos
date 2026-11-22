@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Move, Save, X } from "lucide-react";
+import { Plus, Move, Save, X, CloudOff } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg } from "@/lib/api";
 import { CACHE_KEYS } from "@/lib/localStore";
 import { loadWithCache } from "@/lib/offlineRead";
+import { OFFLINE_BILL_STATUS_LABEL, isOfflineMode, mergeOfflineTables, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
+import { useTransactionQueue } from "@/hooks/useTransactionQueue";
+import { QUEUE_SYNC_EVENT } from "@/lib/queueSync";
 import { PageHeader } from "@/components/PageHeader";
 import { FormDialog } from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
@@ -45,6 +48,8 @@ export default function Tables() {
   const [receipt, setReceipt] = useState(null);
   const [fromCache, setFromCache] = useState(false);
   const [cachedAt, setCachedAt] = useState(null);
+  const [offline, setOffline] = useState(() => isOfflineMode());
+  const { items: queueItems } = useTransactionQueue(true);
 
   // Muat denah meja dengan fallback cache lokal: bila fetch gagal karena
   // jaringan/offline, denah terakhir dari cache tetap ditampilkan.
@@ -58,6 +63,49 @@ export default function Tables() {
     setCachedAt(result.updatedAt);
     if (result.error) toast.error(errMsg(result.error));
   }), []);
+
+  // Deteksi mode offline + jaring pemulihan: saat koneksi kembali, antrean
+  // disinkronkan (`queueSync`) lalu muat ulang data SEGAR dari server.
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const sync = () => setOffline(isOfflineMode());
+    sync();
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+
+  const queueReloadRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onOnline = () => { queueReloadRef.current = true; };
+    const onSynced = () => {
+      if (!queueReloadRef.current) return;
+      queueReloadRef.current = false;
+      load();
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener(QUEUE_SYNC_EVENT, onSynced);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener(QUEUE_SYNC_EVENT, onSynced);
+    };
+  }, [load]);
+
+  // Proyeksikan Open Bill yang masih mengantre (pending/failed) ke denah meja
+  // agar meja berstatus "Terisi" walau bill belum tersimpan di server.
+  const offlineBills = useMemo(
+    () => (offline ? pendingOpenBillsFromQueue(queueItems) : []),
+    [offline, queueItems],
+  );
+  const offlineByTable = useMemo(
+    () => Object.fromEntries(offlineBills.filter((b) => b.tableId).map((b) => [b.tableId, b])),
+    [offlineBills],
+  );
+
   useEffect(() => {
     const controller = new AbortController();
     load(controller.signal);
@@ -89,11 +137,16 @@ export default function Tables() {
     if (!editing) setPositions(autoLayout(tables, !layoutUsesUnits(tables)));
   }, [tables, editing]);
 
+  // Denah yang ditampilkan = data server/cache + proyeksi antrean offline.
+  const renderedTables = useMemo(
+    () => (offline ? mergeOfflineTables(tables, offlineBills) : tables),
+    [offline, tables, offlineBills],
+  );
   const areas = [...new Set(tables.map((t) => t.area))];
   const current = areas.includes(area) ? area : areas[0];
-  const shown = tables.filter((t) => t.area === current);
-  const realTables = tables.filter((t) => t.kind !== "fixture");
-  const detail = tables.find((t) => t.id === detailId) || null;
+  const shown = renderedTables.filter((t) => t.area === current);
+  const realTables = renderedTables.filter((t) => t.kind !== "fixture");
+  const detail = renderedTables.find((t) => t.id === detailId) || null;
 
   const saveLayout = async () => {
     try {
@@ -157,6 +210,18 @@ export default function Tables() {
 
       <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
 
+      {offline && offlineBills.length > 0 && (
+        <div data-testid="tables-offline-bills-notice" className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {offlineBills.length} Open Bill menunggu dikirim: {offlineBills.map((b) => {
+              const tableName = tables.find((t) => t.id === b.tableId)?.name || b.tableId || "Tanpa meja";
+              return `${tableName} (${OFFLINE_BILL_STATUS_LABEL[b.queuedStatus] || b.queuedStatus})`;
+            }).join(", ")}. Meja terkait ditandai terisi sampai data terkirim.
+          </span>
+        </div>
+      )}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-4 text-sm" data-testid="table-legend">
           {Object.entries(STATUS).map(([k, s]) => (
@@ -178,7 +243,7 @@ export default function Tables() {
         onDelete={deleteTable} />
 
       <FormDialog open={!!form} onOpenChange={(o) => !o && setForm(null)} title={form?.id ? `Edit ${form.name}` : "Tambah Meja / Objek"} fields={FIELDS} initial={form} onSubmit={saveForm} testid="table-form" />
-      <TableDetailDialog table={detail} tables={tables} onClose={() => setDetailId(null)} onChanged={load}
+      <TableDetailDialog table={detail} tables={tables} offlineBill={detail ? offlineByTable[detail.id] || null : null} onClose={() => setDetailId(null)} onChanged={load}
         onPaid={(trx, partial) => { setReceipt(trx); if (!partial) setDetailId(null); load(); }} />
       <ReceiptDialog trx={receipt} onClose={() => setReceipt(null)} />
     </div>

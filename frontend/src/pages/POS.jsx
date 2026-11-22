@@ -3,8 +3,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, errorCode, fmtDate, itemKey, itemName, isNetworkError, isFetchNetworkError, NETWORK_ERROR_MESSAGE } from "@/lib/api";
-import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey, openBillCacheKey, enqueueTransaction, makeClientRequestId, countTransactionQueue } from "@/lib/localStore";
+import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey, openBillCacheKey, enqueueTransaction, makeClientRequestId, countTransactionQueue, getTransactionQueue } from "@/lib/localStore";
 import { loadWithCache } from "@/lib/offlineRead";
+import { offlineOrderFromBill, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
 import { ProductGrid } from "@/components/pos/ProductGrid";
 import { CartPanel } from "@/components/pos/CartPanel";
 import { PayDialog } from "@/components/pos/PayDialog";
@@ -121,8 +122,35 @@ export default function POS() {
   useEffect(() => {
     const controller = new AbortController();
     const billId = params.get("bill");
+    const offlineBillId = params.get("offline-bill");
     const tableId = params.get("table");
-    if (billId) {
+    if (offlineBillId) {
+      // Bill yang masih mengantre di antrean offline belum ada di server; muat
+      // langsung dari antrean lokal agar keranjang tetap bisa dibuka untuk
+      // menambah item (yang nanti ikut mengantre sebagai open-bill-update).
+      getTransactionQueue().then((queue) => {
+        if (controller.signal.aborted) return;
+        const found = pendingOpenBillsFromQueue(queue).find((b) => b.id === offlineBillId);
+        if (!found) {
+          toast.error("Open Bill antrean tidak ditemukan atau sudah tersinkron.");
+          return;
+        }
+        const order = offlineOrderFromBill(found);
+        const billItems = found.items_json.map((i) => {
+          const id = i.id || createItemId();
+          return {
+            key: cartItemKey({ ...i, id }), id, is_printed: Boolean(i.is_printed),
+            productId: i.productId, variantId: i.variantId ?? null, extra: 0,
+            variantName: i.variantName || "", name: itemName(i), price: i.price, qty: i.qty,
+            notes: i.notes || "", waiterId: i.waiterId ?? null, waiterName: i.waiterName || "",
+          };
+        });
+        setOrder(order);
+        setCart(billItems);
+        setSaved(Object.fromEntries(billItems.map((i) => [i.key, i.qty])));
+        setAuthPin(null);
+      });
+    } else if (billId) {
       // Fallback cache offline: bila detail bill gagal karena jaringan, pakai
       // salinan terakhir dari cache lokal supaya keranjang tetap bisa dibuka
       // untuk menambah item / melanjutkan pesanan tanpa error "tidak ada jaringan".

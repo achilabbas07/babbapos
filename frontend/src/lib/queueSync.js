@@ -1,8 +1,14 @@
 // Sinkronisasi otomatis antrean transaksi lokal (Tahap 2 "Offline Queue").
 //
 // Modul ini HANYA membaca antrean yang sudah tersimpan (via `getTransactionQueue`)
-// dan mengirim ulang item yang belum terkirim ke `POST /transactions` memakai
-// payload + `client_request_id` yang tersimpan. Ia TIDAK mengubah:
+// dan mengirim ulang item yang belum terkirim. Rute permintaan ditentukan
+// `resolveQueueRequest()` (lihat `offlineOpenBills.js`):
+//   - `open-bill-create`            -> POST /open-bills
+//   - `open-bill-update` + `billId` -> PUT  /open-bills/{billId}
+//   - lainnya                       -> POST /transactions (perilaku lama)
+// Field internal (`type`, `client_request_id`, `billId`) dibuang dari body agar
+// tidak ditolak validasi `OpenBillIn` (yang tidak menerima `client_request_id`).
+// Modul ini TIDAK mengubah:
 //   - alur checkout `pay()` di POS.jsx,
 //   - kalkulasi harga/diskon/pembayaran/HPP,
 //   - backend (`server.py`), skema database, `ShiftGate.jsx`, `AuthContext.jsx`.
@@ -25,6 +31,7 @@ import {
   updateTransactionQueueItem,
   QUEUE_STATUS,
 } from "@/lib/localStore";
+import { resolveQueueRequest } from "@/lib/offlineOpenBills";
 
 // Jeda backoff antar percobaan ulang (dalam milidetik). Indeks >= panjang array
 // memakai nilai terakhir (retry makin jarang saat terus gagal).
@@ -126,26 +133,14 @@ export async function syncTransactionQueue() {
       }
 
       try {
-        const body = { ...item.payload };
         // Item Open Bill offline dikirim ke endpoint Open Bill (bukan
         // /transactions). Tipe item dibawa di payload oleh POS.jsx:
         //   - "open-bill-create" -> POST /open-bills   (bill baru)
         //   - "open-bill-update" -> PUT  /open-bills/{id} (tambah/ubah item)
         // Tipe lain (pembayaran/transaksi) tetap memakai POST /transactions
         // dengan `client_request_id` seperti sebelumnya (tidak diubah).
-        if (body.type === "open-bill-create") {
-          delete body.type;
-          delete body.client_request_id;
-          await api.post("/open-bills", body);
-        } else if (body.type === "open-bill-update" && body.billId) {
-          const billId = body.billId;
-          delete body.type;
-          delete body.client_request_id;
-          delete body.billId;
-          await api.put(`/open-bills/${billId}`, body);
-        } else {
-          await api.post("/transactions", { ...body, client_request_id: clientRequestId });
-        }
+        const { method, url, body } = resolveQueueRequest(item);
+        await api[method](url, body);
         await removeTransactionQueueItem(clientRequestId);
         result.sent += 1;
       } catch (error) {
