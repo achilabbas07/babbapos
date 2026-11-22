@@ -219,22 +219,32 @@ export const offlineOrderFromBill = (bill) => {
  *   - `open-bill-update` -> PUT  /open-bills/{billId} (tambah/ubah item),
  *   - lainnya            -> POST /transactions (perilaku lama, tidak berubah).
  *
+ * PENTING: penanda rute ada di `item.type` (meta antrean), BUKAN `payload.type`.
+ * `payload.type` adalah JENIS PESANAN Open Bill ("Dine In"/"Takeaway"/...) yang
+ * WAJIB dikirim ke backend. Menentukan rute dari `payload.type` (kesalahan lama)
+ * membuat pemeriksaan `payload.type === "open-bill-create"` SELALU gagal,
+ * sehingga item Open Bill ikut dikirim ke `POST /transactions` yang membutuhkan
+ * `method` -> server membalas 422 "method: Field required" dan item ditandai
+ * `failed` permanen.
+ *
  * @returns {{method:"post"|"put", url:string, body:object}}
  */
 export const resolveQueueRequest = (item) => {
   const payload = { ...(item?.payload || {}) };
   const clientRequestId = item?.client_request_id || payload.client_request_id || "";
-  const type = payload.type;
+  // Rute diambil dari penanda antrean (`item.type`), bukan tipe pesanan.
+  const queuedType = item?.type;
 
-  if (type === OPEN_BILL_CREATE_TYPE) {
-    delete payload.type;
+  if (queuedType === OPEN_BILL_CREATE_TYPE) {
+    // `type` (jenis pesanan) dipertahankan; hanya kunci idempotensi lokal
+    // yang dibuang karena `OpenBillIn` tidak menerimanya.
     delete payload.client_request_id;
     return { method: "post", url: "/open-bills", body: payload };
   }
 
-  if (type === OPEN_BILL_UPDATE_TYPE && payload.billId) {
+  if (queuedType === OPEN_BILL_UPDATE_TYPE && payload.billId) {
     const billId = payload.billId;
-    delete payload.type;
+    // `type` (jenis pesanan) dipertahankan; `billId` pindah ke URL.
     delete payload.client_request_id;
     delete payload.billId;
     return { method: "put", url: `/open-bills/${billId}`, body: payload };

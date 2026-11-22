@@ -24,31 +24,46 @@ const queueItem = (overrides = {}) => ({
 });
 
 describe("resolveQueueRequest", () => {
-  it("mengirim open-bill-create sebagai POST /open-bills tanpa type/client_request_id", () => {
+  it("mengirim open-bill-create sebagai POST /open-bills, mempertahankan jenis pesanan", () => {
     const item = queueItem({
       type: "open-bill-create",
       client_request_id: "crq-create",
-      payload: { type: "open-bill-create", client_request_id: "crq-create", tableId: "t1", items: [{ productId: "p1", qty: 1 }] },
+      payload: { type: "Dine In", client_request_id: "crq-create", tableId: "t1", items: [{ productId: "p1", qty: 1 }] },
     });
     const { method, url, body } = resolveQueueRequest(item);
     expect(method).toBe("post");
     expect(url).toBe("/open-bills");
-    expect(body).not.toHaveProperty("type");
+    // `type` = jenis pesanan Open Bill yang WAJIB dikirim (bukan penanda rute).
+    expect(body.type).toBe("Dine In");
     expect(body).not.toHaveProperty("client_request_id");
     expect(body.tableId).toBe("t1");
+  });
+
+  it("menentukan rute dari item.type, bukan payload.type (regresi 'Field required')", () => {
+    // Penanda antrean "open-bill-create" + jenis pesanan "Takeaway" harus tetap
+    // diarahkan ke POST /open-bills (dulu salah jatuh ke POST /transactions
+    // sehingga server membalas 422 "method: Field required").
+    const item = queueItem({
+      type: "open-bill-create",
+      payload: { type: "Takeaway", tableId: null, items: [{ id: "i1", productId: "p1", qty: 1 }] },
+    });
+    const { method, url, body } = resolveQueueRequest(item);
+    expect(method).toBe("post");
+    expect(url).toBe("/open-bills");
+    expect(body.type).toBe("Takeaway");
   });
 
   it("mengirim open-bill-update sebagai PUT /open-bills/{id} tanpa billId di body", () => {
     const item = queueItem({
       type: "open-bill-update",
       client_request_id: "crq-update",
-      payload: { type: "open-bill-update", client_request_id: "crq-update", billId: "BILL-9", items: [{ productId: "p1", qty: 3 }] },
+      payload: { type: "Dine In", client_request_id: "crq-update", billId: "BILL-9", items: [{ productId: "p1", qty: 3 }] },
     });
     const { method, url, body } = resolveQueueRequest(item);
     expect(method).toBe("put");
     expect(url).toBe("/open-bills/BILL-9");
     expect(body).not.toHaveProperty("billId");
-    expect(body).not.toHaveProperty("type");
+    expect(body.type).toBe("Dine In");
     expect(body).not.toHaveProperty("client_request_id");
   });
 

@@ -156,11 +156,15 @@ export async function syncTransactionQueue() {
           break;
         }
         // Error 4xx/validasi dari server -> tandai failed, lanjut ke item berikut.
+        // `nextAttemptAt` dikosongkan agar item tetap layak di-retry pada batch
+        // berikutnya / saat kasir menekan "Sinkronkan Sekarang" (tanpa ini,
+        // sisa backoff jaringan sebelumnya bisa membuat item failed dilewati).
         await updateTransactionQueueItem(clientRequestId, {
           status: QUEUE_STATUS.FAILED,
           retryCount: (Number(item.retryCount) || 0) + 1,
           lastAttemptAt: new Date().toISOString(),
           lastError: errMsg(error),
+          nextAttemptAt: null,
         });
         result.failed += 1;
       }
