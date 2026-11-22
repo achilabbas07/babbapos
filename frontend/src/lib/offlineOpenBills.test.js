@@ -106,6 +106,49 @@ describe("pendingOpenBillsFromQueue", () => {
     expect(bill.total).toBe(30000);
   });
 
+  it("menampilkan nama menu + nominal rupiah dari payload antrean (bukan 'Menu'/'Rp 0')", () => {
+    // Bentuk payload yang dikirim POS.jsx: menyertakan productName/variantName/price
+    // sebagai field tampilan. Proyeksi bill offline harus memakainya agar dialog
+    // detail meja menampilkan nama menu & subtotal, bukan "Menu" dan "Rp 0".
+    const [bill] = pendingOpenBillsFromQueue([
+      queueItem({
+        payload: {
+          type: "Dine In",
+          items: [
+            { id: "i1", productId: "p1", productName: "Kopi Susu", variantName: "Es", price: 15000, qty: 2 },
+          ],
+        },
+      }),
+    ]);
+    expect(bill.items_json[0].productName).toBe("Kopi Susu");
+    expect(bill.items_json[0].name).toBe("Kopi Susu");
+    expect(bill.items_json[0].variantName).toBe("Es");
+    expect(bill.items_json[0].price).toBe(15000);
+    expect(bill.items_json[0].subtotal).toBe(30000);
+    expect(bill.total).toBe(30000);
+  });
+
+  it("membaca field nama/harga bergaya snake_case dengan fallback aman", () => {
+    // Payload lama/berbeda versi bisa memakai snake_case; nama & harga tetap
+    // terbaca, dan subtotal dihitung dari price*qty bila `subtotal` tak ada.
+    const [bill] = pendingOpenBillsFromQueue([
+      queueItem({
+        payload: {
+          type: "Dine In",
+          items: [
+            { product_id: "p1", nama_menu: "Nasi Goreng", qty: 3, price: "20000" },
+            { productId: "p2", qty: 1 }, // tanpa nama & tanpa harga -> fallback aman
+          ],
+        },
+      }),
+    ]);
+    expect(bill.items_json[0].productName).toBe("Nasi Goreng");
+    expect(bill.items_json[0].qty).toBe(3);
+    expect(bill.items_json[0].subtotal).toBe(60000);
+    expect(bill.items_json[1].productName).toBe("Menu");
+    expect(bill.items_json[1].subtotal).toBe(0);
+  });
+
   it("aksi update terbaru menang untuk bill yang sama", () => {
     const bills = pendingOpenBillsFromQueue([
       queueItem({ type: "open-bill-create", createdAt: "2024-01-01T10:00:00.000Z" }),

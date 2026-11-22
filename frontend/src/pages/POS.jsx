@@ -254,9 +254,16 @@ export default function POS() {
     adminPin: authPin,
     // Sertakan atribusi pelayan per item agar item yang sudah tersimpan tidak
     // ikut berpindah nama ketika pelayan diganti pada tambah order.
-    items: cart.map(({ id, is_printed, productId, qty, notes, variantId, waiterId, waiterName }) => ({
-      id, is_printed, productId, qty, notes, variantId,
-      waiterId: waiterId ?? null, waiterName: waiterName || "",
+    // `productName`/`variantName`/`price` bersifat TAMPILAN saja (dipakai untuk
+    // memproyeksikan bill antrean offline di dialog detail meja). Server tetap
+    // menghitung ulang nama & harga/HPP dari `productId`/`variantId`, jadi angka
+    // yang ditagih tidak berubah.
+    items: cart.map((i) => ({
+      id: i.id, is_printed: i.is_printed, productId: i.productId, qty: i.qty, notes: i.notes, variantId: i.variantId,
+      waiterId: i.waiterId ?? null, waiterName: i.waiterName || "",
+      productName: i.name || "",
+      variantName: i.variantName || "",
+      price: priceOf(i),
     })),
   });
 
