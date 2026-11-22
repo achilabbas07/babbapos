@@ -26,28 +26,41 @@ export const offlineBillActionLabel = (queuedType) =>
 // Normalisasi nilai "none"/undefined -> null (dipakai field opsional).
 const optional = (v) => (v === "none" || v === undefined ? null : v ?? null);
 
+// Ambil nilai pertama yang "terisi" (bukan undefined/null/string kosong).
+// Toleran terhadap payload bergaya camelCase maupun snake_case.
+const pick = (...values) => values.find((v) => v !== undefined && v !== null && v !== "");
+
+// Konversi ke angka; kembalikan null bila bukan angka valid (mis. "" / undefined).
+const toNumber = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 // Ubah satu item payload antrean menjadi bentuk item `items_json` Open Bill
 // yang bisa dipakai komponen tampilan (groupOrderItemsForDisplay, rp, dst.).
+// Murni pemetaan TAMPILAN: hanya membaca field nama/harga/qty/subtotal dengan
+// fallback aman; tidak menyentuh kalkulasi harga/diskon/HPP maupun antrean.
 const toDisplayItem = (src) => {
   if (!src || typeof src !== "object") return null;
-  const qty = Number(src.qty) || 0;
-  const priceRaw = Number(src.price);
-  const subtotalRaw = Number(src.subtotal);
-  const price = Number.isFinite(priceRaw) ? priceRaw : (qty ? (Number.isFinite(subtotalRaw) ? subtotalRaw : 0) / qty : 0);
-  const subtotal = Number.isFinite(subtotalRaw) ? subtotalRaw : price * qty;
-  const productName = src.productName || src.variantName || src.name || "Menu";
+  const qty = Number(pick(src.qty, src.quantity)) || 0;
+  const unitPrice = toNumber(pick(src.price, src.unitPrice, src.unit_price));
+  const extra = toNumber(pick(src.variantPrice, src.variant_price, src.extra)) || 0;
+  const subtotalRaw = toNumber(pick(src.subtotal, src.sub_total));
+  const price = unitPrice != null ? unitPrice : (subtotalRaw != null && qty ? subtotalRaw / qty : extra);
+  const subtotal = subtotalRaw != null ? subtotalRaw : price * qty;
+  const productName = String(pick(src.productName, src.product_name, src.name, src.nama_menu, src.menuName, src.menu_name, src.variantName, src.variant_name) || "Menu");
   return {
     id: src.id ?? null,
     is_printed: Boolean(src.is_printed),
-    productId: src.productId ?? null,
-    variantId: src.variantId ?? null,
+    productId: pick(src.productId, src.product_id) ?? null,
+    variantId: pick(src.variantId, src.variant_id) ?? null,
     productName,
-    variantName: src.variantName || "",
+    variantName: String(pick(src.variantName, src.variant_name) || ""),
     name: productName,
     qty,
-    notes: src.notes || "",
-    waiterId: src.waiterId ?? null,
-    waiterName: src.waiterName || "",
+    notes: String(pick(src.notes, src.note) || ""),
+    waiterId: pick(src.waiterId, src.waiter_id) ?? null,
+    waiterName: String(pick(src.waiterName, src.waiter_name) || ""),
     price,
     subtotal,
   };

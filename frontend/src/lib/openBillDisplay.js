@@ -29,3 +29,30 @@ export function groupOrderItemsForDisplay(items = []) {
 
   return Array.from(grouped.values());
 }
+
+/**
+ * Total nominal seluruh Open Bill yang sedang ditampilkan (termasuk bill
+ * proyeksi offline). Memakai `total` tiap bill bila tersedia/numerik; bila
+ * tidak, diturunkan dari subtotal item (atau harga satuan x qty). Murni untuk
+ * ringkasan tampilan — tidak mengubah data sumber maupun kalkulasi harga/HPP.
+ *
+ * @param {Array<object>} bills daftar open bill (mis. `displayBills`)
+ * @returns {number} total nominal (0 bila daftar kosong/tidak valid)
+ */
+export function openBillsGrandTotal(bills = []) {
+  if (!Array.isArray(bills)) return 0;
+  return bills.reduce((sum, bill) => {
+    if (!bill || typeof bill !== "object") return sum;
+    const total = Number(bill.total);
+    if (Number.isFinite(total)) return sum + total;
+    const items = Array.isArray(bill.items_json) ? bill.items_json : [];
+    const fallback = items.reduce((s, item) => {
+      const qty = Number(item?.qty) || 0;
+      const subtotal = Number(item?.subtotal);
+      if (Number.isFinite(subtotal)) return s + subtotal;
+      const price = Number(item?.price);
+      return s + (Number.isFinite(price) ? price * qty : 0);
+    }, 0);
+    return sum + fallback;
+  }, 0);
+}

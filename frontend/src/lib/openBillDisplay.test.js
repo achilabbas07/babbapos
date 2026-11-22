@@ -1,4 +1,4 @@
-import { groupOrderItemsForDisplay } from "./openBillDisplay";
+import { groupOrderItemsForDisplay, openBillsGrandTotal } from "./openBillDisplay";
 
 describe("groupOrderItemsForDisplay", () => {
   it("groups repeated menu items for display without changing their source data", () => {
@@ -64,5 +64,32 @@ describe("groupOrderItemsForDisplay", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ qty: 3, subtotal: 60000, displayName: "Nasi Goreng" });
+  });
+});
+
+describe("openBillsGrandTotal", () => {
+  it("menjumlahkan total tiap open bill yang tampil", () => {
+    const bills = [
+      { id: "OB-1", total: 10000 },
+      { id: "OB-2", total: 21000 },
+      { id: "OB-3", total: 0 },
+    ];
+
+    expect(openBillsGrandTotal(bills)).toBe(31000);
+  });
+
+  it("menurunkan total dari subtotal/harga item bila `total` tidak ada (bill proyeksi offline)", () => {
+    const bills = [
+      { id: "OB-offline", items_json: [{ qty: 2, subtotal: 30000 }, { qty: 1, price: 5000 }] },
+      { id: "OB-online", total: 10000 },
+    ];
+
+    expect(openBillsGrandTotal(bills)).toBe(45000);
+  });
+
+  it("mengembalikan 0 untuk input kosong/tidak valid", () => {
+    expect(openBillsGrandTotal()).toBe(0);
+    expect(openBillsGrandTotal([])).toBe(0);
+    expect(openBillsGrandTotal([null, undefined, 5])).toBe(0);
   });
 });

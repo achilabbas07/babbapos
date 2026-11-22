@@ -9,8 +9,9 @@ import { combineCacheResults, loadWithCache } from "@/lib/offlineRead";
 import { OFFLINE_BILL_STATUS_LABEL, offlineBillActionLabel, isOfflineMode, mergeOfflineBills, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
 import { useTransactionQueue } from "@/hooks/useTransactionQueue";
 import { QUEUE_SYNC_EVENT } from "@/lib/queueSync";
-import { groupOrderItemsForDisplay } from "@/lib/openBillDisplay";
-import { notifyOpenBillsChanged } from "@/lib/openBillCount";
+import { groupOrderItemsForDisplay, openBillsGrandTotal } from "@/lib/openBillDisplay";
+import { notifyOpenBillsChanged, OPEN_BILLS_CHANGED_EVENT } from "@/lib/openBillCount";
+import { subscribeToOpenBillsRealtime } from "@/lib/realtimeOpenBills";
 import { PageHeader, Empty } from "@/components/PageHeader";
 import CachedDataNotice from "@/components/CachedDataNotice";
 import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
@@ -25,6 +26,7 @@ export default function OpenBills() {
   const [cachedAt, setCachedAt] = useState(null);
   const [offline, setOffline] = useState(() => isOfflineMode());
   const reloadOnSyncRef = useRef(false);
+  const lastChangedReloadRef = useRef(0);
   const { items: queueItems } = useTransactionQueue(true);
 
   // Muat open bill + denah meja dengan fallback cache lokal, sehingga saat
@@ -57,17 +59,39 @@ export default function OpenBills() {
       reloadOnSyncRef.current = false;
       load();
     };
+    // Muat ulang saat daftar Open Bill berubah dari aksi lokal (bill
+    // dibuat/di-update/dibayar/di-void di halaman lain perangkat ini) supaya
+    // total di header ikut ter-update. Dibatasi ~1,5 dtk agar tidak berulang
+    // saat fallback cache aktif, namun tetap real-time.
+    const onBillsChanged = () => {
+      const now = Date.now();
+      if (now - lastChangedReloadRef.current < 1500) return;
+      lastChangedReloadRef.current = now;
+      load();
+    };
     sync();
     window.addEventListener("online", sync);
     window.addEventListener("offline", sync);
     window.addEventListener("online", onOnline);
     window.addEventListener(QUEUE_SYNC_EVENT, onSynced);
+    window.addEventListener(OPEN_BILLS_CHANGED_EVENT, onBillsChanged);
     return () => {
       window.removeEventListener("online", sync);
       window.removeEventListener("offline", sync);
       window.removeEventListener("online", onOnline);
       window.removeEventListener(QUEUE_SYNC_EVENT, onSynced);
+      window.removeEventListener(OPEN_BILLS_CHANGED_EVENT, onBillsChanged);
     };
+  }, [load]);
+
+  // Update real-time lintas perangkat: berlangganan perubahan tabel open_bills
+  // (Supabase Realtime) lalu muat ulang daftar. Best-effort — bila Realtime
+  // belum dikonfigurasi, helper mengembalikan no-op dan halaman tetap akurat
+  // via muat-ulang saat mount/navigasi dan event lokal di atas.
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const unsubscribe = subscribeToOpenBillsRealtime(() => load());
+    return () => unsubscribe();
   }, [load]);
 
   const offlineBills = useMemo(
@@ -78,10 +102,22 @@ export default function OpenBills() {
     () => (offline ? mergeOfflineBills(bills, offlineBills) : bills),
     [offline, bills, offlineBills],
   );
+  // Total nominal seluruh Open Bill yang tampil (termasuk bill proyeksi offline).
+  const grandTotal = useMemo(() => openBillsGrandTotal(displayBills), [displayBills]);
+  // Label sesuai permintaan memakai "Rp." (titik), sedangkan helper `rp()`
+  // mengembalikan "Rp " — titik ditambahkan tanpa mengubah format ribuan.
+  const grandTotalLabel = useMemo(() => `Total Open Bill ${rp(grandTotal).replace(/^Rp/, "Rp.")}`, [grandTotal]);
 
   return (
     <div>
-      <PageHeader title="Open Bill" subtitle="Pesanan tersimpan yang belum dibayar. Lanjutkan untuk menambah item atau membayar." />
+      <PageHeader title="Open Bill" subtitle="Pesanan tersimpan yang belum dibayar. Lanjutkan untuk menambah item atau membayar.">
+        <p
+          data-testid="open-bills-grand-total"
+          className="font-mono text-lg font-bold tracking-tight text-[#1e3a8a] sm:text-xl"
+        >
+          {grandTotalLabel}
+        </p>
+      </PageHeader>
       <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       {offline && offlineBills.length > 0 && (
         <div data-testid="open-bills-offline-notice" className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800">
