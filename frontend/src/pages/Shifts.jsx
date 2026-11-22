@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Printer } from "lucide-react";
 import { api, errMsg, fmtDate, rp } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache, rangeCacheKey } from "@/lib/offlineRead";
 import { ShiftPrintDialog } from "@/components/ShiftPrintDialog";
 import { PageHeader, Empty } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -13,11 +16,23 @@ export default function Shifts() {
   const [list, setList] = useState([]);
   const [printing, setPrinting] = useState(null);
   const [range, setRange] = useState({ from: "", to: "" });
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
+  // Fallback cache lokal per rentang: riwayat shift tetap tampil saat offline.
   const load = useCallback(() => {
     const params = {};
     if (range.from) params.start = range.from;
     if (range.to) params.end = range.to;
-    return api.get("/shifts", { params }).then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e)));
+    return loadWithCache(
+      rangeCacheKey(CACHE_KEYS.SHIFTS, params),
+      async () => (await api.get("/shifts", { params })).data,
+    ).then((result) => {
+      if (result.canceled) return;
+      if (result.data !== undefined) setList(Array.isArray(result.data) ? result.data : []);
+      setFromCache(result.fromCache);
+      setCachedAt(result.updatedAt);
+      if (result.error) toast.error(errMsg(result.error));
+    });
   }, [range]);
   useEffect(() => {
     load();
@@ -26,6 +41,7 @@ export default function Shifts() {
   return (
     <div>
       <PageHeader title="Riwayat Shift Kasir" subtitle="Seharusnya = kas awal + penjualan tunai + kas masuk − kas keluar. Selisih = uang fisik − seharusnya." />
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <DateRangeFilter from={range.from} to={range.to} onChange={setRange} testidPrefix="shifts-date-filter" />
       {list.length === 0 ? <Empty testid="shifts-empty" text="Belum ada shift." /> : (
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">

@@ -3,7 +3,10 @@ import { toast } from "sonner";
 import { Plus, Pencil } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, ROLE_LABEL } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { PageHeader } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { FormDialog } from "@/components/FormDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { Button } from "@/components/ui/button";
@@ -19,7 +22,19 @@ export default function Users() {
   const { user } = useAuth();
   const [list, setList] = useState([]);
   const [dialog, setDialog] = useState(null);
-  const load = useCallback(() => api.get("/users").then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e))), []);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
+  // Fallback cache lokal: daftar pengguna terakhir tetap tampil saat offline.
+  const load = useCallback(() => loadWithCache(
+    CACHE_KEYS.USERS,
+    async () => (await api.get("/users")).data,
+  ).then((result) => {
+    if (result.canceled) return;
+    if (result.data !== undefined) setList(Array.isArray(result.data) ? result.data : []);
+    setFromCache(result.fromCache);
+    setCachedAt(result.updatedAt);
+    if (result.error) toast.error(errMsg(result.error));
+  }), []);
   useEffect(() => {
     load();
   }, [load]);
@@ -37,6 +52,7 @@ export default function Users() {
       <PageHeader title="Pengguna & PIN" subtitle="Admin: akses penuh · Kasir: kasir, meja, transaksi, pelanggan · Waiter: meja, open bill, pelanggan.">
         <Button data-testid="add-user-button" onClick={() => setDialog({ role: "kasir" })}><Plus className="mr-1 h-4 w-4" />Tambah Pengguna</Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <div className="overflow-x-auto rounded-2xl border border-border bg-card">
         <Table>
           <TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Nama</TableHead><TableHead>Peran</TableHead><TableHead>PIN</TableHead><TableHead /></TableRow></TableHeader>

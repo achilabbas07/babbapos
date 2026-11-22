@@ -4,9 +4,12 @@ import { toast } from "sonner";
 import { ArrowRight, Ban } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, fmtDate, itemName, rp } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { combineCacheResults, loadWithCache } from "@/lib/offlineRead";
 import { groupOrderItemsForDisplay } from "@/lib/openBillDisplay";
 import { notifyOpenBillsChanged } from "@/lib/openBillCount";
 import { PageHeader, Empty } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { AdminPinDialog } from "@/components/tables/AdminPinDialog";
 
 export default function OpenBills() {
@@ -15,16 +18,23 @@ export default function OpenBills() {
   const [bills, setBills] = useState([]);
   const [tables, setTables] = useState({});
   const [voidBill, setVoidBill] = useState(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
+  // Muat open bill + denah meja dengan fallback cache lokal, sehingga saat
+  // offline daftar bill terakhir tetap tampil (tidak terblokir pesan gagal).
   const load = useCallback(async () => {
-    try {
-      const [b, t] = await Promise.all([api.get("/open-bills"), api.get("/tables")]);
-      setBills(b.data);
-      setTables(Object.fromEntries(t.data.map((x) => [x.id, x.name])));
-      notifyOpenBillsChanged();
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
+    const [b, t] = await Promise.all([
+      loadWithCache(CACHE_KEYS.OPEN_BILLS, async () => (await api.get("/open-bills")).data),
+      loadWithCache(CACHE_KEYS.TABLES, async () => (await api.get("/tables")).data),
+    ]);
+    if (b.data !== undefined) setBills(Array.isArray(b.data) ? b.data : []);
+    if (t.data !== undefined) setTables(Object.fromEntries((t.data || []).map((x) => [x.id, x.name])));
+    const combined = combineCacheResults([b, t]);
+    setFromCache(combined.fromCache);
+    setCachedAt(b.updatedAt || t.updatedAt || null);
+    if (combined.fromCache) notifyOpenBillsChanged();
+    if (combined.error) toast.error(errMsg(combined.error));
   }, []);
   useEffect(() => {
     load();
@@ -33,6 +43,7 @@ export default function OpenBills() {
   return (
     <div>
       <PageHeader title="Open Bill" subtitle="Pesanan tersimpan yang belum dibayar. Lanjutkan untuk menambah item atau membayar." />
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       {bills.length === 0 ? <Empty testid="open-bills-empty" text="Tidak ada open bill." /> : (
         <div className="android-bills-grid grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {bills.map((b) => (

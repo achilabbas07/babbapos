@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, errMsg, rp, todayStr, daysAgoStr, dayRange } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache, rangeCacheKey } from "@/lib/offlineRead";
 import { PageHeader, StatCard } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 
 const PRESETS = [["Hari ini", 0], ["7 hari", 6], ["30 hari", 29]];
 
@@ -31,10 +34,23 @@ const Bars = ({ rows, labelKey, valueKey, testid }) => {
 export default function Reports() {
   const [range, setRange] = useState({ from: daysAgoStr(6), to: todayStr() });
   const [data, setData] = useState(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
+  // Fallback cache lokal per rentang: ringkasan laporan terakhir tetap tampil
+  // saat offline (angka bisa sedikit tertinggal, ditandai lewat notice).
   const load = useCallback(() => {
-    api.get("/reports/summary", { params: { ...dayRange(range.from, range.to), tz_offset: new Date().getTimezoneOffset() } })
-      .then((r) => setData(r.data)).catch((e) => toast.error(errMsg(e)));
+    const params = { ...dayRange(range.from, range.to), tz_offset: new Date().getTimezoneOffset() };
+    return loadWithCache(
+      rangeCacheKey(CACHE_KEYS.REPORTS_SUMMARY, params),
+      async () => (await api.get("/reports/summary", { params })).data,
+    ).then((result) => {
+      if (result.canceled) return;
+      if (result.data !== undefined) setData(result.data);
+      setFromCache(result.fromCache);
+      setCachedAt(result.updatedAt);
+      if (result.error) toast.error(errMsg(result.error));
+    });
   }, [range]);
   useEffect(() => {
     load();
@@ -50,6 +66,7 @@ export default function Reports() {
         <input data-testid="report-from-date" type="date" value={range.from} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="h-10 rounded-lg border border-border bg-card px-3 text-sm" />
         <input data-testid="report-to-date" type="date" value={range.to} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="h-10 rounded-lg border border-border bg-card px-3 text-sm" />
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       {data && (
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

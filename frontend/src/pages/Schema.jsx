@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { KeyRound, Link2 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { SCHEMA, RELATIONS } from "@/lib/schema";
 import { PageHeader } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 
 const NAMES = Object.fromEntries(SCHEMA.map((s) => [s.key, s.name]));
 
@@ -28,9 +31,21 @@ const FieldRow = ({ f, onHover }) => {
 export default function Schema() {
   const [counts, setCounts] = useState({});
   const [focus, setFocus] = useState(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
+  // Fallback cache lokal: jumlah baris terakhir tetap tampil saat offline.
   useEffect(() => {
-    api.get("/schema").then((r) => setCounts(r.data.counts)).catch((e) => toast.error(errMsg(e)));
+    loadWithCache(
+      CACHE_KEYS.SCHEMA_COUNTS,
+      async () => (await api.get("/schema")).data?.counts,
+    ).then((result) => {
+      if (result.canceled) return;
+      if (result.data !== undefined && result.data !== null) setCounts(result.data);
+      setFromCache(result.fromCache);
+      setCachedAt(result.updatedAt);
+      if (result.error) toast.error(errMsg(result.error));
+    });
   }, []);
 
   const rel = focus ? related(focus) : null;
@@ -38,6 +53,7 @@ export default function Schema() {
   return (
     <div>
       <PageHeader title="Skema Database" subtitle="10 tabel inti + tabel tambahan di Supabase (PostgreSQL) beserta relasi PK/FK. Arahkan kursor ke tabel untuk menyorot relasinya." />
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" onMouseLeave={() => setFocus(null)}>
         {SCHEMA.map((s) => {
           const state = !focus ? "" : s.key === focus ? "border-primary ring-1 ring-primary" : rel.has(s.key) ? "border-sky-500/70" : "opacity-35";

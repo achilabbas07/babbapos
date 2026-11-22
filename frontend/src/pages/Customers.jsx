@@ -3,7 +3,10 @@ import { toast } from "sonner";
 import { Plus, Pencil, Search, Star } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, rp } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { PageHeader } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { TopCustomers } from "@/components/TopCustomers";
 import { FormDialog } from "@/components/FormDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
@@ -21,7 +24,19 @@ export default function Customers() {
   const [list, setList] = useState([]);
   const [q, setQ] = useState("");
   const [dialog, setDialog] = useState(null);
-  const load = useCallback(() => api.get("/customers").then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e))), []);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
+  // Fallback cache lokal: daftar pelanggan terakhir tetap tampil saat offline.
+  const load = useCallback(() => loadWithCache(
+    CACHE_KEYS.CUSTOMERS,
+    async () => (await api.get("/customers")).data,
+  ).then((result) => {
+    if (result.canceled) return;
+    if (result.data !== undefined) setList(Array.isArray(result.data) ? result.data : []);
+    setFromCache(result.fromCache);
+    setCachedAt(result.updatedAt);
+    if (result.error) toast.error(errMsg(result.error));
+  }), []);
   useEffect(() => {
     load();
   }, [load]);
@@ -44,6 +59,7 @@ export default function Customers() {
         </div>
         <Button data-testid="add-customer-button" onClick={() => setDialog({})}><Plus className="mr-1 h-4 w-4" />Tambah</Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <div className="grid items-start gap-6 lg:grid-cols-[7fr_3fr]">
       <div className="min-w-0 overflow-x-auto rounded-2xl border border-border bg-card">
         <Table>

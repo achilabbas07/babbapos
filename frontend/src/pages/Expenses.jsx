@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { api, errMsg, fmtDate, rp, todayStr, dateToIso } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache, rangeCacheKey } from "@/lib/offlineRead";
 import { PageHeader, StatCard, Empty } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { FormDialog } from "@/components/FormDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import DateRangeFilter from "@/components/DateRangeFilter";
@@ -21,13 +24,30 @@ export default function Expenses() {
   const [open, setOpen] = useState(false);
   const [cats, setCats] = useState([]);
   const [range, setRange] = useState({ from: "", to: "" });
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
+  // Fallback cache lokal: daftar pengeluaran terakhir tetap tampil saat offline.
   const load = useCallback(() => {
     const params = {};
     if (range.from) params.start = range.from;
     if (range.to) params.end = range.to;
-    return api.get("/expenses", { params }).then((r) => setList(r.data)).catch((e) => toast.error(errMsg(e)));
+    return loadWithCache(
+      rangeCacheKey(CACHE_KEYS.EXPENSES, params),
+      async () => (await api.get("/expenses", { params })).data,
+    ).then((result) => {
+      if (result.canceled) return;
+      if (result.data !== undefined) setList(Array.isArray(result.data) ? result.data : []);
+      setFromCache(result.fromCache);
+      setCachedAt(result.updatedAt);
+      if (result.error) toast.error(errMsg(result.error));
+    });
   }, [range]);
-  const loadCats = useCallback(() => api.get("/expense-categories").then((r) => setCats(r.data)).catch((e) => toast.error(errMsg(e))), []);
+  const loadCats = useCallback(() => loadWithCache(
+    CACHE_KEYS.EXPENSE_CATEGORIES,
+    async () => (await api.get("/expense-categories")).data,
+  ).then((result) => {
+    if (result.data !== undefined) setCats(Array.isArray(result.data) ? result.data : []);
+  }), []);
   useEffect(() => {
     load();
     loadCats();
@@ -46,6 +66,7 @@ export default function Expenses() {
       <PageHeader title="Pengeluaran" subtitle="Beban operasional yang mengurangi laba bersih.">
         <Button data-testid="add-expense-button" onClick={() => setOpen(true)}><Plus className="mr-1 h-4 w-4" />Catat Pengeluaran</Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <StatCard label="Total tercatat" value={rp(total)} testid="expenses-total" />
         <StatCard label="Jumlah catatan" value={list.length} />

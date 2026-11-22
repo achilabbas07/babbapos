@@ -5,9 +5,12 @@ import AccountTransactionsModal from "@/components/AccountTransactionsModal";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import COAFormModal from "@/components/COAFormModal";
 import { PageHeader } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { errMsg, rp } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache, rangeCacheKey } from "@/lib/offlineRead";
 import { createAccount, deleteAccount, getAccounts, updateAccount } from "@/services/coaService";
 import {
   attachAccountHeaders,
@@ -28,6 +31,8 @@ export default function COAManagement() {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
   const [editingAccount, setEditingAccount] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [startDate, setStartDate] = useState("");
@@ -45,17 +50,30 @@ export default function COAManagement() {
   const loadAccounts = useCallback(async (range = EMPTY_RANGE) => {
     setLoading(true);
     setError("");
-    try {
-      const [rows, headers] = await Promise.all([
-        getAccounts(range),
-        fetchAccountHeaders(),
-      ]);
-      setAccounts(attachAccountHeaders(rows, headers));
-    } catch (requestError) {
-      setError(errMsg(requestError));
-    } finally {
+    // Fallback cache lokal per rentang tanggal: daftar akun terakhir tetap
+    // tampil saat offline. Error hanya tampil bila tidak ada cache tersimpan.
+    const result = await loadWithCache(
+      rangeCacheKey(CACHE_KEYS.COA_ACCOUNTS, range),
+      () => getAccounts(range),
+    );
+    if (result.canceled) {
       setLoading(false);
+      return;
     }
+    setFromCache(result.fromCache);
+    setCachedAt(result.updatedAt);
+    if (result.data !== undefined) {
+      let headers = [];
+      try {
+        headers = await fetchAccountHeaders();
+      } catch {
+        headers = [];
+      }
+      setAccounts(attachAccountHeaders(result.data, headers));
+    } else if (result.error) {
+      setError(errMsg(result.error));
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -203,6 +221,7 @@ export default function COAManagement() {
           <Plus className="h-4 w-4" />Tambah Akun
         </Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
 
       <form
         onSubmit={applyFilter}

@@ -3,10 +3,13 @@ import { toast } from "sonner";
 import { Plus, Move, Save, X } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api, errMsg } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { PageHeader } from "@/components/PageHeader";
 import { FormDialog } from "@/components/FormDialog";
 import { Button } from "@/components/ui/button";
 import { ReceiptDialog } from "@/components/ReceiptDialog";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { FloorCanvas, STATUS, autoLayout } from "@/components/tables/FloorCanvas";
 import { TableDetailDialog } from "@/components/tables/TableDetailDialog";
 import { TABLES_FALLBACK_POLL_MS, createTablesReloadScheduler, subscribeToTablesRealtime } from "@/lib/realtimeTables";
@@ -40,9 +43,20 @@ export default function Tables() {
   const [form, setForm] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [receipt, setReceipt] = useState(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
-  const load = useCallback((signal) => api.get("/tables", { signal }).then((r) => setTables(r.data)).catch((e) => {
-    if (e.name !== "CanceledError") toast.error(errMsg(e));
+  // Muat denah meja dengan fallback cache lokal: bila fetch gagal karena
+  // jaringan/offline, denah terakhir dari cache tetap ditampilkan.
+  const load = useCallback((signal) => loadWithCache(
+    CACHE_KEYS.TABLES,
+    async () => (await api.get("/tables", { signal })).data,
+  ).then((result) => {
+    if (result.canceled) return;
+    if (result.data !== undefined) setTables(result.data);
+    setFromCache(result.fromCache);
+    setCachedAt(result.updatedAt);
+    if (result.error) toast.error(errMsg(result.error));
   }), []);
   useEffect(() => {
     const controller = new AbortController();
@@ -140,6 +154,8 @@ export default function Tables() {
           </>
         )}
       </PageHeader>
+
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-4 text-sm" data-testid="table-legend">

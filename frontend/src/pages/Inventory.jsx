@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Download, Pencil, Plus, ScanLine } from "lucide-react";
 import { api, errMsg, num, rp } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { PageHeader, StatCard } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { FormDialog } from "@/components/FormDialog";
 import InventoryOpnameDialog from "@/components/InventoryOpnameDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
@@ -26,11 +29,29 @@ export default function Inventory() {
   const [dialog, setDialog] = useState(null);
   const [opnameOpen, setOpnameOpen] = useState(false);
   const [opnameHistory, setOpnameHistory] = useState([]);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
-  const load = useCallback(() => api.get("/inventory").then((r) => setItems(r.data)).catch((e) => toast.error(errMsg(e))), []);
-  const loadOpnameHistory = useCallback(() => api.get("/inventory/opname")
-    .then((r) => setOpnameHistory(r.data))
-    .catch((e) => toast.error(errMsg(e))), []);
+  // Fallback cache lokal: daftar bahan terakhir tetap tampil saat offline.
+  // Riwayat stok opname bersifat pelengkap -> gagal tanpa cache cukup dibiarkan
+  // kosong tanpa toast supaya halaman tidak terkesan rusak.
+  const load = useCallback(() => loadWithCache(
+    CACHE_KEYS.INVENTORY,
+    async () => (await api.get("/inventory")).data,
+  ).then((result) => {
+    if (result.canceled) return;
+    if (result.data !== undefined) setItems(Array.isArray(result.data) ? result.data : []);
+    setFromCache(result.fromCache);
+    setCachedAt(result.updatedAt);
+    if (result.error) toast.error(errMsg(result.error));
+  }), []);
+  const loadOpnameHistory = useCallback(() => loadWithCache(
+    "inventory/opname",
+    async () => (await api.get("/inventory/opname")).data,
+  ).then((result) => {
+    if (result.canceled) return;
+    if (result.data !== undefined) setOpnameHistory(Array.isArray(result.data) ? result.data : []);
+  }), []);
   const startOpname = async () => {
     try {
       const { data } = await api.get("/inventory");
@@ -73,6 +94,7 @@ export default function Inventory() {
         </Button>
         <Button data-testid="add-inventory-button" onClick={() => setDialog({ type: "Bahan Baku", stock: 0, min_stock: 0 })}><Plus className="mr-1 h-4 w-4" />Tambah Bahan</Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <StatCard label="Jumlah bahan" value={items.length} testid="inventory-count" />
         <StatCard label="Nilai persediaan" value={rp(value)} testid="inventory-value" />

@@ -1,15 +1,32 @@
 import { useEffect, useState } from "react";
 import { Star, Trophy } from "lucide-react";
 import { api, rp } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
+import CachedDataNotice from "@/components/CachedDataNotice";
 
 export const TopCustomers = ({ refreshKey }) => {
   const [top, setTop] = useState([]);
   const [error, setError] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
   useEffect(() => {
-    api.get("/customers/top").then((r) => { setTop(r.data); setError(false); }).catch(() => setError(true));
+    // Fallback cache lokal: daftar pelanggan terbaik tetap tampil saat offline.
+    // Error hanya ditampilkan bila tidak ada cache sama sekali.
+    loadWithCache(
+      CACHE_KEYS.CUSTOMERS_TOP,
+      async () => (await api.get("/customers/top")).data,
+    ).then((result) => {
+      if (result.canceled) return;
+      if (result.data !== undefined) { setTop(Array.isArray(result.data) ? result.data : []); setError(false); }
+      else if (result.error) setError(true);
+      setFromCache(result.fromCache);
+      setCachedAt(result.updatedAt);
+    });
   }, [refreshKey]);
   return (
     <div data-testid="top-customers-card" className="rounded-2xl border border-border bg-card p-5">
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <div className="mb-4 flex items-center gap-2">
         <Trophy className="h-5 w-5 text-primary" />
         <h2 className="text-base font-semibold">10 Pelanggan Terbaik</h2>

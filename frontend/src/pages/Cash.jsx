@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ArrowDownCircle, ArrowUpCircle, Lock } from "lucide-react";
 import { api, errMsg, fmtDate, fmtTime, rp } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { loadWithCache } from "@/lib/offlineRead";
 import { useShift, OpenShiftForm } from "@/components/ShiftGate";
 import { PageHeader, StatCard, Empty } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { FormDialog } from "@/components/FormDialog";
 import { CloseShiftDialog } from "@/components/CloseShiftDialog";
 import { Button } from "@/components/ui/button";
@@ -19,15 +22,35 @@ export default function Cash() {
   const [dialog, setDialog] = useState(null);
   const [closing, setClosing] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
   useEffect(() => {
     if (dialog === "out") {
-      api.get("/expense-categories").then((r) => setCategories(r.data)).catch((e) => toast.error(errMsg(e)));
+      // Fallback cache lokal: kategori pengeluaran tetap tersedia saat offline.
+      loadWithCache(
+        CACHE_KEYS.EXPENSE_CATEGORIES,
+        async () => (await api.get("/expense-categories")).data,
+      ).then((result) => {
+        if (result.data !== undefined) setCategories(Array.isArray(result.data) ? result.data : []);
+        else if (result.error) toast.error(errMsg(result.error));
+      });
     }
   }, [dialog]);
 
+  // Fallback cache lokal: mutasi kas shift berjalan tetap tampil saat offline.
   const load = useCallback(() => {
-    if (shift) api.get("/shifts/current/movements").then((r) => setMoves(r.data)).catch((e) => toast.error(errMsg(e)));
+    if (!shift) return;
+    return loadWithCache(
+      `shifts/current/movements:${shift.id}`,
+      async () => (await api.get("/shifts/current/movements")).data,
+    ).then((result) => {
+      if (result.canceled) return;
+      if (result.data !== undefined) setMoves(Array.isArray(result.data) ? result.data : []);
+      setFromCache(result.fromCache);
+      setCachedAt(result.updatedAt);
+      if (result.error) toast.error(errMsg(result.error));
+    });
   }, [shift]);
   useEffect(() => {
     load();
@@ -67,6 +90,7 @@ export default function Cash() {
         <Button data-testid="cash-out-button" variant="outline" onClick={() => setDialog("out")}><ArrowUpCircle className="mr-1 h-4 w-4 text-destructive" />Kas Keluar</Button>
         <Button data-testid="close-shift-button" onClick={() => setClosing(true)}><Lock className="mr-1 h-4 w-4" />Tutup Kasir</Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <StatCard label="Kas awal" value={rp(shift.openingCash)} testid="shift-opening-cash" />
         <StatCard label="Kas masuk" value={rp(cin)} tone="text-emerald-600" testid="shift-cash-in" />

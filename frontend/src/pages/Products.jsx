@@ -3,7 +3,10 @@ import { toast } from "sonner";
 import { Plus, Pencil, ChefHat, UtensilsCrossed, Layers, Percent } from "lucide-react";
 import { VariantAdminDialog } from "@/components/VariantAdminDialog";
 import { api, errMsg, rp, PRODUCT_TYPE_LABEL } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { combineCacheResults, loadWithCache } from "@/lib/offlineRead";
 import { PageHeader } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { FormDialog } from "@/components/FormDialog";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { RecipeDialog } from "@/components/RecipeDialog";
@@ -22,16 +25,24 @@ export default function Products() {
   const [editingOjol, setEditingOjol] = useState(false);
   const [ojolDraft, setOjolDraft] = useState("");
   const [savingOjol, setSavingOjol] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
+  // Fallback cache lokal: daftar produk/resep/bahan terakhir tetap tampil saat
+  // offline, tidak terblokir pesan gagal jaringan.
   const load = useCallback(async () => {
-    try {
-      const [p, i, r] = await Promise.all([api.get("/products"), api.get("/inventory"), api.get("/recipes")]);
-      setProducts(p.data);
-      setInventory(i.data);
-      setRecipes(r.data);
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
+    const [p, i, r] = await Promise.all([
+      loadWithCache(CACHE_KEYS.PRODUCTS, async () => (await api.get("/products")).data),
+      loadWithCache(CACHE_KEYS.INVENTORY, async () => (await api.get("/inventory")).data),
+      loadWithCache(CACHE_KEYS.RECIPES, async () => (await api.get("/recipes")).data),
+    ]);
+    if (p.data !== undefined) setProducts(Array.isArray(p.data) ? p.data : []);
+    if (i.data !== undefined) setInventory(Array.isArray(i.data) ? i.data : []);
+    if (r.data !== undefined) setRecipes(Array.isArray(r.data) ? r.data : []);
+    const combined = combineCacheResults([p, i, r]);
+    setFromCache(combined.fromCache);
+    setCachedAt(p.updatedAt || i.updatedAt || r.updatedAt || null);
+    if (combined.error) toast.error(errMsg(combined.error));
   }, []);
   useEffect(() => {
     load();
@@ -100,6 +111,7 @@ export default function Products() {
         <Button data-testid="add-variant-button" variant="outline" onClick={() => setVariantOpen(true)}><Layers className="mr-1 h-4 w-4" />Tambah Varian</Button>
         <Button data-testid="add-product-button" onClick={() => setDialog({ type: "both", hpp: 0, price_ojol: 0 })}><Plus className="mr-1 h-4 w-4" />Tambah Produk</Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       {ojolMarkup != null && (
         <div data-testid="ojol-markup-info" className="mb-5 flex items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Percent className="h-5 w-5" /></div>

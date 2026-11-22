@@ -4,7 +4,10 @@ import { Plus, Pencil, Lock } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useShift } from "@/components/ShiftGate";
 import { api, errMsg } from "@/lib/api";
+import { CACHE_KEYS } from "@/lib/localStore";
+import { combineCacheResults, loadWithCache } from "@/lib/offlineRead";
 import { PageHeader, Empty } from "@/components/PageHeader";
+import CachedDataNotice from "@/components/CachedDataNotice";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { TargetDialog } from "@/components/TargetDialog";
 import { ProgressCard, TargetBar } from "@/components/TargetProgress";
@@ -23,6 +26,8 @@ const WaiterView = () => {
   const [closedShiftId, setClosedShiftId] = useState(null);
   const [closing, setClosing] = useState(false);
   const [connectingPrinter, setConnectingPrinter] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
   const {
     loading: reportLoading,
     fetchError: reportFetchError,
@@ -33,8 +38,18 @@ const WaiterView = () => {
     retryPrint,
   } = useWaiterShiftReport(closedShiftId);
 
+  // Fallback cache lokal: progres target terakhir tetap tampil saat offline.
   useEffect(() => {
-    api.get("/targets/progress").then((r) => setProgress(r.data)).catch((e) => toast.error(errMsg(e)));
+    loadWithCache(
+      CACHE_KEYS.TARGET_PROGRESS,
+      async () => (await api.get("/targets/progress")).data,
+    ).then((result) => {
+      if (result.canceled) return;
+      if (result.data !== undefined) setProgress(Array.isArray(result.data) ? result.data : []);
+      setFromCache(result.fromCache);
+      setCachedAt(result.updatedAt);
+      if (result.error) toast.error(errMsg(result.error));
+    });
   }, []);
 
   const close = async () => {
@@ -74,6 +89,7 @@ const WaiterView = () => {
       <PageHeader title="Target Sales Saya" subtitle="Target kuantitas item dihitung per pelayan saat order. Target omzet (Rupiah) dan target berbasis waktu/periode dihitung dari total tim, jadi kartu ini menampilkan progres global tim secara real-time.">
         <Button data-testid="close-waiter-shift-button" onClick={() => setConfirm(true)}><Lock className="mr-1 h-4 w-4" />Tutup Shift</Button>
       </PageHeader>
+      <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       {progress === null ? <p className="py-10 text-center text-sm text-muted-foreground">Memuat target...</p> : progress.length === 0 ? <Empty testid="target-empty" text="Belum ada shift aktif." /> : (
         <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,24rem),1fr))]">{progress.map((p) => <ProgressCard key={p.shiftId} p={p} />)}</div>
       )}
@@ -118,14 +134,26 @@ const AdminView = () => {
   const [waiters, setWaiters] = useState([]);
   const [progress, setProgress] = useState([]);
   const [dialog, setDialog] = useState(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [cachedAt, setCachedAt] = useState(null);
 
+  // Fallback cache lokal: daftar target + produk + pelayan + progres tetap
+  // tampil saat offline, tidak terblokir pesan gagal jaringan.
   const load = useCallback(async () => {
-    try {
-      const [t, p, w, pr] = await Promise.all([api.get("/targets"), api.get("/products"), api.get("/users/waiters"), api.get("/targets/progress")]);
-      setTargets(t.data); setProducts(p.data); setWaiters(w.data); setProgress(pr.data);
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
+    const [t, p, w, pr] = await Promise.all([
+      loadWithCache(CACHE_KEYS.TARGETS, async () => (await api.get("/targets")).data),
+      loadWithCache(CACHE_KEYS.PRODUCTS, async () => (await api.get("/products")).data),
+      loadWithCache(CACHE_KEYS.WAITERS, async () => (await api.get("/users/waiters")).data),
+      loadWithCache(CACHE_KEYS.TARGET_PROGRESS, async () => (await api.get("/targets/progress")).data),
+    ]);
+    if (t.data !== undefined) setTargets(Array.isArray(t.data) ? t.data : []);
+    if (p.data !== undefined) setProducts(Array.isArray(p.data) ? p.data : []);
+    if (w.data !== undefined) setWaiters(Array.isArray(w.data) ? w.data : []);
+    if (pr.data !== undefined) setProgress(Array.isArray(pr.data) ? pr.data : []);
+    const combined = combineCacheResults([t, p, w, pr]);
+    setFromCache(combined.fromCache);
+    setCachedAt(t.updatedAt || pr.updatedAt || null);
+    if (combined.error) toast.error(errMsg(combined.error));
   }, []);
   useEffect(() => {
     load();
@@ -137,6 +165,7 @@ const AdminView = () => {
         <PageHeader title="Target Sales Pelayan" subtitle="Target kuantitas item dihitung per pelayan saat order. Target omzet (Rupiah) dan target berbasis waktu/periode dihitung kolektif dari total akumulasi seluruh tim dan tampil di setiap shift aktif.">
           <Button data-testid="add-target-button" onClick={() => setDialog({})}><Plus className="mr-1 h-4 w-4" />Tambah Target</Button>
         </PageHeader>
+        <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
         {targets.length === 0 ? <Empty testid="targets-empty" text="Belum ada target." /> : (
           <div className="overflow-x-auto rounded-2xl border border-border bg-card">
             <Table className="android-table">

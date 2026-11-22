@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, isNetworkError } from "@/lib/api";
+import { CACHE_KEYS, readCache } from "@/lib/localStore";
 import {
   OPEN_BILLS_POLL_MS,
   parseOpenBillCount,
@@ -38,7 +39,18 @@ export const useOpenBillCount = (enabled = true) => {
         setCount(parseOpenBillCount(data));
       })
       // Silent fallback: jangan ganggu tampilan sidebar saat fetch gagal.
-      .catch(() => {});
+      // Saat error jaringan/offline, pakai jumlah dari cache baca terakhir
+      // (bila ada) supaya badge tidak menampilkan 0 palsu.
+      .catch((error) => {
+        if (!isNetworkError(error)) return;
+        readCache(CACHE_KEYS.OPEN_BILLS)
+          .then((cached) => {
+            if (signal?.aborted || requestId !== requestRef.current) return;
+            if (!cached) return;
+            setCount(parseOpenBillCount(cached.data));
+          })
+          .catch(() => {});
+      });
   }, []);
 
   useEffect(() => {
