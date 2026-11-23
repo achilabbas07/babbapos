@@ -56,3 +56,18 @@ export function openBillsGrandTotal(bills = []) {
     return sum + fallback;
   }, 0);
 }
+
+/**
+ * Cek apakah pengguna sesi aktif berperan sebagai admin (`user.role === "admin"`).
+ *
+ * HANYA dipakai untuk membatasi TAMPILAN ringkasan `Total Open Bill Rp. <nominal>`
+ * di halaman Open Bill. Tidak membatasi akses halaman Open Bill maupun aksi/tombol
+ * di dalamnya — semua role tetap bisa membuka halaman dan beraksi. Murni (tanpa
+ * dependensi React/DOM) agar mudah diuji.
+ *
+ * @param {object|null|undefined} user profil pengguna aktif (mis. dari `useAuth()`)
+ * @returns {boolean} true bila role admin
+ */
+export function isAdminRole(user) {
+  return user?.role === "admin";
+}

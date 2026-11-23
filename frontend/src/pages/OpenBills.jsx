@@ -9,7 +9,7 @@ import { combineCacheResults, loadWithCache } from "@/lib/offlineRead";
 import { OFFLINE_BILL_STATUS_LABEL, offlineBillActionLabel, isOfflineMode, mergeOfflineBills, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
 import { useTransactionQueue } from "@/hooks/useTransactionQueue";
 import { QUEUE_SYNC_EVENT } from "@/lib/queueSync";
-import { groupOrderItemsForDisplay, openBillsGrandTotal } from "@/lib/openBillDisplay";
+import { groupOrderItemsForDisplay, isAdminRole, openBillsGrandTotal } from "@/lib/openBillDisplay";
 import { notifyOpenBillsChanged, OPEN_BILLS_CHANGED_EVENT } from "@/lib/openBillCount";
 import { subscribeToOpenBillsRealtime } from "@/lib/realtimeOpenBills";
 import { PageHeader, Empty } from "@/components/PageHeader";
@@ -107,16 +107,22 @@ export default function OpenBills() {
   // Label sesuai permintaan memakai "Rp." (titik), sedangkan helper `rp()`
   // mengembalikan "Rp " — titik ditambahkan tanpa mengubah format ribuan.
   const grandTotalLabel = useMemo(() => `Total Open Bill ${rp(grandTotal).replace(/^Rp/, "Rp.")}`, [grandTotal]);
+  // Ringkasan total HANYA ditampilkan untuk admin. Ini murni pembatasan TAMPILAN
+  // elemen total — halaman Open Bill dan seluruh aksi/tombolnya tetap tersedia
+  // untuk semua role (tidak ada pembatasan akses di sini).
+  const isAdmin = isAdminRole(user);
 
   return (
     <div>
       <PageHeader title="Open Bill" subtitle="Pesanan tersimpan yang belum dibayar. Lanjutkan untuk menambah item atau membayar.">
-        <p
-          data-testid="open-bills-grand-total"
-          className="font-mono text-lg font-bold tracking-tight text-[#1e3a8a] sm:text-xl"
-        >
-          {grandTotalLabel}
-        </p>
+        {isAdmin && (
+          <p
+            data-testid="open-bills-grand-total"
+            className="font-mono text-lg font-bold tracking-tight text-[#1e3a8a] sm:text-xl"
+          >
+            {grandTotalLabel}
+          </p>
+        )}
       </PageHeader>
       <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
       {offline && offlineBills.length > 0 && (
