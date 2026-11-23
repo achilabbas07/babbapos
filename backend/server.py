@@ -1348,9 +1348,21 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
     # balapan (race) juga tidak bisa menduplikasi data.
     client_request_id = (body.client_request_id or "").strip() or None
     if client_request_id:
-        existing = await db.transactions.find_one({"client_request_id": client_request_id})
-        if existing:
-            return Transaction.from_mongo(existing)
+        try:
+            existing = await db.transactions.find_one({"client_request_id": client_request_id})
+        except asyncpg.exceptions.UndefinedColumnError:
+            # Skema lama (migrasi `client_request_id` belum diterapkan). Kolom
+            # idempotensi tidak boleh menggagalkan checkout, terlebih jalur
+            # Open Bill yang mengirim kunci dari antrean offline. Abaikan
+            # idempotensi lalu lanjutkan transaksi seperti biasa.
+            logger.warning(
+                "Kolom client_request_id belum ada di tabel transactions; "
+                "melewati pemeriksaan idempotensi."
+            )
+            client_request_id = None
+        else:
+            if existing:
+                return Transaction.from_mongo(existing)
     bill = OpenBill.from_mongo(await get_or_404("open_bills", body.openBillId, "Open bill")) if body.openBillId else None
     if body.partial and not bill:
         raise HTTPException(400, "Pisah bill membutuhkan open bill")
