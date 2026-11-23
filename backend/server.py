@@ -1383,7 +1383,16 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
             },
         )
     if body.waiterId:
-        wid, wname = await resolve_waiter(body.waiterId, "", user)
+        # Khusus pembayaran open bill, pelayan yang tersimpan di bill bisa saja
+        # sudah dinonaktifkan/diubah perannya. Identitas pelayan bersifat
+        # tampilan/atribusi, jadi checkout tidak boleh gagal (404) karena itu:
+        # jatuh kembali ke nama yang tersimpan di bill.
+        try:
+            wid, wname = await resolve_waiter(body.waiterId, "", user)
+        except HTTPException:
+            if not bill:
+                raise
+            wid, wname = body.waiterId, body.waiterName or bill.waiterName
     elif bill:
         wid, wname = bill.waiterId, body.waiterName or bill.waiterName
     else:
@@ -1484,18 +1493,30 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         raise HTTPException(400, f"Checkout gagal: {message}") from err
     except ValueError as err:
         raise HTTPException(400, f"Checkout gagal: {err}") from err
-    if not body.partial:
-        old_items, old_w = (bill.items_json, (bill.waiterId, bill.waiterName)) if bill else ([], (None, ""))
-        await log_order_diff(old_items, old_w, items, (wid, wname), "payment" if bill else "direct", trx.id)
-    if remaining:
-        if stale_table_occupancy:
-            await free_table(table_id)
-        await save_bill_items(bill, remaining)
-    else:
-        if bill:
-            await db.open_bills.delete_one({"_id": bill.id})
-        for tid in {bill.tableId if bill else None, table_id} - {None}:
-            await mark_paid(tid, trx)
+    # Penulisan pasca-commit. Blok ini HANYA dijalankan oleh alur open bill
+    # (`save_bill_items`/`mark_paid`) dan berada di luar `except` transaksi
+    # database, sehingga kegagalannya (mis. `pgdb.update_one` melempar
+    # ValueError "Kolom ... tidak ada di tabel ...") sebelumnya lolos sebagai
+    # HTTP 500 mentah. Transaksi sudah tersimpan pada titik ini, jadi balas
+    # error terklasifikasi + catat jejaknya agar tidak ambigu di klien.
+    try:
+        if not body.partial:
+            old_items, old_w = (bill.items_json, (bill.waiterId, bill.waiterName)) if bill else ([], (None, ""))
+            await log_order_diff(old_items, old_w, items, (wid, wname), "payment" if bill else "direct", trx.id)
+        if remaining:
+            if stale_table_occupancy:
+                await free_table(table_id)
+            await save_bill_items(bill, remaining)
+        else:
+            if bill:
+                await db.open_bills.delete_one({"_id": bill.id})
+            for tid in {bill.tableId if bill else None, table_id} - {None}:
+                await mark_paid(tid, trx)
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.exception("Checkout gagal saat menyelesaikan open bill %s", bill.id if bill else "-")
+        raise HTTPException(400, f"Checkout gagal: {err}") from err
     return trx
 
 
