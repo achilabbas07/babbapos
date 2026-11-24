@@ -24,6 +24,7 @@
 // Semua operasi best-effort: kegagalan sync tidak boleh menggagalkan aplikasi.
 
 import { api, isNetworkError, errMsg } from "@/lib/api";
+import { isOnline } from "@/lib/connectivity";
 import {
   getTransactionQueue,
   removeTransactionQueueItem,
@@ -113,8 +114,10 @@ export async function syncTransactionQueue() {
     const due = queue.filter((item) => isDue(item, now)).sort(byCreatedAt);
     result.deferred = queue.length - due.length;
 
-    // Tidak ada koneksi jaringan -> jangan coba-coba (hemat baterai/request).
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    // Tidak ada koneksi -> jangan coba-coba (hemat baterai/request). Status
+    // diambil dari sumber kebenaran tunggal: `navigator.onLine` saja bisa tetap
+    // `true` di WebView Android walau server tidak terjangkau.
+    if (!isOnline()) {
       result.deferred += due.length;
       result.stopped = true;
       return result;

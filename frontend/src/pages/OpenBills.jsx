@@ -6,7 +6,8 @@ import { useAuth } from "@/context/AuthContext";
 import { api, errMsg, fmtDate, itemName, rp } from "@/lib/api";
 import { CACHE_KEYS } from "@/lib/localStore";
 import { combineCacheResults, loadWithCache } from "@/lib/offlineRead";
-import { OFFLINE_BILL_STATUS_LABEL, offlineBillActionLabel, isOfflineMode, mergeOfflineBills, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
+import { OFFLINE_BILL_STATUS_LABEL, offlineBillActionLabel, projectOpenBills, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
+import { ensureConnectivityMonitor, subscribeConnectivity } from "@/lib/connectivity";
 import { useTransactionQueue } from "@/hooks/useTransactionQueue";
 import { QUEUE_SYNC_EVENT } from "@/lib/queueSync";
 import { groupOrderItemsForDisplay, isAdminRole, openBillsGrandTotal } from "@/lib/openBillDisplay";
@@ -24,7 +25,6 @@ export default function OpenBills() {
   const [voidBill, setVoidBill] = useState(null);
   const [fromCache, setFromCache] = useState(false);
   const [cachedAt, setCachedAt] = useState(null);
-  const [offline, setOffline] = useState(() => isOfflineMode());
   const reloadOnSyncRef = useRef(false);
   const lastChangedReloadRef = useRef(0);
   const { items: queueItems } = useTransactionQueue(true);
@@ -48,11 +48,10 @@ export default function OpenBills() {
     load();
   }, [load]);
 
-  // Deteksi mode offline (untuk proyeksi antrean) + muat ulang SEGAR dari
-  // server begitu antrean selesai disinkronkan setelah koneksi kembali.
+  // Muat ulang SEGAR dari server begitu antrean selesai disinkronkan setelah
+  // koneksi kembali.
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const sync = () => setOffline(isOfflineMode());
     const onOnline = () => { reloadOnSyncRef.current = true; };
     const onSynced = () => {
       if (!reloadOnSyncRef.current) return;
@@ -69,18 +68,21 @@ export default function OpenBills() {
       lastChangedReloadRef.current = now;
       load();
     };
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
     window.addEventListener("online", onOnline);
     window.addEventListener(QUEUE_SYNC_EVENT, onSynced);
     window.addEventListener(OPEN_BILLS_CHANGED_EVENT, onBillsChanged);
+    ensureConnectivityMonitor();
+    // Pemulihan koneksi juga dideteksi lewat probe HTTP (bukan hanya event
+    // `online` yang bisa tidak muncul di WebView Android), agar daftar ikut
+    // di-refresh setelah antrean selesai disinkronkan.
+    const unsubscribeConnectivity = subscribeConnectivity(({ online }) => {
+      if (online) onOnline();
+    });
     return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
       window.removeEventListener("online", onOnline);
       window.removeEventListener(QUEUE_SYNC_EVENT, onSynced);
       window.removeEventListener(OPEN_BILLS_CHANGED_EVENT, onBillsChanged);
+      unsubscribeConnectivity();
     };
   }, [load]);
 
@@ -94,13 +96,14 @@ export default function OpenBills() {
     return () => unsubscribe();
   }, [load]);
 
-  const offlineBills = useMemo(
-    () => (offline ? pendingOpenBillsFromQueue(queueItems) : []),
-    [offline, queueItems],
-  );
+  // Bill antrean SELALU diproyeksikan (lihat `projectOpenBills`): item yang sudah
+  // terkirim dihapus dari antrean oleh `queueSync`, jadi tidak dobel setelah
+  // sinkronisasi, tetapi data lokal tetap terlihat walau `navigator.onLine`
+  // keliru melaporkan "online" di WebView Android.
+  const offlineBills = useMemo(() => pendingOpenBillsFromQueue(queueItems), [queueItems]);
   const displayBills = useMemo(
-    () => (offline ? mergeOfflineBills(bills, offlineBills) : bills),
-    [offline, bills, offlineBills],
+    () => projectOpenBills(bills, queueItems, offlineBills),
+    [bills, queueItems, offlineBills],
   );
   // Total nominal seluruh Open Bill yang tampil (termasuk bill proyeksi offline).
   const grandTotal = useMemo(() => openBillsGrandTotal(displayBills), [displayBills]);
@@ -125,7 +128,7 @@ export default function OpenBills() {
         )}
       </PageHeader>
       <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
-      {offline && offlineBills.length > 0 && (
+      {offlineBills.length > 0 && (
         <div data-testid="open-bills-offline-notice" className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
           <span>

@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 PUBLIC = Path(__file__).resolve().parent
-SOURCE = PUBLIC / "LOGO WARKOP.ico"
+SOURCE = PUBLIC / "icon-1024.png"
 
 # Sizes required by the web app manifest + Apple touch icon.
 TARGETS = {

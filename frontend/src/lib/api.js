@@ -1,4 +1,11 @@
 import axios from "axios";
+import {
+  CONNECTIVITY_PROBE_INTERVAL_MS,
+  CONNECTIVITY_PROBE_TIMEOUT_MS,
+  recordNetworkFailure,
+  recordNetworkSuccess,
+  setConnectivityProbe,
+} from "./connectivity";
 
 const backendUrl = process.env.REACT_APP_BACKEND_URL?.trim().replace(/\/+$/, "");
 const LOCAL_HOSTNAMES = ["localhost", "127.0.0.1", "::1", "[::1]"];
@@ -30,7 +37,12 @@ api.interceptors.request.use((cfg) => {
 });
 
 api.interceptors.response.use(
-  (r) => r,
+  (r) => {
+    // Server menjawab -> aplikasi TIDAK offline (indikator + proyeksi data
+    // offline memakai sumber kebenaran yang sama, lihat `connectivity.js`).
+    recordNetworkSuccess();
+    return r;
+  },
   (err) => {
     const url = err.config?.url || "";
     const isPinCheck = url.includes("/auth/login") || url.endsWith("/login") || url.includes("/auth/verify-admin") || url.endsWith("/void");
@@ -38,9 +50,22 @@ api.interceptors.response.use(
       localStorage.removeItem("pos_token");
       window.dispatchEvent(new Event("pos-logout"));
     }
+    // Pembatalan request (AbortController) bukan bukti gangguan jaringan.
+    const canceled = err.name === "CanceledError" || err.name === "AbortError" || err.code === "ERR_CANCELED";
+    if (!canceled) recordNetworkFailure();
     return Promise.reject(err);
   }
 );
+
+// Probe pemulihan status: saat aplikasi dianggap offline, `connectivity.js`
+// memanggil endpoint `/ping` yang sangat ringan. Bila berhasil, status kembali
+// "online" tanpa menunggu event `online` (yang sering tidak muncul di WebView
+// Android/Capacitor).
+setConnectivityProbe(() => api.get("/ping", { timeout: CONNECTIVITY_PROBE_TIMEOUT_MS }));
+
+// Probe pertama setelah jeda satu interval (bukan segera) agar aplikasi tidak
+// menghujani server pada saat start.
+export const CONNECTIVITY_PROBE_DELAY_MS = CONNECTIVITY_PROBE_INTERVAL_MS;
 
 export const NETWORK_ERROR_MESSAGE =
   "Tidak dapat terhubung ke server POS. Periksa koneksi internet dan coba lagi.";

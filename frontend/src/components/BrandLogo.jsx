@@ -3,7 +3,7 @@ import { Coffee } from "lucide-react";
 
 // Logo brand bawaan aplikasi (Warkop Babba). Dipakai bila tidak ada URL logo
 // kustom dari Profil Usaha, atau bila gambar kustom gagal dimuat.
-export const DEFAULT_LOGO_URL = "/logo%20babba.jpg";
+export const DEFAULT_LOGO_URL = "/icon-1024.png";
 
 export const BrandLogo = ({ url, className = "h-9 w-9", iconClass = "h-5 w-5", testid }) => {
   const [failed, setFailed] = useState(false);

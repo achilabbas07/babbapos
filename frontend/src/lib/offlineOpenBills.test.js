@@ -6,6 +6,8 @@ import {
   offlineBillActionLabel,
   offlineOrderFromBill,
   pendingOpenBillsFromQueue,
+  projectOpenBills,
+  projectTables,
   resolveQueueRequest,
 } from "./offlineOpenBills";
 
@@ -187,6 +189,37 @@ describe("mergeOfflineTables", () => {
     expect(merged.find((t) => t.id === "t1").orderData.openBillId).toBe("local-1");
     expect(merged.find((t) => t.id === "t2").status).toBe("available");
   });
+
+  it("mengabaikan bill tanpa meja valid (Takeaway / 'none') tanpa error", () => {
+    const tables = [{ id: "t1", status: "available" }];
+    const merged = mergeOfflineTables(tables, [
+      { id: "local-1", tableId: "none" },
+      { id: "local-2", tableId: null },
+      { id: "local-3" },
+      { id: "local-4", tableId: "t-tidak-ada" },
+    ]);
+    expect(merged.find((t) => t.id === "t1").status).toBe("available");
+  });
+});
+
+describe("projection helpers (selalu sertakan bill antrean)", () => {
+  it("projectOpenBills menyatukan bill antrean tanpa duplikat id server", () => {
+    const cachedD = [{ id: "BILL-1", total: 1000 }];
+    const queue = [
+      queueItem({ client_request_id: "local-1", payload: { type: "Dine In", items: [{ productId: "p1", qty: 1, price: 5000 }] } }),
+      queueItem({ client_request_id: "BILL-1", status: "syncing" }), // sudah dikirim -> tidak diproyeksikan
+    ];
+    const merged = projectOpenBills(cachedD, queue);
+    expect(merged.map((b) => b.id)).toEqual(["local-1", "BILL-1"]);
+  });
+
+  it("projectTables menandai meja dari bill antrean (tanpa gantung status offline)", () => {
+    const tables = [{ id: "t1", status: "available" }];
+    const queue = [queueItem({ payload: { type: "Dine In", tableId: "t1", items: [{ productId: "p1", qty: 1, price: 5000 }] } })];
+    const merged = projectTables(tables, queue);
+    expect(merged.find((t) => t.id === "t1").status).toBe("occupied");
+    expect(merged.find((t) => t.id === "t1").orderData.offline).toBe(true);
+  });
 });
 
 describe("helpers tampilan", () => {
@@ -194,6 +227,11 @@ describe("helpers tampilan", () => {
     expect(isOfflineMode({ onLine: false })).toBe(true);
     expect(isOfflineMode({ onLine: true })).toBe(false);
     expect(isOfflineMode(undefined)).toBe(false);
+  });
+
+  it("isOfflineMode() tanpa argumen memakai sumber kebenaran tunggal (connectivity)", () => {
+    // jsdom: `navigator.onLine === true` -> default online.
+    expect(isOfflineMode()).toBe(false);
   });
 
   it("offlineOrderFromBill membentuk order POS", () => {

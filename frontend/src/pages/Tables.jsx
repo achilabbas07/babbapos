@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { api, errMsg } from "@/lib/api";
 import { CACHE_KEYS } from "@/lib/localStore";
 import { loadWithCache } from "@/lib/offlineRead";
-import { OFFLINE_BILL_STATUS_LABEL, isOfflineMode, mergeOfflineTables, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
+import { OFFLINE_BILL_STATUS_LABEL, projectTables, pendingOpenBillsFromQueue } from "@/lib/offlineOpenBills";
 import { useTransactionQueue } from "@/hooks/useTransactionQueue";
 import { QUEUE_SYNC_EVENT } from "@/lib/queueSync";
 import { PageHeader } from "@/components/PageHeader";
@@ -48,7 +48,6 @@ export default function Tables() {
   const [receipt, setReceipt] = useState(null);
   const [fromCache, setFromCache] = useState(false);
   const [cachedAt, setCachedAt] = useState(null);
-  const [offline, setOffline] = useState(() => isOfflineMode());
   const { items: queueItems } = useTransactionQueue(true);
 
   // Muat denah meja dengan fallback cache lokal: bila fetch gagal karena
@@ -63,20 +62,6 @@ export default function Tables() {
     setCachedAt(result.updatedAt);
     if (result.error) toast.error(errMsg(result.error));
   }), []);
-
-  // Deteksi mode offline + jaring pemulihan: saat koneksi kembali, antrean
-  // disinkronkan (`queueSync`) lalu muat ulang data SEGAR dari server.
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const sync = () => setOffline(isOfflineMode());
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
-    return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
-    };
-  }, []);
 
   const queueReloadRef = useRef(false);
   useEffect(() => {
@@ -97,10 +82,13 @@ export default function Tables() {
 
   // Proyeksikan Open Bill yang masih mengantre (pending/failed) ke denah meja
   // agar meja berstatus "Terisi" walau bill belum tersimpan di server.
-  const offlineBills = useMemo(
-    () => (offline ? pendingOpenBillsFromQueue(queueItems) : []),
-    [offline, queueItems],
-  );
+  //
+  // PENTING: proyeksi TIDAK digantung pada `navigator.onLine`/status offline.
+  // Di WebView Android, `navigator.onLine` bisa tetap `true` saat server tak
+  // terjangkau; bila proyeksi digantung pada sinyal itu, bill yang tersimpan
+  // lokal tidak pernah tampil. Item yang sudah terkirim sudah dihapus dari
+  // antrean (`queueSync`), jadi tidak ada duplikasi setelah sinkronisasi.
+  const offlineBills = useMemo(() => pendingOpenBillsFromQueue(queueItems), [queueItems]);
   const offlineByTable = useMemo(
     () => Object.fromEntries(offlineBills.filter((b) => b.tableId).map((b) => [b.tableId, b])),
     [offlineBills],
@@ -139,8 +127,8 @@ export default function Tables() {
 
   // Denah yang ditampilkan = data server/cache + proyeksi antrean offline.
   const renderedTables = useMemo(
-    () => (offline ? mergeOfflineTables(tables, offlineBills) : tables),
-    [offline, tables, offlineBills],
+    () => projectTables(tables, queueItems, offlineBills),
+    [tables, queueItems, offlineBills],
   );
   const areas = [...new Set(tables.map((t) => t.area))];
   const current = areas.includes(area) ? area : areas[0];
@@ -210,7 +198,7 @@ export default function Tables() {
 
       <CachedDataNotice fromCache={fromCache} updatedAt={cachedAt} />
 
-      {offline && offlineBills.length > 0 && (
+      {offlineBills.length > 0 && (
         <div data-testid="tables-offline-bills-notice" className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
           <span>

@@ -9,7 +9,7 @@ from PIL import Image, ImageOps
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Directory containing the raw logo asset (e.g., a high-resolution PNG or ICO).
-SOURCE_LOGO_PATH = REPO_ROOT / "frontend/public/logo512.png"
+SOURCE_LOGO_PATH = REPO_ROOT / "frontend/public/icon-1024.png"
 
 # Main Android resources directory.
 ANDROID_RES_DIR = REPO_ROOT / "frontend/android/app/src/main/res"

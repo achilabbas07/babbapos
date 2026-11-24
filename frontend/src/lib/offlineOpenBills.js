@@ -9,6 +9,8 @@
 // pembayaran/HPP, backend, maupun skema database. Ia hanya membaca antrean
 // (`TRANSACTION_QUEUE_KEY`) yang sudah ada dan membentuk data tampilan.
 
+import { isOffline } from "./connectivity";
+
 export const OPEN_BILL_CREATE_TYPE = "open-bill-create";
 export const OPEN_BILL_UPDATE_TYPE = "open-bill-update";
 export const OPEN_BILL_QUEUE_TYPES = Object.freeze([OPEN_BILL_CREATE_TYPE, OPEN_BILL_UPDATE_TYPE]);
@@ -153,9 +155,23 @@ const isNewer = (a, b) => {
   return (Date.parse(a.createdAt || 0) || 0) >= (Date.parse(b.createdAt || 0) || 0);
 };
 
-/** True bila perangkat sedang offline (`navigator.onLine === false`). */
-export const isOfflineMode = (navigatorLike = typeof navigator !== "undefined" ? navigator : undefined) =>
-  Boolean(navigatorLike && navigatorLike.onLine === false);
+/**
+ * True bila aplikasi sedang offline (server tidak terjangkau).
+ *
+ * Bila dipanggil TANPA argumen, status diambil dari sumber kebenaran tunggal
+ * `lib/connectivity.js` (gabungan `navigator.onLine` + event `online`/`offline`
+ * + kegagalan/keberhasilan permintaan HTTP nyata), sehingga indikator koneksi
+ * dan halaman tidak pernah berbeda pendapat.
+ *
+ * Argumen bergaya `navigator` tetap didukung untuk pengujian/dipakai ulang:
+ * `isOfflineMode({ onLine: false })` -> true.
+ */
+export const isOfflineMode = function isOfflineMode(navigatorLike) {
+  // Tanpa argumen -> pakai sumber kebenaran tunggal. Argumen `navigator` (atau
+  // `undefined` eksplisit) -> pertahankan perilaku lama berbasis `onLine`.
+  if (arguments.length === 0) return isOffline();
+  return Boolean(navigatorLike && navigatorLike.onLine === false);
+};
 
 /**
  * Gabungkan Open Bill hasil antrean (belum ada di server) dengan daftar cache.
@@ -174,13 +190,46 @@ export const withOfflineBills = (cached, queue, offline = isOfflineMode()) =>
   (offline ? mergeOfflineBills(cached, pendingOpenBillsFromQueue(queue)) : (Array.isArray(cached) ? cached : []));
 
 /**
+ * Bentuk daftar Open Bill untuk halaman.
+ *
+ * Bill antrean SELALU diproyeksikan (tanpa digantung pada `navigator.onLine`)
+ * karena `pendingOpenBillsFromQueue()` hanya mengembalikan item yang MASIH
+ * `pending`/`failed` di antrean. Item yang sudah terkirim sudah dihapus dari
+ * antrean oleh `queueSync`, jadi tidak akan dobel; dan `mergeOfflineBills`
+ * membuang id yang sudah ada di daftar server.
+ *
+ * @param {unknown} cachedD bills dari server (atau cache saat offline)
+ * @param {unknown} queue isi antrean
+ * @param {Array<object>} [pending] hasil `pendingOpenBillsFromQueue` yang sudah
+ *   dihitung pemanggil (opsional; dihitung sendiri bila tidak diberikan)
+ */
+export const projectOpenBills = (cachedD, queue, pending) => {
+  const offline = Array.isArray(pending) ? pending : pendingOpenBillsFromQueue(queue);
+  return mergeOfflineBills(cachedD, offline);
+};
+
+/**
+ * Bentuk denah Meja untuk halaman: data server/cache + meja yang punya Open
+ * Bill masih mengantre (SELALU diproyeksikan, lihat catatan `projectOpenBills`).
+ *
+ * @param {unknown} cachedTables daftar meja dari server (atau cache)
+ * @param {unknown} queue isi antrean
+ * @param {Array<object>} [pending] hasil `pendingOpenBillsFromQueue` (opsional)
+ */
+export const projectTables = (cachedTables, queue, pending) => {
+  const offline = Array.isArray(pending) ? pending : pendingOpenBillsFromQueue(queue);
+  return mergeOfflineTables(cachedTables, offline);
+};
+
+/**
  * Tandai meja yang punya Open Bill masih mengantre sebagai `occupied` agar
  * status meja di denah ikut memperlihatkan pesanan yang belum terkirim.
  */
 export const mergeOfflineTables = (cachedTables, offlineBills) => {
   const tables = Array.isArray(cachedTables) ? cachedTables.map((table) => ({ ...table })) : [];
   for (const bill of Array.isArray(offlineBills) ? offlineBills : []) {
-    if (!bill?.tableId) continue;
+    // Meja tanpa id meja valid (mis. Takeaway / "none") tidak bisa ditandai.
+    if (!bill?.tableId || bill.tableId === "none") continue;
     const table = tables.find((t) => t?.id === bill.tableId);
     if (!table) continue;
     table.status = "occupied";
@@ -278,6 +327,8 @@ export default {
   mergeOfflineTables,
   withOfflineBills,
   withOfflineTables,
+  projectOpenBills,
+  projectTables,
   offlineOrderFromBill,
   resolveQueueRequest,
 };

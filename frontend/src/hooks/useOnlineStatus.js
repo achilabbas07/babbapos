@@ -1,36 +1,26 @@
 import { useEffect, useState } from "react";
+import { ensureConnectivityMonitor, getConnectivitySnapshot, subscribeConnectivity } from "@/lib/connectivity";
 
-// Pemantau status koneksi berbasis `navigator.onLine` + event `online`/`offline`.
+// Status koneksi untuk indikator di UI (label "Terhubung"/"Offline").
 //
-// Dipakai HANYA untuk indikator status di UI (Tahap 1). Nilai `navigator.onLine`
-// bersifat heuristik: true berarti "ada interface jaringan", bukan jaminan server
-// kita terjangkau. Karena itu indikator diberi label "Terhubung"/"Offline" dan
-// tidak pernah dipakai untuk memblokir alur transaksi.
+// Sumber kebenaran TUNGGAL ada di `lib/connectivity.js`: gabungan
+// `navigator.onLine` + event `online`/`offline` DENGAN bukti nyata dari
+// permintaan HTTP (kegagalan fetch/timeout vs ada respons dari server).
+//
+// Ini penting karena di WebView Android/Capacitor `navigator.onLine` sering
+// tetap `true` walau server tidak terjangkau — sehingga indikator bisa keliru
+// menampilkan "Terhubung" padahal halaman sedang menampilkan data cache
+// ("Mode offline: menampilkan data tersimpan").
 export function useOnlineStatus() {
-  const [online, setOnline] = useState(() => {
-    if (typeof navigator === "undefined" || typeof navigator.onLine !== "boolean") {
-      return true; // Asumsi online bila API tidak tersedia (mis. SSR/tes).
-    }
-    return navigator.onLine;
-  });
+  const [snapshot, setSnapshot] = useState(() => getConnectivitySnapshot());
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const goOnline = () => setOnline(true);
-    const goOffline = () => setOnline(false);
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
-    // Sinkronkan sekali saat mount (event bisa terlewat sebelum listener aktif).
-    if (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") {
-      setOnline(navigator.onLine);
-    }
-    return () => {
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
-    };
+    ensureConnectivityMonitor();
+    setSnapshot(getConnectivitySnapshot());
+    return subscribeConnectivity(setSnapshot);
   }, []);
 
-  return online;
+  return snapshot.online;
 }
 
 export default useOnlineStatus;

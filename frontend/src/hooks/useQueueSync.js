@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { syncTransactionQueue } from "@/lib/queueSync";
+import { ensureConnectivityMonitor, isOnline, subscribeConnectivity } from "@/lib/connectivity";
 
 // Pemicu sinkronisasi antrean transaksi lokal (Tahap 2 "Offline Queue").
 //
@@ -26,17 +27,24 @@ export function useQueueSync(enabled = true) {
     };
 
     // Segera saat mount bila sedang online.
-    if (typeof navigator === "undefined" || navigator.onLine !== false) {
+    ensureConnectivityMonitor();
+    if (isOnline()) {
       trigger();
     }
 
     window.addEventListener("online", trigger);
+    // Status dari sumber kebenaran tunggal: mencakup pemulihan lewat probe
+    // (bukan hanya event `online` yang bisa tidak muncul di WebView Android).
+    const unsubscribe = subscribeConnectivity(({ online }) => {
+      if (online) trigger();
+    });
     const interval = window.setInterval(() => {
-      if (typeof navigator === "undefined" || navigator.onLine !== false) trigger();
+      if (isOnline()) trigger();
     }, QUEUE_SYNC_INTERVAL_MS);
 
     return () => {
       window.removeEventListener("online", trigger);
+      unsubscribe();
       window.clearInterval(interval);
     };
   }, [enabled]);
