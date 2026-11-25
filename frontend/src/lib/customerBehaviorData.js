@@ -36,6 +36,67 @@ export const witaDaysAgoStr = (n, base = new Date()) => {
   return witaDateStr(new Date(baseMs - toNumber(n) * 86400000));
 };
 
+// Ambang penurunan drastis (persen) bila backend tidak mengirimkannya.
+export const DEFAULT_SPEND_DROP_THRESHOLD = 40;
+
+/**
+ * Normalisasi daftar ``spend_alerts`` dari backend (pemantauan perubahan
+ * perilaku belanja per pelanggan). Menjamin tipe angka & boolean aman serta
+ * menyediakan label identitas yang ramah ditampilkan.
+ */
+export const normalizeCustomerSpendAlerts = (rows) => {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row, index) => {
+    const name = String(row?.customer_name || row?.customer_id || "Tanpa nama").trim();
+    return {
+      key: row?.customer_id || `row-${index}`,
+      customerId: row?.customer_id || "",
+      customerName: name,
+      identity: row?.identity || (row?.customer_id ? "customerId" : "customerName"),
+      baselineTxCount: toNumber(row?.baseline_tx_count),
+      baselineAov: toNumber(row?.baseline_aov),
+      baselineAvgItems: toNumber(row?.baseline_avg_items),
+      recentTxCount: toNumber(row?.recent_tx_count),
+      recentAov: toNumber(row?.recent_aov),
+      recentAvgItems: toNumber(row?.recent_avg_items),
+      aovChangePct: toNumber(row?.aov_change_pct),
+      aovDropPct: toNumber(row?.aov_drop_pct),
+      itemsChangePct: toNumber(row?.items_change_pct),
+      itemsDropPct: toNumber(row?.items_drop_pct),
+      dropPct: toNumber(row?.drop_pct),
+      isDrasticDrop: Boolean(row?.is_drastic_drop),
+      lastCashier: String(row?.last_cashier || "").trim(),
+      lastShiftId: row?.last_shift_id || "",
+      lastVisit: row?.last_visit || "",
+    };
+  });
+};
+
+/** Apakah satu pelanggan turun drastis dari kebiasaannya sendiri. */
+export const isDrasticSpendDrop = (alert, threshold = DEFAULT_SPEND_DROP_THRESHOLD) =>
+  Boolean(alert?.isDrasticDrop) || toNumber(alert?.dropPct) >= toNumber(threshold, DEFAULT_SPEND_DROP_THRESHOLD);
+
+/** Saring daftar alert; ``onlyDrastic`` menyisakan penurunan drastis saja. */
+export const filterSpendAlerts = (alerts, onlyDrastic = false) => {
+  const list = Array.isArray(alerts) ? alerts : [];
+  return onlyDrastic ? list.filter((a) => isDrasticSpendDrop(a)) : list;
+};
+
+/**
+ * Urutkan daftar alert. ``mode``: "drop" (penurunan terbesar, default),
+ * "aov" (belanja terakhir terbesar), "name" (alfabetis).
+ */
+export const sortSpendAlerts = (alerts, mode = "drop") => {
+  const list = [...(Array.isArray(alerts) ? alerts : [])];
+  if (mode === "aov") {
+    return list.sort((a, b) => b.recentAov - a.recentAov || a.customerName.localeCompare(b.customerName));
+  }
+  if (mode === "name") {
+    return list.sort((a, b) => a.customerName.localeCompare(b.customerName));
+  }
+  return list.sort((a, b) => b.dropPct - a.dropPct || b.recentAov - a.recentAov);
+};
+
 /**
  * Normalisasi payload `/reports/customer-behavior` milik backend.
  * - Menjamin tipe angka.
@@ -90,6 +151,14 @@ export const normalizeCustomerBehaviorReport = (data) => {
     methods,
     hours,
     insights,
+    spendAlerts: normalizeCustomerSpendAlerts(data?.spend_alerts),
+    spendDropThreshold: toNumber(data?.spend_drop_threshold, 40),
+    baseline: {
+      start: data?.baseline?.start || "",
+      end: data?.baseline?.end || "",
+      days: toNumber(data?.baseline?.days),
+      minBaselineTx: toNumber(data?.baseline?.min_baseline_tx),
+    },
     transactionCount: toNumber(data?.transaction_count),
     totalRevenue: toNumber(data?.total_revenue),
     totalItems: toNumber(data?.total_items),

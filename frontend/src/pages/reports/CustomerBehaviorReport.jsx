@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Lightbulb, RotateCw } from "lucide-react";
+import { AlertTriangle, Lightbulb, RotateCw, TrendingDown } from "lucide-react";
 import { api, errMsg, rp, num } from "@/lib/api";
 import { PageHeader, StatCard, Empty } from "@/components/PageHeader";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  filterSpendAlerts,
   formatHour,
   normalizeCustomerBehaviorReport,
+  sortSpendAlerts,
   witaDaysAgoStr,
   witaTodayStr,
 } from "@/lib/customerBehaviorData";
@@ -47,6 +49,8 @@ export default function CustomerBehaviorReport() {
   const [range, setRange] = useState({ start: witaDaysAgoStr(6), end: witaTodayStr() });
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [dropOnly, setDropOnly] = useState(false);
+  const [sortMode, setSortMode] = useState("drop");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,6 +75,16 @@ export default function CustomerBehaviorReport() {
   const methods = useMemo(() => report?.methods || [], [report]);
   const hours = useMemo(() => report?.hours || [], [report]);
   const insights = useMemo(() => report?.insights || [], [report]);
+  const spendAlerts = useMemo(() => report?.spendAlerts || [], [report]);
+
+  const drasticCount = useMemo(
+    () => filterSpendAlerts(spendAlerts, true).length,
+    [spendAlerts],
+  );
+  const visibleAlerts = useMemo(
+    () => sortSpendAlerts(filterSpendAlerts(spendAlerts, dropOnly), sortMode),
+    [spendAlerts, dropOnly, sortMode],
+  );
 
   const maxChannelRevenue = useMemo(
     () => Math.max(...channels.map((c) => c.revenue), 1),
@@ -342,6 +356,118 @@ export default function CustomerBehaviorReport() {
                 </TableBody>
               </Table>
             </div>
+          </Panel>
+
+          <Panel
+            title="Pemantauan Perubahan Belanja Pelanggan"
+            hint={
+              report?.baseline?.start
+                ? `Dibandingkan kebiasaan ${num(report.baseline.days)} hari sebelumnya (${report.baseline.start} s/d ${report.baseline.end}). Penurunan ≥ ${num(report.spendDropThreshold)}% dari kebiasaan pelanggan sendiri ditandai "Drastis".`
+                : "Perbandingan belanja terakhir vs kebiasaan historis tiap pelanggan."
+            }
+            testid="customer-behavior-spend-alerts"
+          >
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="customer-behavior-drop-filter-all"
+                onClick={() => setDropOnly(false)}
+                className={`h-9 rounded-lg px-3 text-sm ${!dropOnly ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-secondary"}`}
+              >
+                Semua ({num(spendAlerts.length)})
+              </button>
+              <button
+                type="button"
+                data-testid="customer-behavior-drop-filter-drastic"
+                onClick={() => setDropOnly(true)}
+                className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm ${dropOnly ? "bg-red-600 text-white" : "border border-red-200 text-red-600 hover:bg-red-50"}`}
+              >
+                <AlertTriangle className="h-4 w-4" /> Penurunan Drastis ({num(drasticCount)})
+              </button>
+              <span className="ml-auto text-xs uppercase tracking-[0.18em] text-muted-foreground">Urutkan</span>
+              <select
+                data-testid="customer-behavior-drop-sort"
+                aria-label="Urutkan pemantauan belanja"
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value)}
+                className="h-9 rounded-lg border border-border bg-card px-3 text-sm"
+              >
+                <option value="drop">Penurunan Terbesar</option>
+                <option value="aov">Belanja Terakhir Terbesar</option>
+                <option value="name">Nama Pelanggan</option>
+              </select>
+            </div>
+
+            {visibleAlerts.length === 0 ? (
+              <p
+                data-testid="customer-behavior-spend-alerts-empty"
+                className="rounded-xl border border-border p-4 text-sm text-muted-foreground"
+              >
+                {spendAlerts.length === 0
+                  ? "Belum ada pelanggan dengan riwayat belanja yang cukup untuk dibandingkan pada rentang ini."
+                  : "Tidak ada pelanggan dengan penurunan drastis pada rentang ini."}
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Pelanggan</TableHead>
+                      <TableHead className="text-right">AOV Historis</TableHead>
+                      <TableHead className="text-right">AOV Terakhir</TableHead>
+                      <TableHead className="text-right">Perubahan</TableHead>
+                      <TableHead className="text-right">Trx</TableHead>
+                      <TableHead>Kasir / Shift Terakhir</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleAlerts.map((a) => (
+                      <TableRow key={a.key} data-testid={`customer-behavior-alert-row-${a.key}`}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{a.customerName}</span>
+                            {a.isDrasticDrop && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                                <TrendingDown className="h-3 w-3" /> Drastis
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {a.customerId ? `ID ${a.customerId}` : "Nama bebas (tanpa ID)"}
+                            {a.lastVisit ? ` · kunjungan terakhir ${a.lastVisit}` : ""}
+                          </p>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">
+                          {rp(a.baselineAov)}
+                          <span className="block text-xs">{a.baselineTxCount} trx</span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {rp(a.recentAov)}
+                          <span className="block text-xs text-muted-foreground">{a.recentTxCount} trx</span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          <span className={a.aovChangePct < 0 ? "font-semibold text-red-600" : "text-emerald-600"}>
+                            {a.aovChangePct > 0 ? "+" : ""}
+                            {a.aovChangePct.toFixed(1)}%
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            item {a.itemsChangePct > 0 ? "+" : ""}
+                            {a.itemsChangePct.toFixed(1)}%
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">
+                          {num(a.recentTxCount)}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {a.lastCashier || "—"}
+                          {a.lastShiftId ? ` · ${a.lastShiftId}` : ""}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </Panel>
         </div>
       )}

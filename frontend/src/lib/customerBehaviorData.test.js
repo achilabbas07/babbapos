@@ -1,8 +1,12 @@
 import {
+  filterSpendAlerts,
   findPeakAndQuietHours,
   formatHour,
   groupChannels,
+  isDrasticSpendDrop,
   normalizeCustomerBehaviorReport,
+  normalizeCustomerSpendAlerts,
+  sortSpendAlerts,
   witaDateStr,
   witaDaysAgoStr,
   witaTodayStr,
@@ -122,5 +126,111 @@ describe("helper tanggal WITA", () => {
 
   it("witaTodayStr mengembalikan format YYYY-MM-DD", () => {
     expect(witaTodayStr()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+const SPEND_ALERTS = [
+  {
+    customer_id: "CUST-1",
+    customer_name: "Budi",
+    identity: "customerId",
+    baseline_tx_count: 5,
+    baseline_aov: 50000,
+    baseline_avg_items: 3,
+    recent_tx_count: 1,
+    recent_aov: 20000,
+    recent_avg_items: 1,
+    aov_change_pct: -60,
+    aov_drop_pct: 60,
+    items_change_pct: -66.67,
+    items_drop_pct: 66.67,
+    drop_pct: 66.67,
+    is_drastic_drop: true,
+    last_cashier: "Kasir A",
+    last_shift_id: "SHIFT-9",
+    last_visit: "2026-11-20",
+  },
+  {
+    customer_id: null,
+    customer_name: "Sari",
+    identity: "customerName",
+    baseline_tx_count: 4,
+    baseline_aov: 30000,
+    baseline_avg_items: 2,
+    recent_tx_count: 2,
+    recent_aov: 28000,
+    recent_avg_items: 2,
+    aov_change_pct: -6.67,
+    aov_drop_pct: 6.67,
+    items_change_pct: 0,
+    items_drop_pct: 0,
+    drop_pct: 6.67,
+    is_drastic_drop: false,
+    last_cashier: "",
+    last_shift_id: null,
+    last_visit: "2026-11-19",
+  },
+];
+
+describe("normalizeCustomerSpendAlerts", () => {
+  it("memetakan payload spend_alerts ke camelCase dengan tipe aman", () => {
+    const alerts = normalizeCustomerSpendAlerts(SPEND_ALERTS);
+    expect(alerts).toHaveLength(2);
+    expect(alerts[0]).toMatchObject({
+      key: "CUST-1",
+      customerName: "Budi",
+      baselineAov: 50000,
+      recentAov: 20000,
+      dropPct: 66.67,
+      isDrasticDrop: true,
+      lastCashier: "Kasir A",
+      lastShiftId: "SHIFT-9",
+    });
+    expect(alerts[1].customerId).toBe("");
+    expect(alerts[1].isDrasticDrop).toBe(false);
+  });
+
+  it("mengembalikan array kosong untuk input tidak valid", () => {
+    expect(normalizeCustomerSpendAlerts(null)).toEqual([]);
+    expect(normalizeCustomerSpendAlerts(undefined)).toEqual([]);
+  });
+
+  it("menyertakan spendAlerts pada normalisasi laporan dan aman saat null", () => {
+    const report = normalizeCustomerBehaviorReport({
+      ...PAYLOAD,
+      spend_alerts: SPEND_ALERTS,
+      spend_drop_threshold: 40,
+      baseline: { start: "2026-08-03", end: "2026-10-31", days: 90, min_baseline_tx: 2 },
+    });
+    expect(report.spendAlerts).toHaveLength(2);
+    expect(report.spendDropThreshold).toBe(40);
+    expect(report.baseline).toMatchObject({ days: 90, minBaselineTx: 2 });
+
+    const empty = normalizeCustomerBehaviorReport(null);
+    expect(empty.spendAlerts).toEqual([]);
+    expect(empty.spendDropThreshold).toBe(40);
+  });
+});
+
+describe("filterSpendAlerts / isDrasticSpendDrop", () => {
+  it("menyaring hanya penurunan drastis dan mengklasifikasi ambang", () => {
+    const alerts = normalizeCustomerSpendAlerts(SPEND_ALERTS);
+    expect(filterSpendAlerts(alerts).map((a) => a.customerName)).toEqual(["Budi", "Sari"]);
+    expect(filterSpendAlerts(alerts, true).map((a) => a.customerName)).toEqual(["Budi"]);
+    expect(isDrasticSpendDrop(alerts[0])).toBe(true);
+    expect(isDrasticSpendDrop(alerts[1])).toBe(false);
+    // Ambang diturunkan -> Sari (6.67%) seharusnya ikut bila ambang 5%.
+    expect(isDrasticSpendDrop(alerts[1], 5)).toBe(true);
+  });
+});
+
+describe("sortSpendAlerts", () => {
+  it("mengurutkan berdasar penurunan, AOV terakhir, dan nama", () => {
+    const alerts = normalizeCustomerSpendAlerts(SPEND_ALERTS);
+    expect(sortSpendAlerts(alerts, "drop")[0].customerName).toBe("Budi");
+    expect(sortSpendAlerts(alerts, "aov")[0].customerName).toBe("Sari");
+    expect(sortSpendAlerts(alerts, "name")[0].customerName).toBe("Budi");
+    // Tidak mengubah array asli (imutabilitas).
+    expect(alerts.map((a) => a.customerName)).toEqual(["Budi", "Sari"]);
   });
 });

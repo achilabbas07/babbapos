@@ -323,3 +323,203 @@ def test_customer_behavior_requires_dates():
             )
         )
     assert exc.value.status_code == 400
+
+
+# --- Pemantauan perubahan perilaku belanja per pelanggan -------------------
+#
+# Rentang laporan default ``2026-11-01`` s/d ``2026-11-30``; window kebiasaan
+# default 90 hari tepat sebelumnya (``2026-08-03`` s/d ``2026-10-31``).
+
+SPEND_TRANSACTIONS = [
+    # Budi (punya customerId) — kebiasaan belanja 50.000 x 3 transaksi.
+    {
+        "_id": "TRX-20260905-0001",
+        "date": "2026-09-05T03:00:00+00:00",
+        "type": "Dine In",
+        "method": "Cash",
+        "total": 50000,
+        "customerId": "CUST-1",
+        "customerName": "Budi",
+        "items_json": [{"qty": 3}],
+    },
+    {
+        "_id": "TRX-20260910-0001",
+        "date": "2026-09-10T03:00:00+00:00",
+        "type": "Dine In",
+        "method": "Cash",
+        "total": 50000,
+        "customerId": "CUST-1",
+        "customerName": "Budi",
+        "items_json": [{"qty": 3}],
+    },
+    {
+        "_id": "TRX-20261015-0001",
+        "date": "2026-10-15T03:00:00+00:00",
+        "type": "Dine In",
+        "method": "Cash",
+        "total": 50000,
+        "customerId": "CUST-1",
+        "customerName": "Budi",
+        "items_json": [{"qty": 3}],
+    },
+    # Budi pada periode terakhir: hanya 10.000 (turun 80%) -> drastis.
+    {
+        "_id": "TRX-20261105-0001",
+        "date": "2026-11-05T03:00:00+00:00",
+        "type": "Dine In",
+        "method": "Cash",
+        "total": 10000,
+        "customerId": "CUST-1",
+        "customerName": "Budi",
+        "userName": "Kasir A",
+        "shiftId": "SHIFT-9",
+        "items_json": [{"qty": 1}],
+    },
+    # Sari (hanya nama, tanpa customerId) — kebiasaan 30.000 x 4 transaksi.
+    {
+        "_id": "TRX-20260906-0001",
+        "date": "2026-09-06T03:00:00+00:00",
+        "type": "Takeaway",
+        "method": "Cash",
+        "total": 30000,
+        "customerName": "sari",
+        "items_json": [{"qty": 2}],
+    },
+    {
+        "_id": "TRX-20260911-0001",
+        "date": "2026-09-11T03:00:00+00:00",
+        "type": "Takeaway",
+        "method": "Cash",
+        "total": 30000,
+        "customerName": "Sari ",
+        "items_json": [{"qty": 2}],
+    },
+    {
+        "_id": "TRX-20261001-0001",
+        "date": "2026-10-01T03:00:00+00:00",
+        "type": "Takeaway",
+        "method": "Cash",
+        "total": 30000,
+        "customerName": "SARI",
+        "items_json": [{"qty": 2}],
+    },
+    {
+        "_id": "TRX-20261020-0001",
+        "date": "2026-10-20T03:00:00+00:00",
+        "type": "Takeaway",
+        "method": "Cash",
+        "total": 30000,
+        "customerName": "Sari",
+        "items_json": [{"qty": 2}],
+    },
+    # Sari pada periode terakhir: 28.000 x 2 (turun ~6.7%) -> tidak drastis.
+    {
+        "_id": "TRX-20261110-0001",
+        "date": "2026-11-10T03:00:00+00:00",
+        "type": "Takeaway",
+        "method": "Cash",
+        "total": 28000,
+        "customerName": "Sari",
+        "items_json": [{"qty": 2}],
+    },
+    {
+        "_id": "TRX-20261112-0001",
+        "date": "2026-11-12T03:00:00+00:00",
+        "type": "Takeaway",
+        "method": "Cash",
+        "total": 28000,
+        "customerName": "Sari",
+        "items_json": [{"qty": 2}],
+    },
+    # Walk-in tanpa identitas pelanggan -> harus diabaikan.
+    {
+        "_id": "TRX-20261115-0001",
+        "date": "2026-11-15T03:00:00+00:00",
+        "type": "Walk In",
+        "method": "Cash",
+        "total": 15000,
+        "items_json": [{"qty": 1}],
+    },
+]
+
+
+def _run_with_baseline(fake_db, baseline_days=90, start="2026-11-01", end="2026-11-30"):
+    original = reports.db
+    reports.db = fake_db
+    try:
+        return asyncio.run(
+            reports.customer_behavior_report(
+                start_date=start,
+                end_date=end,
+                start=None,
+                end=None,
+                baseline_days=baseline_days,
+                _=ADMIN,
+            )
+        )
+    finally:
+        reports.db = original
+
+
+def test_customer_behavior_spend_alerts_compares_against_own_history():
+    report = _run_with_baseline(FakeDB(SPEND_TRANSACTIONS))
+    alerts = {a["customer_name"]: a for a in report["spend_alerts"]}
+
+    # Identitas berbasis customerId dipakai lebih dulu dan namanya terpilih rapi.
+    budi = alerts["Budi"]
+    assert budi["customer_id"] == "CUST-1"
+    assert budi["identity"] == "customerId"
+    assert budi["baseline_tx_count"] == 3
+    assert budi["baseline_aov"] == 50000
+    assert budi["recent_tx_count"] == 1
+    assert budi["recent_aov"] == 10000
+    assert budi["aov_change_pct"] == -80.0
+    assert budi["aov_drop_pct"] == 80.0
+    assert budi["is_drastic_drop"] is True
+    assert budi["last_cashier"] == "Kasir A"
+    assert budi["last_shift_id"] == "SHIFT-9"
+    assert budi["last_visit"] == "2026-11-05"
+
+
+def test_customer_behavior_spend_alerts_falls_back_to_normalized_name():
+    report = _run_with_baseline(FakeDB(SPEND_TRANSACTIONS))
+    sari = next(a for a in report["spend_alerts"] if a["identity"] == "customerName")
+
+    # "sari", "Sari ", "SARI", "Sari" harus dikelompokkan jadi satu pelanggan.
+    assert sari["baseline_tx_count"] == 4
+    assert sari["baseline_aov"] == 30000
+    assert sari["recent_tx_count"] == 2
+    assert sari["recent_aov"] == 28000
+    assert sari["aov_change_pct"] == -6.67
+    assert sari["is_drastic_drop"] is False
+
+
+def test_customer_behavior_spend_alerts_sorted_by_biggest_drop():
+    report = _run_with_baseline(FakeDB(SPEND_TRANSACTIONS))
+    drops = [a["drop_pct"] for a in report["spend_alerts"]]
+    assert drops == sorted(drops, reverse=True)
+    assert report["spend_alerts"][0]["customer_name"] == "Budi"
+    # Transaksi walk-in tanpa identitas tidak dilaporkan.
+    assert all(a["recent_tx_count"] >= 1 for a in report["spend_alerts"])
+    assert report["spend_drop_threshold"] == 40.0
+    assert report["baseline"]["days"] == 90
+    assert report["baseline"]["start"] == "2026-08-03"
+    assert report["baseline"]["end"] == "2026-10-31"
+
+
+def test_customer_behavior_spend_alerts_respects_baseline_window():
+    # Window kebiasaan 7 hari (2026-10-25 s/d 2026-10-31) tidak mencakup riwayat
+    # Budi/Sari, sehingga tidak ada pelanggan dengan baseline memadai.
+    report = _run_with_baseline(FakeDB(SPEND_TRANSACTIONS), baseline_days=7)
+    assert report["spend_alerts"] == []
+    assert report["baseline"]["start"] == "2026-10-25"
+    assert report["baseline"]["end"] == "2026-10-31"
+
+
+def test_customer_behavior_reads_baseline_window_from_db():
+    fake = FakeDB(SPEND_TRANSACTIONS)
+    _run_with_baseline(fake)
+    # Dua query: rentang laporan + window kebiasaan.
+    assert len(fake.transactions.filters) == 2
+    for flt in fake.transactions.filters:
+        assert "$or" in flt

@@ -21,7 +21,7 @@ Sub-laporan kelima: *Laporan Promo* — riwayat transaksi yang memakai kode prom
 beserta nilai diskon promonya dan rekap per kode promo pada rentang tanggal.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -462,6 +462,139 @@ def _payment_legs(tx):
     return [{"method": tx.get("method"), "amount": float(tx.get("total") or 0)}]
 
 
+DEFAULT_SPEND_DROP_THRESHOLD = 40.0
+DEFAULT_SPEND_BASELINE_DAYS = 90
+DEFAULT_SPEND_MIN_BASELINE_TX = 2
+
+
+def _tx_customer_identity(tx):
+    """Identitas pelanggan satu transaksi (kunci pengelompokan).
+
+    Prioritas ``customerId`` (pelanggan terdaftar). Bila kosong, jatuh ke
+    ``customerName`` yang dinormalisasi (huruf kecil tanpa spasi berlebih)
+    supaya "Budi" dan "budi " tetap satu pelanggan. Transaksi tanpa keduanya
+    (walk-in tanpa nama) dilewati karena tidak dapat dikaitkan ke pelanggan
+    tertentu.
+    """
+    cid = tx.get("customerId")
+    name = str(tx.get("customerName") or "").strip()
+    if cid:
+        return {
+            "key": f"id:{cid}",
+            "customer_id": cid,
+            "name": name or cid,
+            "identity": "customerId",
+        }
+    if name:
+        return {
+            "key": f"name:{name.lower()}",
+            "customer_id": None,
+            "name": name,
+            "identity": "customerName",
+        }
+    return None
+
+
+def _customer_spend_alerts(txs, baseline_txs, threshold, min_baseline_tx):
+    """Bandingkan belanja periode terakhir vs kebiasaan historis per pelanggan.
+
+    Murni agregasi Python atas transaksi yang SUDAH dibaca dari DB (read-only).
+    ``baseline_txs`` berisi transaksi di luar rentang (window sebelum rentang)
+    yang dipakai sebagai "kebiasaan". Hanya pelanggan dengan minimal
+    ``min_baseline_tx`` transaksi historis yang dievaluasi agar sinyal tidak
+    berasal dari satu transaksi tunggal.
+    """
+    baseline = {}
+    for tx in baseline_txs:
+        ident = _tx_customer_identity(tx)
+        if not ident:
+            continue
+        row = baseline.setdefault(ident["key"], {
+            "customer_id": ident["customer_id"],
+            "name": ident["name"],
+            "identity": ident["identity"],
+            "tx_count": 0,
+            "total_spend": 0.0,
+            "total_items": 0.0,
+        })
+        row["tx_count"] += 1
+        row["total_spend"] += float(tx.get("total") or 0)
+        row["total_items"] += _tx_item_qty(tx)
+
+    recent = {}
+    for tx in txs:
+        ident = _tx_customer_identity(tx)
+        if not ident:
+            continue
+        row = recent.setdefault(ident["key"], {
+            "customer_id": ident["customer_id"],
+            "name": ident["name"],
+            "identity": ident["identity"],
+            "tx_count": 0,
+            "total_spend": 0.0,
+            "total_items": 0.0,
+            "last_cashier": "",
+            "last_shift_id": None,
+            "last_order": None,
+        })
+        row["tx_count"] += 1
+        row["total_spend"] += float(tx.get("total") or 0)
+        row["total_items"] += _tx_item_qty(tx)
+        # Simpan transaksi terakhir untuk konteks kasir/shift.
+        parsed = _parse_iso_local(tx.get("orderTime") or tx.get("date"))
+        if parsed is not None and (row["last_order"] is None or parsed > row["last_order"]):
+            row["last_order"] = parsed
+            row["last_cashier"] = str(tx.get("userName") or "").strip()
+            row["last_shift_id"] = tx.get("shiftId")
+
+    alerts = []
+    for key, recent_row in recent.items():
+        base_row = baseline.get(key)
+        if not base_row or base_row["tx_count"] < min_baseline_tx:
+            # Tanpa baseline memadai, penurunan tidak dapat dinilai secara adil.
+            continue
+        base_aov = base_row["total_spend"] / base_row["tx_count"]
+        recent_aov = recent_row["total_spend"] / recent_row["tx_count"]
+        base_items = base_row["total_items"] / base_row["tx_count"]
+        recent_items = recent_row["total_items"] / recent_row["tx_count"]
+
+        def _change(new, old):
+            if old <= 0:
+                return None
+            return round((new - old) / old * 100, 2)
+
+        aov_change = _change(recent_aov, base_aov)
+        items_change = _change(recent_items, base_items)
+        aov_drop = round(-aov_change, 2) if aov_change is not None and aov_change < 0 else 0.0
+        items_drop = round(-items_change, 2) if items_change is not None and items_change < 0 else 0.0
+        drop_pct = max(aov_drop, items_drop)
+
+        alerts.append({
+            "customer_id": recent_row["customer_id"] or base_row["customer_id"],
+            "customer_name": recent_row["name"] or base_row["name"],
+            "identity": recent_row["identity"],
+            "baseline_tx_count": base_row["tx_count"],
+            "baseline_aov": round(base_aov, 2),
+            "baseline_avg_items": round(base_items, 2),
+            "recent_tx_count": recent_row["tx_count"],
+            "recent_aov": round(recent_aov, 2),
+            "recent_avg_items": round(recent_items, 2),
+            "aov_change_pct": aov_change,
+            "aov_drop_pct": aov_drop,
+            "items_change_pct": items_change,
+            "items_drop_pct": items_drop,
+            "drop_pct": round(drop_pct, 2),
+            "is_drastic_drop": drop_pct >= threshold,
+            "last_cashier": recent_row["last_cashier"],
+            "last_shift_id": recent_row["last_shift_id"],
+            "last_visit": recent_row["last_order"].date().isoformat() if recent_row["last_order"] else "",
+        })
+
+    # Urutkan: penurunan terbesar dulu, lalu pelanggan dengan belanja terbesar.
+    alerts.sort(key=lambda a: (-a["drop_pct"], -a["recent_aov"], a["customer_name"]))
+    return alerts
+
+
 def _build_insights(summary) -> list:
     """Wawasan lokal berbasis aturan (rule-based) — tanpa memanggil LLM.
 
@@ -528,6 +661,7 @@ async def customer_behavior_report(
     end_date: Optional[str] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
+    baseline_days: int = DEFAULT_SPEND_BASELINE_DAYS,
     _: User = Depends(ADMIN),
 ):
     """Analisa perilaku pelanggan & perputaran warkop (BACA-SAJA).
@@ -541,6 +675,10 @@ async def customer_behavior_report(
     - ``methods``: Cash / QRIS / Card / Debit (attribusi per leg split payment).
     - ``basket``: statistik ukuran keranjang (item per transaksi).
     - ``hours``: distribusi transaksi per jam + ``peak_hour`` / ``quiet_hour``.
+    - ``spend_alerts``: pemantauan perubahan perilaku belanja per pelanggan —
+        AOV & rata-rata item periode terakhir dibandingkan kebiasaan historis
+        pelanggan itu sendiri (``baseline_days`` hari sebelum rentang), lengkap
+        dengan ``drop_pct`` dan penanda ``is_drastic_drop`` (penurunan drastis).
     - ``insights``: wawasan ringkas berbasis aturan lokal.
     """
     # Kontrak utama memakai ``start_date``/``end_date``; ``start``/``end`` tetap
@@ -562,6 +700,24 @@ async def customer_behavior_report(
         order_day = _tx_order_datetime(tx)
         if order_day is not None and start_day <= order_day.date() <= end_day:
             txs.append(tx)
+
+    # Window "kebiasaan": ``baseline_days`` hari tepat sebelum rentang. Dipakai
+    # sebagai pembanding AOV/ukuran keranjang tiap pelanggan terhadap perilaku
+    # historisnya sendiri (bukan dibanding rata-rata seluruh pelanggan).
+    baseline_days = max(1, min(int(baseline_days or DEFAULT_SPEND_BASELINE_DAYS), 365))
+    baseline_start = (start_day - timedelta(days=baseline_days)).isoformat()
+    baseline_end = (start_day - timedelta(days=1)).isoformat()
+    baseline_txs = []
+    if baseline_start <= baseline_end:
+        baseline_start_day = date.fromisoformat(baseline_start)
+        baseline_end_day = date.fromisoformat(baseline_end)
+        baseline_raw = await db.transactions.find(
+            _report_date_query(baseline_start, baseline_end)
+        ).to_list(None)
+        for tx in baseline_raw:
+            order_day = _tx_order_datetime(tx)
+            if order_day is not None and baseline_start_day <= order_day.date() <= baseline_end_day:
+                baseline_txs.append(tx)
 
     channel_map = {}
     method_map = {}
@@ -650,10 +806,22 @@ async def customer_behavior_report(
         "quiet_hour": quiet_hour,
     }
 
+    spend_alerts = _customer_spend_alerts(
+        txs, baseline_txs, DEFAULT_SPEND_DROP_THRESHOLD, DEFAULT_SPEND_MIN_BASELINE_TX
+    )
+
     return {
         "start": start,
         "end": end,
         **summary,
+        "baseline": {
+            "start": baseline_start,
+            "end": baseline_end,
+            "days": baseline_days,
+            "min_baseline_tx": DEFAULT_SPEND_MIN_BASELINE_TX,
+        },
+        "spend_drop_threshold": DEFAULT_SPEND_DROP_THRESHOLD,
+        "spend_alerts": spend_alerts,
         "basket": {
             "average_items": average_basket_size,
             "max_items": int(max_basket) if float(max_basket).is_integer() else max_basket,
