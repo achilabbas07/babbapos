@@ -1101,8 +1101,9 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         payments=checkout_payments,
         client_request_id=client_request_id,
     )
-    checkout_lines = checkout_journal_lines(total, method, items, checkout_payments)
-    checkout_codes = checkout_journal_account_codes(total, method, items, checkout_payments)
+    discount_total = promo_amount + points_amount
+    checkout_lines = checkout_journal_lines(total, method, items, checkout_payments, discount_total)
+    checkout_codes = checkout_journal_account_codes(total, method, items, checkout_payments, discount_total)
     try:
         await db.connect()
         async with db.pool.acquire() as conn:

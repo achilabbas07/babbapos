@@ -136,6 +136,80 @@ def test_split_with_two_non_cash_methods_aggregates_into_a_single_bank_leg():
     assert checkout_journal_account_codes(60000, "QRIS", [], payments) == ["1-10002", "4-40000"]
 
 
+# --- checkout_journal_lines dengan diskon (promo + tukar poin) -------------------
+
+
+def test_checkout_discount_records_contra_revenue_pair_and_stays_balanced():
+    # Tagihan bersih 97.000 dengan diskon 3.000 -> pendapatan bruto 100.000.
+    lines = checkout_journal_lines(97000, "Cash", [], None, 3000)
+    assert lines == [
+        ("Kas Tunai", "asset", Decimal("97000.00"), Decimal("0")),
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("100000.00")),
+        ("Diskon Penjualan", "revenue", Decimal("3000.00"), Decimal("0")),
+    ]
+    debit, credit = _balance(lines)
+    assert debit == credit == Decimal("100000.00")
+    assert checkout_journal_account_codes(97000, "Cash", [], None, 3000) == [
+        "1-10001", "4-40000", "4-40100",
+    ]
+
+
+def test_checkout_discount_keeps_hpp_pair_and_preserves_line_order():
+    items = [{"hpp": 10000, "qty": 1}]
+    lines = checkout_journal_lines(97000, "Cash", items, None, 3000)
+    assert lines == [
+        ("Kas Tunai", "asset", Decimal("97000.00"), Decimal("0")),
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("100000.00")),
+        ("Diskon Penjualan", "revenue", Decimal("3000.00"), Decimal("0")),
+        ("Beban HPP", "expense", Decimal("10000.00"), Decimal("0")),
+        ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("10000.00")),
+    ]
+    debit, credit = _balance(lines)
+    assert debit == credit == Decimal("110000.00")
+    assert checkout_journal_account_codes(97000, "Cash", items, None, 3000) == [
+        "1-10001", "4-40000", "4-40100", "5-50000", "1-10003",
+    ]
+
+
+def test_checkout_discount_combines_with_split_payments():
+    payments = normalize_checkout_payments(
+        97000,
+        [{"method": "Cash", "amount": 27000}, {"method": "QRIS", "amount": 70000}],
+        "QRIS",
+    )
+    lines = checkout_journal_lines(97000, "QRIS", [], payments, 3000)
+    assert lines == [
+        ("Kas Tunai", "asset", Decimal("27000"), Decimal("0")),
+        ("Kas Bank / QRIS", "asset", Decimal("70000"), Decimal("0")),
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("100000")),
+        ("Diskon Penjualan", "revenue", Decimal("3000"), Decimal("0")),
+    ]
+    debit, credit = _balance(lines)
+    assert debit == credit == Decimal("100000")
+    assert checkout_journal_account_codes(97000, "QRIS", [], payments, 3000) == [
+        "1-10001", "1-10002", "4-40000", "4-40100",
+    ]
+
+
+def test_zero_discount_keeps_legacy_output_identical():
+    items = [{"hpp": 12.5, "qty": 2}]
+    with_explicit_zero = checkout_journal_lines(1000, "Cash", items, None, 0)
+    without_discount = checkout_journal_lines(1000, "Cash", items, None)
+    assert with_explicit_zero == without_discount
+    assert checkout_journal_account_codes(1000, "Cash", items, None, 0) == (
+        checkout_journal_account_codes(1000, "Cash", items, None)
+    )
+
+
+def test_checkout_discount_rejects_negative_or_invalid_amounts():
+    with pytest.raises(ValueError):
+        checkout_journal_lines(97000, "Cash", [], None, -1)
+    with pytest.raises(ValueError):
+        checkout_journal_account_codes(97000, "Cash", [], None, -1)
+    with pytest.raises(ValueError):
+        checkout_journal_lines(97000, "Cash", [], None, "bukan angka")
+
+
 # --- primary_checkout_method -----------------------------------------------------
 
 
@@ -196,6 +270,20 @@ def test_legacy_entries_split_each_method_against_the_same_revenue_leg():
         ("4-40000", "KREDIT", 100000.0),
     ]
     # Jumlah debit dan kredit pada jurnal legacy tetap seimbang.
+    debit = sum(amount for _code, position, amount in entries if position == "DEBIT")
+    credit = sum(amount for _code, position, amount in entries if position == "KREDIT")
+    assert debit == credit == 100000.0
+
+
+def test_legacy_entries_include_the_contra_revenue_discount_leg():
+    lines = checkout_journal_lines(97000, "Cash", [], None, 3000)
+    codes = checkout_journal_account_codes(97000, "Cash", [], None, 3000)
+    entries = legacy_checkout_journal_entries(lines, codes)
+    assert entries == [
+        ("1-10001", "DEBIT", 97000.0),
+        ("4-40000", "KREDIT", 100000.0),
+        ("4-40100", "DEBIT", 3000.0),
+    ]
     debit = sum(amount for _code, position, amount in entries if position == "DEBIT")
     credit = sum(amount for _code, position, amount in entries if position == "KREDIT")
     assert debit == credit == 100000.0

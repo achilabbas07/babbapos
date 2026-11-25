@@ -106,6 +106,14 @@ def test_profit_loss_aggregates_account_and_expense_sources_for_requested_date_r
                 ) in normalized_query
                 return {"sales_discount": Decimal("75.00")}
 
+            if "as ledger_discount" in normalized_query:
+                # Bagian diskon yang SUDAH dijurnal ke 4-40100 di buku besar.
+                # Di sini dibuat 0 supaya angka uji tetap deterministik; bagian
+                # transaksi lama tetap dibaca lewat query "as sales_discount".
+                assert "from public.general_ledger as ledger" in normalized_query
+                assert "ledger.account_code = '4-40100'" in normalized_query
+                return {"ledger_discount": Decimal("0")}
+
             assert "jsonb_array_elements" in normalized_query
             assert "from public.variant_ingredients" in normalized_query
             assert "join public.inventory" in normalized_query

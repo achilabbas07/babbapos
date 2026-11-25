@@ -18,6 +18,13 @@ ACCOUNT_BEBAN_OPERASIONAL_ID = "6-60000"
 ACCOUNT_HPP_ID = "5-50000"
 ACCOUNT_KAS_TUNAI_ID = "1-10001"
 ACCOUNT_KAS_BANK_ID = "1-10002"
+# Akun pendapatan bruto (kredit) dan akun kontra pendapatan untuk diskon
+# penjualan (promo + tukar poin). Diskon dicatat sebagai DEBIT pada
+# ``4-40100`` berpasangan dengan KREDIT ``4-40000`` supaya pendapatan bruto
+# dan potongan penjualan terlihat eksplisit di buku besar/Chart of Accounts.
+ACCOUNT_PENDAPATAN_ID = "4-40000"
+ACCOUNT_DISKON_PENJUALAN_ID = "4-40100"
+ACCOUNT_DISKON_PENJUALAN_NAME = "Diskon Penjualan"
 
 # Nama akun kas/bank wajib sama dengan nama di Chart of Accounts. Sebelumnya
 # beberapa pembentuk baris jurnal memakai nama literal "Bank"/"Kas" sehingga
@@ -643,6 +650,11 @@ async def get_profit_and_loss_report(
           ) as summary_rows
           where account_type not in ('operating_expense', 'balance_sheet')
                         and coalesce(account_code, '') not like '8-%'
+                        -- Akun kontra pendapatan "Diskon Penjualan" (4-40100)
+                        -- ditampilkan sebagai satu baris "Potongan Penjualan"
+                        -- di bawah ini, bukan sebagai baris pendapatan buku
+                        -- besar, supaya tidak terhitung dua kali.
+                        and coalesce(account_code, '') <> '4-40100'
                         -- Akun transit/penampungan aset (mis. 1-10004 "Rek. Belanja")
                         -- dikecualikan agar tidak ikut sebagai Beban Operasional.
                         and coalesce(account_code, '') not like '1-%'
@@ -895,8 +907,36 @@ async def get_profit_and_loss_report(
           0
         ) as sales_discount
         from public.transactions
-                where (date at time zone 'Asia/Makassar')::date >= $1::date
-                    and (date at time zone 'Asia/Makassar')::date < $2::date
+        where (date at time zone 'Asia/Makassar')::date >= $1::date
+            and (date at time zone 'Asia/Makassar')::date < $2::date
+            -- Diskon yang SUDAH punya jurnal (DEBIT "Diskon Penjualan")
+            -- tidak dihitung lagi di sini karena sudah masuk lewat buku
+            -- besar; sisanya (transaksi pra-backfill) tetap dibaca dari
+            -- nilai transaksi supaya angka laporan tidak hilang.
+            and not exists (
+                select 1
+                from public.general_ledger as ledger
+                where ledger.source_type = 'transaction'
+                    and ledger.source_id = transactions.id
+                    and ledger.account_code = '4-40100'
+            )
+        """,
+        start_date,
+        end_date,
+    )
+    ledger_discount_row = await pool.fetchrow(
+        """
+        select coalesce(
+          sum(
+            coalesce(nullif(ledger.debit_amount, 0), ledger.debit, 0)
+            - coalesce(nullif(ledger.credit_amount, 0), ledger.credit, 0)
+          ),
+          0
+        ) as ledger_discount
+        from public.general_ledger as ledger
+        where ledger.account_code = '4-40100'
+            and ledger.transaction_date >= $1::date
+            and ledger.transaction_date < $2::date
         """,
         start_date,
         end_date,
@@ -1047,14 +1087,29 @@ async def get_profit_and_loss_report(
     report_rows.extend(hpp_rows)
 
     try:
-        sales_discount = Decimal(str(discount_row["sales_discount"] if discount_row else 0))
+        legacy_discount = Decimal(str(discount_row["sales_discount"] if discount_row else 0))
+        ledger_discount = Decimal(str(
+            ledger_discount_row["ledger_discount"] if ledger_discount_row else 0
+        ))
     except (KeyError, TypeError, ValueError, InvalidOperation) as error:
         raise ValueError("Nilai potongan penjualan tidak valid.") from error
-    if not sales_discount.is_finite() or sales_discount < 0:
+    if not legacy_discount.is_finite() or legacy_discount < 0:
         raise ValueError("Nilai potongan penjualan tidak valid.")
+    if not ledger_discount.is_finite() or ledger_discount < 0:
+        raise ValueError("Nilai potongan penjualan buku besar tidak valid.")
+    # Total potongan penjualan = bagian transaksi lama yang BELUM dijurnal
+    # (``legacy_discount``) + bagian yang sudah punya jurnal DEBIT 4-40100
+    # (``ledger_discount``). Keduanya saling eksklusif karena query transaksi
+    # menyaring transaksi yang sudah punya baris 4-40100.
+    sales_discount = legacy_discount + ledger_discount
+    # Pendapatan dilaporkan BRUTO. Baris jurnal 4-40000 sudah bruto untuk
+    # transaksi pascabackfill, sedangkan transaksi lama masih neto (diskon belum
+    # pernah dinaikkan), sehingga HANYA bagian lama yang perlu dinaikkan sebesar
+    # diskonnya. Bagian pascabackfill sudah bruto di buku besar sehingga tidak
+    # boleh dinaikkan lagi (menghindari pendapatan ganda).
+    totals["revenue"] += legacy_discount
 
     if sales_discount:
-        totals["revenue"] += sales_discount
         revenue_end = next(
             (index for index, row in enumerate(report_rows) if row["account_type"] != "revenue"),
             len(report_rows),
@@ -1294,6 +1349,21 @@ def _transaction_amounts(total: Any, admin_fee: Any) -> tuple[Decimal, Decimal]:
     return amount, fee
 
 
+def _discount_amount(value: Any) -> Decimal:
+    """Nilai diskon penjualan yang valid (nol atau positif).
+
+    Dipakai oleh pembentuk jurnal checkout. Nilai tak valid ditolak sebagai
+    ``ValueError`` supaya pemanggil mengembalikan HTTP 400, bukan 500.
+    """
+    try:
+        amount = _money(value)
+    except (InvalidOperation, TypeError, ValueError) as error:
+        raise ValueError("Diskon penjualan bukan nilai nominal yang valid.") from error
+    if not amount.is_finite() or amount < 0:
+        raise ValueError("Diskon penjualan harus bernilai nol atau positif.")
+    return amount
+
+
 def transaction_lines(
     total: float,
     method: str,
@@ -1463,11 +1533,19 @@ def checkout_journal_lines(
     method: str,
     items: list[dict],
     payments: Optional[Sequence[dict]] = None,
+    discount: Any = 0,
 ) -> list[JournalLine]:
     """Baris jurnal checkout lengkap (pendapatan multi-metode + HPP).
 
     Dipakai oleh ``general_ledger`` (via ``post_finance_source``) sekaligus
     ``jurnal_entries`` agar kedua catatan selalu identik.
+
+    ``discount`` adalah total diskon penjualan (promo + tukar poin). Bila ada,
+    ditambahkan pasangan eksplisit DEBIT ``4-40100`` (Diskon Penjualan) dan
+    KREDIT ``4-40000`` (Pendapatan) sebesar nilai diskon. Nilai ``total`` yang
+    diterima sudah bersih setelah diskon, sehingga pasangan ini membuat
+    pendapatan bruto (``4-40000``) dan potongan penjualan (``4-40100``)
+    tercatat terpisah tanpa mengubah total debit/kredit jurnal.
     """
     payment_lines = payment_journal_lines(payments or [])
     if not payment_lines:
@@ -1477,10 +1555,14 @@ def checkout_journal_lines(
             if line[1] == "asset" and line[2] > 0 and line[3] == 0
         ]
     amount, _fee = _transaction_amounts(total, 0)
+    discount_amount = _discount_amount(discount)
     lines: list[JournalLine] = []
     if amount > 0:
         lines.extend(payment_lines)
-        lines.append(("Pendapatan", "revenue", Decimal("0"), amount))
+        # Pendapatan bruto = penerimaan bersih + diskon yang mengurangi tagihan.
+        lines.append(("Pendapatan", "revenue", Decimal("0"), amount + discount_amount))
+        if discount_amount > 0:
+            lines.append((ACCOUNT_DISKON_PENJUALAN_NAME, "revenue", discount_amount, Decimal("0")))
     cost_of_goods = _money(sum(
         Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
         for item in items
@@ -1496,16 +1578,20 @@ def checkout_journal_account_codes(
     method: str,
     items: list[dict],
     payments: Optional[Sequence[dict]] = None,
+    discount: Any = 0,
 ) -> list[Optional[str]]:
     payment_codes = payment_account_codes(payments or [])
     if not payment_codes:
         fallback_codes = transaction_account_codes(total, method, [])
         payment_codes = [fallback_codes[0]] if fallback_codes[:1] in (["1-10001"], ["1-10002"]) else []
     amount, _fee = _transaction_amounts(total, 0)
+    discount_amount = _discount_amount(discount)
     codes: list[Optional[str]] = []
     if amount > 0:
         codes.extend(payment_codes)
-        codes.append("4-40000")
+        codes.append(ACCOUNT_PENDAPATAN_ID)
+        if discount_amount > 0:
+            codes.append(ACCOUNT_DISKON_PENJUALAN_ID)
     if _money(sum(
         Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
         for item in items
@@ -1531,6 +1617,7 @@ _CHECKOUT_FALLBACK_CODES = {
     "Kas Bank / QRIS": "1-10002",
     "Bank": "1-10002",
     "Pendapatan": "4-40000",
+    ACCOUNT_DISKON_PENJUALAN_NAME: ACCOUNT_DISKON_PENJUALAN_ID,
     "Beban HPP": "5-50000",
     "Persediaan bahan baku": "1-10003",
 }
@@ -1903,14 +1990,22 @@ async def post_finance_source(
         if not code and source_type == "transaction":
             # Penjualan POS tidak boleh jatuh ke akun penampung 41999.
             if account_type == "revenue" and credit > 0 and debit == 0:
-                return "4-40000"
+                return ACCOUNT_PENDAPATAN_ID
+            # Kontra pendapatan: DEBIT pada akun diskon penjualan.
+            if (
+                account_type == "revenue"
+                and debit > 0
+                and credit == 0
+                and account_name == ACCOUNT_DISKON_PENJUALAN_NAME
+            ):
+                return ACCOUNT_DISKON_PENJUALAN_ID
             if (
                 account_type == "expense"
                 and debit > 0
                 and credit == 0
                 and account_name == "Beban HPP"
             ):
-                return "5-50000"
+                return ACCOUNT_HPP_ID
         return code
 
     effective_codes = [
@@ -1960,7 +2055,8 @@ async def post_finance_source(
     account_names_by_code = {
         "1-10001": "Kas Tunai",
         "1-10002": "Kas Bank / QRIS",
-        "4-40000": "Pendapatan",
+        ACCOUNT_PENDAPATAN_ID: "Pendapatan",
+        ACCOUNT_DISKON_PENJUALAN_ID: ACCOUNT_DISKON_PENJUALAN_NAME,
     }
     rows = []
     for index, (account_name, account_type, debit, credit) in enumerate(lines):

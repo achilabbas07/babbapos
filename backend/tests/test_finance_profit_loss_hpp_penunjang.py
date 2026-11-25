@@ -82,6 +82,8 @@ def test_profit_loss_keeps_seri_8_rows_as_independent_hpp_rows_below_beban_pokok
             normalized_query = " ".join(query.lower().split())
             if "as sales_discount" in normalized_query:
                 return {"sales_discount": Decimal("0")}
+            if "as ledger_discount" in normalized_query:
+                return {"ledger_discount": Decimal("0")}
             return {"hpp": Decimal("200.00"), "missing_products": 0}
 
     report = asyncio.run(
@@ -134,6 +136,8 @@ def test_profit_loss_does_not_double_add_variant_hpp_on_top_of_product_hpp():
             normalized_query = " ".join(query.lower().split())
             if "as sales_discount" in normalized_query:
                 return {"sales_discount": Decimal("0")}
+            if "as ledger_discount" in normalized_query:
+                return {"ledger_discount": Decimal("0")}
             # Formula baru: snapshot HPP dipakai lebih dulu, lalu varian ATAU
             # produk — tidak pernah keduanya dijumlahkan.
             assert "nullif(sold.snapshot_hpp, 0)" in normalized_query

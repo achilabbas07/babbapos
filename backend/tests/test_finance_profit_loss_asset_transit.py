@@ -37,6 +37,8 @@ def test_profit_loss_sql_excludes_asset_transit_accounts_from_operating_expense(
             normalized_query = " ".join(query.lower().split())
             if "as sales_discount" in normalized_query:
                 return {"sales_discount": Decimal("0")}
+            if "as ledger_discount" in normalized_query:
+                return {"ledger_discount": Decimal("0")}
             return {"hpp": Decimal("0"), "missing_products": 0}
 
     report = asyncio.run(
@@ -84,6 +86,8 @@ def test_profit_loss_never_reports_1_10004_rek_belanja_as_operating_expense():
             normalized_query = " ".join(query.lower().split())
             if "as sales_discount" in normalized_query:
                 return {"sales_discount": Decimal("0")}
+            if "as ledger_discount" in normalized_query:
+                return {"ledger_discount": Decimal("0")}
             return {"hpp": Decimal("0"), "missing_products": 0}
 
     report = asyncio.run(
