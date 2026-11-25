@@ -700,8 +700,11 @@ async def delete_customer(cid: str, _: User = Depends(ADMIN)):
 
 @api.get("/customers/{cid}/purchases")
 async def customer_purchases(cid: str, start: Optional[str] = None, end: Optional[str] = None,
-                             _: User = Depends(ANY)):
+                             _: User = Depends(ADMIN)):
     """Riwayat transaksi pelanggan (BACA-SAJA) untuk halaman Pelanggan.
+
+    AKSES KHUSUS ADMIN: endpoint ini menampilkan riwayat transaksi pelanggan
+    sehingga dibatasi ``Depends(ADMIN)`` -- kasir/waiter menerima HTTP 403.
 
     Mengembalikan tepat tujuh informasi tampilan: tanggal pembayaran (kalender
     WITA), waktu order (WITA), waktu bayar (WITA), nama/nomor meja, total item

@@ -13,6 +13,9 @@ Vercel `api/index.py`:
   terbalik dengan HTTP 400.
 - Penandaan void membaca `void_logs` secara best-effort (tanpa kolom tautan
   baru) dan TIDAK pernah menghapus riwayat pelanggan.
+- AKSES KHUSUS ADMIN: endpoint dibatasi `Depends(ADMIN)` sehingga kasir/waiter
+    menerima HTTP 403. Diuji lewat `dependency_overrides` (izin admin lolos,
+    non-admin ditolak) dan inspeksi AST sumber di kedua entrypoint.
 - Endpoint bersifat baca-saja: tidak ada satu pun panggilan tulis (`insert_*`,
   `update_*`, `delete_*`) di dalamnya.
 """
@@ -24,6 +27,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+import core
 import server
 
 MIRROR = Path(__file__).resolve().parents[2] / "api" / "index.py"
@@ -312,3 +316,49 @@ def test_no_schema_migration_introduced():
         assert "customer_purchase" not in path.read_text(encoding="utf-8").lower(), (
             f"Opsi A tidak boleh menambah migrasi baru: {path.name}"
         )
+
+
+# ---------------------------------------------------------------------------
+# AKSES KHUSUS ADMIN (kasir & waiter ditolak, admin lolos)
+# ---------------------------------------------------------------------------
+def _invoke_guard(role):
+    """Jalankan dependency `require_roles("admin")` persis seperti FastAPI.
+
+    `get_current_user` (parameter default) diisi langsung dengan user ber-role
+    tertentu sehingga hasilnya mencerminkan guard yang benar-benar dipasang di
+    endpoint (`Depends(ADMIN)`), tanpa butuh server/DB/httpx."""
+    guard = core.require_roles("admin")
+    return asyncio.run(guard(core.User(id=f"U-{role}", name=f"Uji {role}", role=role)))
+
+
+@pytest.mark.parametrize("role", ["kasir", "waiter"])
+def test_guard_rejects_non_admin_roles(role):
+    with pytest.raises(HTTPException) as exc:
+        _invoke_guard(role)
+    assert exc.value.status_code == 403
+
+
+def test_guard_allows_admin_role():
+    user = _invoke_guard("admin")
+    assert user.role == "admin"
+
+
+def test_endpoint_dependency_is_admin_only():
+    """Guard endpoint harus `require_roles("admin")` -- bukan ANY/CUSTOMER_STAFF."""
+    signature = inspect.signature(server.customer_purchases)
+    dependency = signature.parameters["_"].default.dependency
+    for role in ("admin",):
+        assert asyncio.run(dependency(core.User(id="U", name="U", role=role))).role == role
+    for role in ("kasir", "waiter"):
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(dependency(core.User(id="U", name="U", role=role)))
+        assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("source", [SERVER, MIRROR])
+def test_guard_is_depends_admin_in_both_entrypoints(source):
+    text = source.read_text(encoding="utf-8")
+    start = text.index("@api.get(\"/customers/{cid}/purchases\")")
+    header = text[start:start + 400]
+    assert "Depends(ADMIN)" in header, f"{source.name}: guard riwayat pelanggan bukan ADMIN"
+    assert "Depends(ANY)" not in header, f"{source.name}: riwayat pelanggan tidak boleh ANY"

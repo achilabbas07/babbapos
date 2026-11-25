@@ -22,6 +22,8 @@ const FIELDS = [
 
 export default function Customers() {
   const { user } = useAuth();
+  // Riwayat transaksi pelanggan bersifat ADMIN-ONLY (tombol & panel).
+  const isAdmin = user.role === "admin";
   const [list, setList] = useState([]);
   const [q, setQ] = useState("");
   const [dialog, setDialog] = useState(null);
@@ -76,7 +78,7 @@ export default function Customers() {
                 <TableCell data-testid={`customer-spent-${c.id}`} className="text-right font-mono">{rp(c.total_spent)}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <button data-testid={`customer-history-${c.id}`} onClick={() => setSelected(c)} title="Riwayat transaksi" className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground hover:text-foreground"><History className="h-4 w-4" /></button>
+                    {isAdmin && <button data-testid={`customer-history-${c.id}`} onClick={() => setSelected(c)} title="Riwayat transaksi" className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground hover:text-foreground"><History className="h-4 w-4" /></button>}
                     <button data-testid={`customer-edit-${c.id}`} onClick={() => setDialog(c)} className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground hover:text-foreground"><Pencil className="h-4 w-4" /></button>
                     {user.role === "admin" && <ConfirmDelete testid={`customer-delete-${c.id}`} title={`Hapus ${c.name}?`} description="Riwayat transaksi tetap tersimpan." onConfirm={async () => { await api.delete(`/customers/${c.id}`); load(); }} />}
                   </div>
@@ -86,17 +88,17 @@ export default function Customers() {
           </TableBody>
         </Table>
       </div>
-      <div className="flex min-w-0 flex-col gap-6">
-        {selected ? (
+      <TopCustomers refreshKey={list} />
+      </div>
+      {isAdmin && (selected ? (
+        <div className="mt-6">
           <CustomerPurchaseHistory customer={selected} onClose={() => setSelected(null)} />
-        ) : (
-          <div data-testid="customer-history-hint" className="rounded-2xl border border-dashed border-border px-5 py-6 text-sm text-muted-foreground">
-            Pilih <History className="inline h-4 w-4" /> pada baris pelanggan untuk melihat riwayat transaksinya.
-          </div>
-        )}
-        <TopCustomers refreshKey={list} />
-      </div>
-      </div>
+        </div>
+      ) : (
+        <div data-testid="customer-history-hint" className="mt-6 rounded-2xl border border-dashed border-border px-5 py-6 text-sm text-muted-foreground">
+          Pilih <History className="inline h-4 w-4" /> pada baris pelanggan untuk melihat riwayat transaksinya.
+        </div>
+      ))}
       <FormDialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} title={dialog?.id ? "Edit Pelanggan" : "Tambah Pelanggan"} fields={FIELDS} initial={dialog} onSubmit={save} testid="customer-form" />
     </div>
   );

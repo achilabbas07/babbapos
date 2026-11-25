@@ -1,4 +1,5 @@
 import {
+  canViewCustomerPurchases,
   customerPurchaseCellValue,
   customerPurchaseColumns,
   customerPurchasesCacheKey,
@@ -38,6 +39,20 @@ describe("customerPurchasesCacheKey", () => {
     expect(customerPurchasesCacheKey("CUST-1")).toBe("customers/purchases/CUST-1");
     expect(customerPurchasesCacheKey("CUST-1", { start: "2026-11-01", end: "" }))
       .toBe("customers/purchases/CUST-1?start=2026-11-01");
+  });
+});
+
+describe("canViewCustomerPurchases (admin-only)", () => {
+  it("allows only the admin role", () => {
+    expect(canViewCustomerPurchases({ role: "admin" })).toBe(true);
+    expect(canViewCustomerPurchases({ role: "kasir" })).toBe(false);
+    expect(canViewCustomerPurchases({ role: "waiter" })).toBe(false);
+  });
+
+  it("denies when there is no user", () => {
+    expect(canViewCustomerPurchases(null)).toBe(false);
+    expect(canViewCustomerPurchases(undefined)).toBe(false);
+    expect(canViewCustomerPurchases({})).toBe(false);
   });
 });
 

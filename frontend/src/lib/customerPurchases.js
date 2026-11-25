@@ -48,6 +48,15 @@ export const customerPurchasesCacheKey = (customerId, params = {}) =>
   rangeCacheKey(`${CACHE_KEYS.CUSTOMER_PURCHASES}/${customerId}`, params);
 
 /**
+ * Riwayat transaksi pelanggan bersifat ADMIN-ONLY.
+ *
+ * Dipakai bersama oleh tombol pemicu dan panel supaya non-Admin (kasir/waiter)
+ * tidak bisa melihat atau membuka riwayat transaksi di UI. Ini hanya gerbang
+ * tampilan; penegakan sebenarnya tetap di backend (`Depends(ADMIN)`).
+ */
+export const canViewCustomerPurchases = (user) => user?.role === "admin";
+
+/**
  * Normalisasi payload riwayat transaksi pelanggan menjadi baris siap tampil.
  * Field yang hilang tidak boleh membuat panel rusak — selalu ada fallback "-".
  */

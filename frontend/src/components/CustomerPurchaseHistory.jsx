@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { History, Search } from "lucide-react";
 import { api, errMsg, rp } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { loadWithCache } from "@/lib/offlineRead";
 import CachedDataNotice from "@/components/CachedDataNotice";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import { Empty } from "@/components/PageHeader";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  canViewCustomerPurchases,
   customerPurchaseCellValue,
   customerPurchaseColumns,
   customerPurchasesCacheKey,
@@ -24,8 +26,13 @@ import {
  * Menampilkan tepat 7 informasi: Tanggal, Waktu Order, Waktu Bayar, No. Meja,
  * Total Item, Jumlah, dan Pelayan. Tidak ada aksi tulis apa pun di panel ini
  * sehingga alur transaksi, harga, stok, dan jurnal tidak tersentuh.
+ *
+ * ADMIN-ONLY: panel ini hanya dirender untuk peran admin. Non-Admin tidak
+ * melihat panel maupun memuat data (penegakan sebenarnya di backend).
  */
 export default function CustomerPurchaseHistory({ customer, onClose }) {
+  const { user } = useAuth();
+  const allowed = canViewCustomerPurchases(user);
   const [range, setRange] = useState({ from: "", to: "" });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -36,7 +43,7 @@ export default function CustomerPurchaseHistory({ customer, onClose }) {
   const cid = customer?.id;
 
   const load = useCallback(async () => {
-    if (!cid) return;
+    if (!cid || !allowed) return;
     const params = {};
     if (range.from) params.start = range.from;
     if (range.to) params.end = range.to;
@@ -55,11 +62,12 @@ export default function CustomerPurchaseHistory({ customer, onClose }) {
     setFromCache(result.fromCache);
     setCachedAt(result.updatedAt);
     setLoading(false);
-  }, [cid, range]);
+  }, [cid, range, allowed]);
 
   useEffect(() => { load(); }, [load]);
 
-  if (!customer) return null;
+  // ADMIN-ONLY: non-Admin tidak boleh melihat riwayat transaksi pelanggan.
+  if (!customer || !allowed) return null;
 
   const shown = q
     ? rows.filter((r) => `${r.tanggal} ${r.waktuOrder} ${r.waktuBayar} ${r.meja} ${r.pelayan}`.toLowerCase().includes(q.toLowerCase()))
@@ -98,7 +106,7 @@ export default function CustomerPurchaseHistory({ customer, onClose }) {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Cari meja / pelayan / tanggal"
-          className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm outline-none focus:border-primary"
+          className="h-11 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-base outline-none focus:border-primary"
         />
       </div>
 
@@ -115,12 +123,12 @@ export default function CustomerPurchaseHistory({ customer, onClose }) {
       {!loading && shown.length === 0 ? (
         <Empty testid="customer-history-empty" text="Belum ada transaksi pada rentang ini." />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <Table>
+        <div className="w-full overflow-x-auto rounded-xl border border-border">
+          <Table className="w-full text-base">
             <TableHeader>
               <TableRow>
                 {columns.map((c) => (
-                  <TableHead key={c.key} className={c.align === "right" ? "text-right" : ""}>{c.label}</TableHead>
+                  <TableHead key={c.key} className={`whitespace-nowrap px-4 py-3 text-sm ${c.align === "right" ? "text-right" : ""}`}>{c.label}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -131,7 +139,7 @@ export default function CustomerPurchaseHistory({ customer, onClose }) {
                     <TableCell
                       key={c.key}
                       data-testid={`customer-history-${r.key}-${c.key}`}
-                      className={`whitespace-nowrap text-sm ${c.align === "right" ? "text-right font-mono" : ""}`}
+                      className={`whitespace-nowrap px-4 py-3 text-base ${c.align === "right" ? "text-right font-mono" : ""}`}
                     >
                       {customerPurchaseCellValue(c.key, r, rp)}
                       {c.key === "tanggal" && r.void && (
@@ -146,9 +154,9 @@ export default function CustomerPurchaseHistory({ customer, onClose }) {
         </div>
       )}
 
-      <div data-testid="customer-history-summary" className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div data-testid="customer-history-summary" className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
         <span>{summary.count} transaksi &middot; {summary.totalItem} item</span>
-        <span className="font-mono text-sm font-semibold text-foreground">{rp(summary.total)}</span>
+        <span className="font-mono text-base font-semibold text-foreground">{rp(summary.total)}</span>
       </div>
     </div>
   );
