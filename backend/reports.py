@@ -16,6 +16,9 @@ pada saat checkout beserta jumlah poin dan nilai diskonnya.
 Sub-laporan keempat: *Analisa Perilaku Pelanggan* — agregasi kanal order,
 metode pembayaran, ukuran keranjang, jam sibuk/sepian, dan wawasan aturan
 (rule-based) untuk rentang tanggal terpilih.
+
+Sub-laporan kelima: *Laporan Promo* — riwayat transaksi yang memakai kode promo
+beserta nilai diskon promonya dan rekap per kode promo pada rentang tanggal.
 """
 
 from datetime import date, datetime, timezone
@@ -231,6 +234,85 @@ async def point_reward_usage_report(start: str, end: str, _: User = Depends(ADMI
         "total_redemptions": len(rows),
         "total_points_redeemed": int(total_points) if float(total_points).is_integer() else total_points,
         "total_discount_value": round(total_discount, 2),
+        "items": rows,
+    }
+
+
+@router.get("/reports/promo-usage")
+async def promo_usage_report(start: str, end: str, _: User = Depends(ADMIN)):
+    """Riwayat pemakaian PROMO (kode promo) pada rentang tanggal (WITA).
+
+    Tanggal ``start``/``end`` adalah tanggal kalender Asia/Makassar (``YYYY-MM-DD``).
+    Baca-saja: hanya membaca kolom promo pada ``transactions``
+    (``promoCode`` / ``promoDiscount``) sehingga tidak menyentuh logika
+    transaksional, pembayaran, cetak struk, maupun alur POS lainnya.
+
+    Mengembalikan daftar transaksi yang memakai promo (``promoDiscount`` > 0)
+    beserta kode promo, nilai diskon, nilai transaksi terkait, pelanggan, dan
+    kasir, plus ringkasan:
+    - ``total_transactions``: jumlah transaksi ber-promo,
+    - ``total_promo_discount``: total rupiah diskon promo,
+    - ``total_transaction_value``: total nilai transaksi ber-promo (``total``),
+    - ``promos``: rekap per kode promo (jumlah transaksi, diskon, nilai transaksi),
+    - ``items``: rincian transaksi (terbaru lebih dulu).
+    """
+    # Batas tanggal memakai kalender WITA supaya transaksi dini hari tidak jatuh
+    # ke hari sebelumnya -- pola yang sama dipakai /reports/point-reward-usage.
+    query = date_range_query(start, end)
+    # Filter promo dilakukan di Python agar payload ``transactions`` tetap
+    # dibaca lewat abstraksi yang sama dengan laporan operasional lain.
+    txs = await db.transactions.find(query).sort("date", -1).to_list(None)
+
+    rows = []
+    promo_map = {}
+    total_discount = 0.0
+    total_value = 0.0
+    for t in txs:
+        promo_discount = float(t.get("promoDiscount") or 0)
+        if promo_discount <= 0:
+            continue
+        ts = t.get("date")
+        code = (t.get("promoCode") or "").strip()
+        total = float(t.get("total") or 0)
+        rows.append({
+            "transaction_id": t.get("_id"),
+            "date": to_local_date(ts).isoformat() if ts else "",
+            "timestamp": ts,
+            "promo_code": code,
+            "promo_discount": round(promo_discount, 2),
+            "subtotal": round(float(t.get("subtotal") or 0), 2),
+            "discount": round(float(t.get("discount") or 0), 2),
+            "total": round(total, 2),
+            "customer_name": (t.get("customerName") or "").strip(),
+            "cashier": (t.get("userName") or "").strip(),
+        })
+        # Rekap per kode promo (kode kosong dikelompokkan sebagai "-").
+        bucket_key = code or "-"
+        bucket = promo_map.setdefault(bucket_key, {"code": bucket_key, "transactions": 0, "promo_discount": 0.0, "transaction_value": 0.0})
+        bucket["transactions"] += 1
+        bucket["promo_discount"] += promo_discount
+        bucket["transaction_value"] += total
+        total_discount += promo_discount
+        total_value += total
+
+    promos = [
+        {
+            "code": b["code"],
+            "transactions": b["transactions"],
+            "promo_discount": round(b["promo_discount"], 2),
+            "transaction_value": round(b["transaction_value"], 2),
+        }
+        for b in sorted(promo_map.values(), key=lambda r: (-r["promo_discount"], r["code"]))
+    ]
+
+    return {
+        "start": start,
+        "end": end,
+        "total_transactions": len(rows),
+        "total_promo_discount": round(total_discount, 2),
+        "total_transaction_value": round(total_value, 2),
+        "promo_count": len(promos),
+        "promos": promos,
         "items": rows,
     }
 

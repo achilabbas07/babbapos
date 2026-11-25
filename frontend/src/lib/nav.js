@@ -1,5 +1,5 @@
 import {
-  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart, Ban, Gift,
+  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart, Ban, Gift, TicketPercent,
 } from "lucide-react";
 
 const ALL = ["admin", "kasir", "waiter"];
@@ -87,6 +87,14 @@ export const OPERATIONAL_NAV = [
     roles: ADMIN,
     group: OPERATIONAL_REPORTS_GROUP_ID,
   },
+  {
+    to: "/reports/promo",
+    label: "Laporan Promo",
+    shortLabel: "Laporan Promo",
+    icon: TicketPercent,
+    roles: ADMIN,
+    group: OPERATIONAL_REPORTS_GROUP_ID,
+  },
 ];
 
 // Lookup so the grouped sidebar reuses the exact same objects (path, label, icon, roles)
@@ -112,6 +120,7 @@ export const OPERATIONAL_REPORTS_NAV_GROUP = {
     "/reports/waiter-sales-target",
     "/reports/point-reward",
     "/reports/customer-behavior",
+    "/reports/promo",
     "/transactions",
     "/shifts",
   ),
