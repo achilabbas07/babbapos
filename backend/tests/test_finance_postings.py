@@ -246,6 +246,27 @@ def test_vercel_mirror_endpoints_match_server_implementation():
         )
 
 
+def test_checkout_journal_gate_allows_discount_only_transactions_in_both_sources():
+    """Regresi: penjurnalan checkout harus tetap berjalan saat `total == 0`
+    namun ada diskon (promo komplimen `COMP`), baik di `backend/server.py`
+    maupun mirror Vercel `api/index.py`, dengan gerbang yang sama.
+    """
+    import inspect
+
+    import server
+
+    server_source = inspect.getsource(server.create_transaction)
+    mirror_source = _mirror_source()
+    gate = "if trx.total > 0 or discount_total > 0:"
+    assert gate in server_source
+    assert gate in mirror_source
+    assert "if trx.total > 0:" not in server_source
+    assert "if trx.total > 0:" not in mirror_source
+    # Mirror Vercel harus ikut menulis `jurnal_entries` (paritas server).
+    assert "post_checkout_journal_entries(" in mirror_source
+    assert "legacy_checkout_journal_entries(" in mirror_source
+
+
 def test_check_pin_does_not_touch_dropped_login_attempts_table():
     """Regresi: tabel `login_attempts` sudah dihapus, sehingga `check_pin`
     tidak boleh lagi mengaksesnya (memicu KeyError 500 saat login).

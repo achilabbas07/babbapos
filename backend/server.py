@@ -1544,7 +1544,10 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         async with db.pool.acquire() as conn:
             async with conn.transaction():
                 await db.transactions.insert_one(trx.to_mongo(), connection=conn)
-                if trx.total > 0:
+                # Gerbang dipisah seperti di `finance.py`: transaksi diskon penuh
+                # (total == 0, mis. promo komplimen `COMP`) tetap menjurnal
+                # DEBIT `4-40100` + KREDIT `4-40000` tanpa baris kas/bank.
+                if trx.total > 0 or discount_total > 0:
                     await post_checkout_journal_entries(
                         conn,
                         {

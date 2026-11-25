@@ -33,8 +33,10 @@ from finance import (
     get_laporan_arus_kas,
     get_profit_and_loss_report,
     get_recent_finance_transactions,
+    legacy_checkout_journal_entries,
     normalize_checkout_payments,
     post_cash_expense_journal,
+    post_checkout_journal_entries,
     post_debt_payment_journal,
     post_finance_source,
     post_purchase_journal,
@@ -1109,6 +1111,21 @@ async def create_transaction(body: TransactionIn, request: Request, user: User =
         async with db.pool.acquire() as conn:
             async with conn.transaction():
                 await db.transactions.insert_one(trx.to_mongo(), connection=conn)
+                # Paritas dengan `backend/server.py`: kaki `jurnal_entries` (legacy)
+                # ikut ditulis agar Vercel mirror tidak kehilangan jurnal penjualan.
+                # Gerbang dipisah seperti di `finance.py`: transaksi diskon penuh
+                # (total == 0, mis. promo komplimen `COMP`) tetap menjurnal
+                # DEBIT `4-40100` + KREDIT `4-40000` tanpa baris kas/bank.
+                if trx.total > 0 or discount_total > 0:
+                    await post_checkout_journal_entries(
+                        conn,
+                        {
+                            "transaction_id": trx.id,
+                            "payment_method": trx.method,
+                            "total": trx.total,
+                            "journal_entries": legacy_checkout_journal_entries(checkout_lines, checkout_codes),
+                        },
+                    )
                 await post_finance_source(
                     conn,
                     "transaction",

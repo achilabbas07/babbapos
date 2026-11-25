@@ -1546,6 +1546,13 @@ def checkout_journal_lines(
     diterima sudah bersih setelah diskon, sehingga pasangan ini membuat
     pendapatan bruto (``4-40000``) dan potongan penjualan (``4-40100``)
     tercatat terpisah tanpa mengubah total debit/kredit jurnal.
+
+    Gerbang nilai dipisah: kaki pembayaran (kas/bank) hanya dibuat saat
+    ``amount > 0``, sedangkan kaki pendapatan + diskon dibuat saat
+    ``amount > 0`` ATAU ``discount > 0``. Dengan begitu transaksi diskon penuh
+    (``total == 0``, mis. promo komplimen ``COMP``) tetap mencatat
+    DEBIT ``4-40100`` dan KREDIT ``4-40000`` secara seimbang tanpa baris
+    kas/bank.
     """
     payment_lines = payment_journal_lines(payments or [])
     if not payment_lines:
@@ -1559,6 +1566,10 @@ def checkout_journal_lines(
     lines: list[JournalLine] = []
     if amount > 0:
         lines.extend(payment_lines)
+    # Kaki pendapatan + diskon: saat total == 0 namun ada diskon (mis. promo
+    # komplimen 100%), pasangan kontra pendapatan tetap dicatat agar seimbang
+    # dan tidak menyentuh kas/bank.
+    if amount > 0 or discount_amount > 0:
         # Pendapatan bruto = penerimaan bersih + diskon yang mengurangi tagihan.
         lines.append(("Pendapatan", "revenue", Decimal("0"), amount + discount_amount))
         if discount_amount > 0:
@@ -1589,6 +1600,9 @@ def checkout_journal_account_codes(
     codes: list[Optional[str]] = []
     if amount > 0:
         codes.extend(payment_codes)
+    # Kode akun pendapatan + diskon mengikuti aturan yang sama dengan
+    # `checkout_journal_lines` agar baris ledger tidak pernah berkode NULL.
+    if amount > 0 or discount_amount > 0:
         codes.append(ACCOUNT_PENDAPATAN_ID)
         if discount_amount > 0:
             codes.append(ACCOUNT_DISKON_PENJUALAN_ID)

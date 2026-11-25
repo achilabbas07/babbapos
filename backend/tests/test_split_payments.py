@@ -210,6 +210,76 @@ def test_checkout_discount_rejects_negative_or_invalid_amounts():
         checkout_journal_lines(97000, "Cash", [], None, "bukan angka")
 
 
+# --- checkout total 0 dengan diskon penuh (promo komplimen `COMP`) ---------------
+
+
+def test_zero_total_full_discount_records_only_contra_revenue_pair():
+    # Komplimen 100%: total bersih 0, tetapi diskon 9.000 tetap dijurnal
+    # DEBIT 4-40100 + KREDIT 4-40000 tanpa menyentuh kas/bank.
+    lines = checkout_journal_lines(0, "Cash", [], None, 9000)
+    assert lines == [
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("9000.00")),
+        ("Diskon Penjualan", "revenue", Decimal("9000.00"), Decimal("0")),
+    ]
+    debit, credit = _balance(lines)
+    assert debit == credit == Decimal("9000.00")
+    assert checkout_journal_account_codes(0, "Cash", [], None, 9000) == ["4-40000", "4-40100"]
+
+
+def test_zero_total_full_discount_keeps_hpp_pair_and_no_cash_leg():
+    items = [{"hpp": 1750, "qty": 1}]
+    lines = checkout_journal_lines(0, "Cash", items, None, 9000)
+    assert lines == [
+        ("Pendapatan", "revenue", Decimal("0"), Decimal("9000.00")),
+        ("Diskon Penjualan", "revenue", Decimal("9000.00"), Decimal("0")),
+        ("Beban HPP", "expense", Decimal("1750.00"), Decimal("0")),
+        ("Persediaan bahan baku", "asset", Decimal("0"), Decimal("1750.00")),
+    ]
+    # Tidak ada baris kas/bank sama sekali.
+    assert all(line[0] not in {"Kas Tunai", "Kas Bank / QRIS"} for line in lines)
+    debit, credit = _balance(lines)
+    assert debit == credit == Decimal("10750.00")
+    assert checkout_journal_account_codes(0, "Cash", items, None, 9000) == [
+        "4-40000", "4-40100", "5-50000", "1-10003",
+    ]
+
+
+def test_zero_total_without_discount_produces_no_revenue_legs():
+    # Total 0 dan tanpa diskon tetap tidak menghasilkan jurnal pendapatan.
+    assert checkout_journal_lines(0, "Cash", [], None, 0) == []
+    assert checkout_journal_account_codes(0, "Cash", [], None, 0) == []
+
+
+def test_zero_total_full_discount_legacy_entries_are_balanced_without_cash():
+    lines = checkout_journal_lines(0, "Cash", [], None, 9000)
+    codes = checkout_journal_account_codes(0, "Cash", [], None, 9000)
+    entries = legacy_checkout_journal_entries(lines, codes)
+    assert entries == [
+        ("4-40000", "KREDIT", 9000.0),
+        ("4-40100", "DEBIT", 9000.0),
+    ]
+    debit = sum(amount for _code, position, amount in entries if position == "DEBIT")
+    credit = sum(amount for _code, position, amount in entries if position == "KREDIT")
+    assert debit == credit == 9000.0
+
+
+def test_zero_total_full_discount_posts_legacy_jurnal_entries():
+    lines = checkout_journal_lines(0, "Cash", [], None, 9000)
+    codes = checkout_journal_account_codes(0, "Cash", [], None, 9000)
+    connection = FakeConnection()
+    asyncio.run(post_checkout_journal_entries(connection, {
+        "transaction_id": "TRX-COMP",
+        "payment_method": "Cash",
+        "total": 0,
+        "journal_entries": legacy_checkout_journal_entries(lines, codes),
+    }))
+    assert "insert into public.jurnal_entries" in connection.query
+    assert connection.rows == [
+        ("TRX-COMP", "4-40000", "KREDIT", 9000.0),
+        ("TRX-COMP", "4-40100", "DEBIT", 9000.0),
+    ]
+
+
 # --- primary_checkout_method -----------------------------------------------------
 
 
