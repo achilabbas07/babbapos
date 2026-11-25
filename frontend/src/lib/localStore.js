@@ -28,6 +28,7 @@ export const CACHE_KEYS = Object.freeze({
   TABLES: "tables",
   CUSTOMERS: "customers",
   CUSTOMERS_TOP: "customers/top",
+  CUSTOMER_PURCHASES: "customers/purchases",
   WAITERS: "waiters",
   USERS: "users",
   INVENTORY: "inventory",

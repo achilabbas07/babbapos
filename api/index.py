@@ -698,6 +698,77 @@ async def delete_customer(cid: str, _: User = Depends(ADMIN)):
     return {"ok": True}
 
 
+@api.get("/customers/{cid}/purchases")
+async def customer_purchases(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+                             _: User = Depends(ANY)):
+    """Riwayat transaksi pelanggan (BACA-SAJA) untuk halaman Pelanggan.
+
+    Mengembalikan tepat tujuh informasi tampilan: tanggal pembayaran (kalender
+    WITA), waktu order (WITA), waktu bayar (WITA), nama/nomor meja, total item
+    (jumlah ``qty`` pada ``items_json``), nominal ``total``, dan nama pelayan.
+    Tidak mengubah skema, data, harga, stok, maupun jurnal -- hanya membaca
+    ``transactions`` beserta referensi ``tables``/``users``.
+
+    Catatan void: ``void_logs`` hanya menyimpan ``billId`` open bill sehingga
+    TIDAK ada tautan langsung ke ``transactions``. Penandaan void di sini
+    bersifat best-effort (kecocokan meja + nilai + tanggal WITA) dan transaksi
+    tetap ditampilkan supaya riwayat pelanggan tidak pernah hilang.
+    """
+    await get_or_404("customers", cid, "Pelanggan")
+    query = {"customerId": cid}
+    query.update(date_range_query(start, end))
+    docs = await db.transactions.find(query).sort("date", -1).to_list(1000)
+
+    table_ids = list({d.get("tableId") for d in docs if d.get("tableId")})
+    table_names = {}
+    if table_ids:
+        for t in await db.tables.find({"_id": {"$in": table_ids}}).to_list(None):
+            table_names[t["_id"]] = t.get("name") or ""
+
+    waiter_ids = list({d.get("waiterId") for d in docs if d.get("waiterId")})
+    waiter_names = {}
+    if waiter_ids:
+        for u in await db.users.find({"_id": {"$in": waiter_ids}}).to_list(None):
+            waiter_names[u["_id"]] = u.get("name") or ""
+
+    void_keys = set()
+    if docs:
+        local_dates = sorted({to_local_date(d["date"]).isoformat() for d in docs if d.get("date")})
+        if local_dates:
+            void_query = date_range_query(start, end, field="timestamp") or date_range_query(
+                local_dates[0], local_dates[-1], field="timestamp")
+            for v in await db.void_logs.find(void_query).to_list(None):
+                if v.get("timestamp"):
+                    void_keys.add((
+                        v.get("tableId"),
+                        v.get("total"),
+                        sum(int(i.get("qty") or 0) for i in (v.get("items_json") or [])),
+                        to_local_date(v["timestamp"]).isoformat(),
+                    ))
+
+    rows = []
+    for d in docs:
+        table_name = table_names.get(d.get("tableId")) or (d.get("tableName") or "")
+        waiter_name = waiter_names.get(d.get("waiterId")) or (d.get("waiterName") or "")
+        if not waiter_name:
+            # Fallback: pelayan per baris item (identitas tersimpan per item).
+            waiter_name = next((i.get("waiterName") for i in (d.get("items_json") or []) if i.get("waiterName")), "")
+        tanggal = to_local_date(d["date"]).isoformat() if d.get("date") else ""
+        total_item = sum(int(i.get("qty") or 0) for i in (d.get("items_json") or []))
+        rows.append({
+            "id": d["_id"],
+            "tanggal": tanggal,
+            "waktuOrder": to_local_iso(d["orderTime"]) if d.get("orderTime") else (to_local_iso(d["date"]) if d.get("date") else ""),
+            "waktuBayar": to_local_iso(d["date"]) if d.get("date") else "",
+            "meja": table_name or "-",
+            "totalItem": total_item,
+            "jumlah": d.get("total") or 0,
+            "pelayan": waiter_name or "-",
+            "void": (d.get("tableId"), d.get("total"), total_item, tanggal) in void_keys,
+        })
+    return rows
+
+
 # ---------- Open Bills ----------
 async def compose_bill(body: OpenBillIn, user: User, bill_id: str, timestamp: str) -> OpenBill:
     if body.type in DIRECT_PAY_TYPES:
