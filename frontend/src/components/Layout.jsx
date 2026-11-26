@@ -1,11 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { ChevronDown, LogOut, Maximize, Minimize, Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
 import { toast } from "sonner";
 import { BrandLogo } from "@/components/BrandLogo";
-import { NAV_GROUPS, OPERATIONAL_REPORTS_GROUP_ID, filterNavItemsByRole } from "@/lib/nav";
+import {
+  NAV_GROUPS,
+  OPERATIONAL_REPORTS_GROUP_ID,
+  OWNER_MODE_GROUPS,
+  filterNavItemsByRole,
+  filterOwnerModeGroups,
+} from "@/lib/nav";
+import { isOwnerAccount, isOwnerMode } from "@/lib/appMode";
 import { ROLE_LABEL } from "@/lib/api";
 import { ShiftGate } from "@/components/ShiftGate";
 import { PrinterMappingDialog } from "@/components/settings/PrinterMappingDialog";
@@ -269,6 +276,10 @@ export default function Layout() {
   const [openNested, setOpenNested] = useState(readOpenNested);
   const [printerOpen, setPrinterOpen] = useState(false);
   const { count: openBillCount } = useOpenBillCount(Boolean(user));
+  // Mode Owner (APK pemilik): sidebar diganti daftar baca-saja sehingga tidak ada
+  // satu pun menu yang bisa memutasi data (kasir, meja, open bill, void, opname,
+  // pengeluaran, jurnal, pengguna, dll.). Build operasional tidak terpengaruh.
+  const ownerMode = isOwnerMode() && isOwnerAccount(user);
 
   // Sinkronkan antrean transaksi offline begitu kembali online / saat masuk
   // aplikasi dalam kondisi online. Murni efek samping latar; tidak menyentuh
@@ -279,8 +290,13 @@ export default function Layout() {
   // menampilkan jumlah bill aktif; jalur lain cukup mengembalikan 0.
   const badgeFor = (to) => (to === "/open-bills" ? openBillCount : 0);
 
-  const visibleGroups = NAV_GROUPS
-    .map((group) => ({ ...group, items: filterNavItemsByRole(group.items, user.role) }))
+  const baseGroups = useMemo(() => (ownerMode ? OWNER_MODE_GROUPS : NAV_GROUPS), [ownerMode]);
+  const roleFilteredGroups = baseGroups.map((group) => ({
+    ...group,
+    items: filterNavItemsByRole(group.items, user.role),
+  }));
+  // Mode Owner disaring sekali lagi: hanya path baca-saja yang boleh tersisa.
+  const visibleGroups = (ownerMode ? filterOwnerModeGroups(roleFilteredGroups) : roleFilteredGroups)
     .filter((group) => group.items.length > 0);
   const flatItems = visibleGroups.flatMap((group) => flattenNavItems(group.items));
 
@@ -305,21 +321,21 @@ export default function Layout() {
 
   // Keep the active route discoverable: expand its group when navigating into it.
   useEffect(() => {
-    const activeGroup = NAV_GROUPS.find(
+    const activeGroup = baseGroups.find(
       (group) => !group.alwaysOpen && flattenNavItems(group.items).some((n) => n.to === location.pathname),
     );
     if (!activeGroup) return;
     setOpenGroups((prev) => (prev[activeGroup.id] ? prev : { ...prev, [activeGroup.id]: true }));
-  }, [location.pathname]);
+  }, [location.pathname, baseGroups]);
 
   // Expand nested menu (dua tingkat) bila salah satu sub-menu-nya sedang aktif.
   useEffect(() => {
-    const activeNested = NAV_GROUPS
+    const activeNested = baseGroups
       .flatMap((group) => group.items)
       .find((node) => node.items?.some((n) => n.to === location.pathname));
     if (!activeNested) return;
     setOpenNested((prev) => (prev[activeNested.id] ? prev : { ...prev, [activeNested.id]: true }));
-  }, [location.pathname]);
+  }, [location.pathname, baseGroups]);
 
   const handleLogout = async () => {
     try {
@@ -367,15 +383,17 @@ export default function Layout() {
             <div className="flex items-center gap-3">
               <ConnectionStatus className="max-w-[7rem] sm:max-w-none" />
               <OfflineQueueBadge />
-              <button
-                data-testid="printer-settings-button"
-                type="button"
-                onClick={() => setPrinterOpen(true)}
-                title="Pengaturan Printer (Dapur & Kasir)"
-                className="grid h-10 w-10 touch-manipulation place-items-center rounded-xl border border-border text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-              >
-                <Settings className="h-4 w-4" />
-              </button>
+              {!ownerMode && (
+                <button
+                  data-testid="printer-settings-button"
+                  type="button"
+                  onClick={() => setPrinterOpen(true)}
+                  title="Pengaturan Printer (Dapur & Kasir)"
+                  className="grid h-10 w-10 touch-manipulation place-items-center rounded-xl border border-border text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+              )}
               <FullscreenButton />
               <div className="text-right leading-tight">
                 <p data-testid="header-user-name" className="text-sm font-semibold">{user.name}</p>

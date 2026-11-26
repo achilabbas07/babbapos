@@ -43,6 +43,7 @@ export const CACHE_KEYS = Object.freeze({
   TARGET_PROGRESS: "targets/progress",
   REPORTS_SUMMARY: "reports/summary",
   PROMO_REPORT: "reports/promo",
+  OWNER_DASHBOARD: "reports/owner",
   SCHEMA_COUNTS: "schema",
   COA_ACCOUNTS: "chart-of-accounts",
   OJOL_MARKUP: "ojol-markup",

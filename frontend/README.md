@@ -29,6 +29,13 @@ Your app is ready to be deployed!
 
 See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
 
+### `npm run build:owner`
+
+Builds the **Owner mode** bundle (`REACT_APP_OWNER_MODE=1`) into the same `build`
+folder. The Owner build reuses the exact same backend, database, and codebase as
+the operational app; it only restricts the UI to the read-only monitoring pages.
+See [Mode Owner (APK Pemilik)](#mode-owner-apk-pemilik) below.
+
 ### `npm run eject`
 
 **Note: this is a one-way operation. Once you `eject`, you can't go back!**
@@ -125,3 +132,109 @@ Menu keuangan hanya ditampilkan untuk role POS `admin`. Route dan endpoint keuan
 Terapkan skema akuntansi dan posting transaksi dengan menjalankan `alembic upgrade head` dari folder `backend`. Jika memakai Supabase SQL Editor, jalankan [`backend/supabase/migrate_finance_module.sql`](../backend/supabase/migrate_finance_module.sql), [`backend/supabase/migrate_finance_postings.sql`](../backend/supabase/migrate_finance_postings.sql), lalu [`backend/supabase/migrate_general_ledger_account_name_fallback.sql`](../backend/supabase/migrate_general_ledger_account_name_fallback.sql), berurutan. Migrasi posting mengisi buku besar dari transaksi penjualan, pembelian, dan pengeluaran yang sudah ada; penjualan tunai dipasangkan ke akun Kas Tunai `1-10001` dan Pendapatan `4-40000`, termasuk UUID akun dari `chart_of_accounts`. Trigger di migrasi terakhir mengisi nama akun dari kode atau ID chart of accounts jika pemanggil mengirim nilai kosong, dan memiliki fallback untuk akun kas/pendapatan POS. Jika migrasi ini sudah pernah dijalankan, jalankan ulang setelah perubahan agar fungsi trigger diperbarui. Pastikan semua kode akun yang digunakan tersedia di chart of accounts; data baru akan diposting otomatis saat transaksi disimpan. Tabel dan view keuangan menolak akses langsung dari role `anon`/`authenticated`; backend POS membaca dan menulisnya setelah validasi role admin.
 
 Jurnal harus berisi sedikitnya dua baris, setiap baris hanya debit atau kredit, dan jumlah debit harus sama dengan jumlah kredit. Dashboard kas dan neraca dapat diperbarui melalui tombol **Perbarui**; laporan laba rugi dapat diekspor sebagai Excel atau dicetak ke PDF.
+
+## Mode Owner (APK Pemilik)
+
+Mode Owner adalah varian aplikasi **baca-saja** untuk pemilik. Varian ini memakai
+**backend, database, dan basis kode yang sama** dengan aplikasi POS operasional —
+tidak ada endpoint, tabel, atau alur data baru. Yang berbeda hanyalah tampilan:
+sidebar dan rute disaring sehingga hanya halaman pantauan/laporan yang tersedia,
+dan seluruh halaman tersebut tidak memiliki aksi ubah data.
+
+### Mengaktifkan Mode Owner
+
+Mode dipilih saat **build** melalui variabel `REACT_APP_OWNER_MODE`:
+
+```dotenv
+REACT_APP_OWNER_MODE=1
+```
+
+Bila variabel ini kosong (default), aplikasi berjalan sebagai POS operasional
+seperti biasa. Penanda mode dibaca modul [`src/lib/appMode.js`](src/lib/appMode.js).
+
+Perilaku saat Mode Owner aktif (hanya bila `user.role === "admin"`):
+
+- Login langsung diarahkan ke halaman **Pantauan Pemilik** (`/owner`) **tanpa
+  dipaksa membuka shift kasir** (akun `admin` memang sudah melewati `ShiftGate`).
+- Sidebar diganti daftar baca-saja (`OWNER_MODE_GROUPS`) sehingga tidak ada menu
+  kasir, meja, open bill, pengeluaran, jurnal, pengguna, atau promo.
+- Rute di luar daftar baca-saja (`OWNER_MODE_ALLOWED_PATHS`) dialihkan kembali ke
+  `/owner`.
+- Akun non-pemilik yang masuk pada build Owner ditolak dengan layar
+  “Aplikasi ini hanya untuk Pemilik”.
+- Tombol pengaturan printer disembunyikan (tidak relevan untuk pemantauan).
+
+### Akun khusus Pemilik
+
+Akun Owner adalah akun POS biasa dengan peran **admin**, dibuat dari menu
+**Pengguna & PIN** (`POST /api/users`) memakai **nama dan PIN sendiri**, mis.
+nama `Pemilik` dan PIN 6 digit yang tidak dipakai akun lain. Tidak ada tabel atau
+alur autentikasi baru, sehingga pengecekan izin tetap konsisten dengan aplikasi
+operasional.
+
+### Bagian pantauan (baca-saja)
+
+Halaman `/owner` membaca satu endpoint agregat baca-saja
+`GET /api/reports/owner-monitor` (`backend/reports.py`) berisi lima bagian:
+
+| # | Bagian | Isi |
+|---|--------|-----|
+| 1 | **Omzet** | Total omzet, jumlah nota, total item, rata-rata per nota. Filter **Bulan** / **Tanggal**. |
+| 2 | **Total Open Bill** | Jumlah dan nilai total open bill aktif beserta daftar bill. |
+| 3 | **Stok Bahan** | Jumlah bahan, bahan menipis, nilai persediaan, dan daftar stok. |
+| 4 | **Shift Aktif** | Per pelayan: **Nama Pelayan**, **Total Item Terjual**, **Total Void**, **Penggunaan Promo**, **Redeem Point**. |
+| 5 | **Laporan Laba-Rugi** | **Total Pendapatan**, **Potongan Penjualan**, **HPP**, **Total Beban**, **Laba Bersih**. Filter **Bulan** / **Tanggal**. |
+
+Endpoint ini hanya menjalankan operasi baca (`find`) dan **tidak** menulis ke
+database; perilaku tersebut dikunci oleh [`backend/tests/test_owner_readonly.py`](../backend/tests/test_owner_readonly.py)
+dan [`src/lib/ownerData.test.js`](src/lib/ownerData.test.js).
+
+### Membangun APK Android Mode Owner
+
+APK Owner dibangun dari basis kode yang sama dan memakai backend/database yang
+sama. Langkah lengkap dari folder `frontend`:
+
+```powershell
+# 1. Build bundle Mode Owner (REACT_APP_OWNER_MODE=1)
+npm run build:owner
+
+# 2. Sinkronkan aset web + tulis nama aplikasi "Warkop Babba POS — Owner"
+#    (nama Owner DIBIARKAN tertulis di strings.xml agar APK ikut berlabel Owner)
+npm run cap:sync:owner
+
+# 3. Build APK
+cd android
+.\gradlew assembleRelease        # atau assembleDebug untuk APK uji
+
+# 4. Setelah APK Owner selesai, kembalikan nama operasional
+cd ..
+npm run cap:sync:owner -- --restore
+```
+
+Hasil APK:
+
+- Rilis: `android/app/build/outputs/apk/release/app-release-unsigned.apk`
+- Uji: `android/app/build/outputs/apk/debug/app-debug.apk`
+
+Skrip `scripts/build-owner.js` hanya menyalakan `REACT_APP_OWNER_MODE=1` di
+lingkungan build lalu memanggil `craco build`, sehingga bundle web benar-benar
+memuat Mode Owner (bukan `undefined`/`false`). Skrip `scripts/cap-sync-owner.js`
+menulis `app_name`/`title_activity_main` di
+`android/app/src/main/res/values/strings.xml` menjadi nama Owner, menjalankan
+`npx cap sync android`, dan **membiarkan nama Owner tertulis** (persisten) supaya
+APK hasil `gradlew assembleRelease` benar-benar berlabel Owner.
+
+Pilihan argumen `cap:sync:owner`:
+
+- `-- --label "Nama Lain"` → pakai nama aplikasi khusus.
+- `-- --restore` → kembalikan `strings.xml` ke nama operasional (tanpa sync).
+- `-- --temporary` → perilaku lama (nama diganti saat sync lalu dikembalikan).
+
+Agar APK Owner mudah dibedakan dari APK operasional, gunakan salah satu cara:
+
+- Nama launcher lewat label pada langkah 2 di atas, dan/atau
+- `applicationId` khusus (mis. `com.warkopbabba.pos.owner`) pada
+  `android/app/build.gradle` bila kedua APK perlu terpasang berdampingan di
+  perangkat yang sama, dan/atau
+- Naikkan `versionCode` setiap kali `versionName` berubah (sumber versi ada di
+  `android/app/build.gradle` `defaultConfig`).

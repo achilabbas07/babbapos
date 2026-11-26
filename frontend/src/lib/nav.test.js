@@ -5,10 +5,14 @@ import {
   OPERATIONAL_NAV,
   OPERATIONAL_REPORTS_GROUP_ID,
   OPERATIONAL_REPORTS_NAV_GROUP,
+  OWNER_MODE_ALLOWED_PATHS,
+  OWNER_MODE_GROUPS,
+  OWNER_NAV,
   filterNavItemsByRole,
+  filterOwnerModeGroups,
 } from "./nav";
 
-const ALL_ROUTES = [...NAV, ...FINANCE_NAV, ...OPERATIONAL_NAV];
+const ALL_ROUTES = [...NAV, ...FINANCE_NAV, ...OPERATIONAL_NAV, ...OWNER_NAV];
 
 describe("navigasi sidebar bertingkat", () => {
   it("menyusun sub-menu 'Laporan & Analisa Operasional' sesuai urutan yang diminta", () => {
@@ -90,5 +94,34 @@ describe("navigasi sidebar bertingkat", () => {
     // Kasir/waiter bukan admin: grup operasional habis difilter -> tidak dirender.
     expect(filterNavItemsByRole([OPERATIONAL_REPORTS_NAV_GROUP], "kasir")).toHaveLength(0);
     expect(filterNavItemsByRole([OPERATIONAL_REPORTS_NAV_GROUP], "waiter")).toHaveLength(0);
+  });
+
+  it("mendaftarkan menu Pantauan Pemilik untuk admin dengan route /owner", () => {
+    const owner = OWNER_NAV.find((item) => item.to === "/owner");
+    expect(owner).toMatchObject({ label: "Pantauan Pemilik", roles: ["admin"] });
+    const byPath = Object.fromEntries(ALL_ROUTES.map((item) => [item.to, item]));
+    expect(byPath["/owner"]).toBeDefined();
+  });
+
+  it("Mode Owner hanya menyisakan menu baca-saja di sidebar", () => {
+    const adminGroups = NAV_GROUPS.map((group) => ({
+      ...group,
+      items: filterNavItemsByRole(group.items, "admin"),
+    }));
+    const readonlyPaths = OWNER_MODE_GROUPS.flatMap((group) => group.items.map((item) => item.to));
+    expect(readonlyPaths).toEqual(OWNER_MODE_ALLOWED_PATHS);
+    // Tidak ada menu transaksional yang ikut tampil di mode baca-saja.
+    for (const forbidden of ["/pos", "/tables", "/open-bills", "/cash", "/expenses", "/users", "/promos"]) {
+      expect(readonlyPaths).not.toContain(forbidden);
+    }
+    for (const path of readonlyPaths) {
+      expect(OWNER_MODE_ALLOWED_PATHS).toContain(path);
+    }
+    // Setiap menu yang muncul di sidebar operasional tetap terfilter benar di mode Owner.
+    const filtered = filterOwnerModeGroups(adminGroups);
+    const filteredPaths = filtered.flatMap((group) => group.items.flatMap((item) => (item.items ? item.items.map((n) => n.to) : [item.to])));
+    expect(filteredPaths.every((path) => OWNER_MODE_ALLOWED_PATHS.includes(path))).toBe(true);
+    expect(filteredPaths).toContain("/reports/promo");
+    expect(filteredPaths).not.toContain("/pos");
   });
 });

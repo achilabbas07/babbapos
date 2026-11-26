@@ -76,6 +76,8 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
+    "build:owner": "node scripts/build-owner.js",
+    "cap:sync:owner": "node scripts/cap-sync-owner.js",
     "test": "craco test",
     "lint": "eslint src"
   },

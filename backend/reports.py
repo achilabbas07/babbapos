@@ -19,6 +19,10 @@ metode pembayaran, ukuran keranjang, jam sibuk/sepian, dan wawasan aturan
 
 Sub-laporan kelima: *Laporan Promo* — riwayat transaksi yang memakai kode promo
 beserta nilai diskon promonya dan rekap per kode promo pada rentang tanggal.
+
+Sub-laporan keenam: *Pantauan Pemilik (Mode Owner)* — satu endpoint gabungan
+baca-saja untuk halaman pemantauan pemilik: omzet, total open bill, stok bahan,
+shift pelayan yang sedang aktif, dan ringkasan laporan laba-rugi.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -31,9 +35,12 @@ from core import (
     User,
     date_range_query,
     db,
+    now_local,
     require_roles,
     to_local_date,
+    today_local,
 )
+from finance import get_profit_and_loss_report
 
 router = APIRouter(prefix="/api")
 ADMIN = require_roles("admin")
@@ -890,4 +897,315 @@ async def customer_behavior_report(
         },
         "hours": hours,
         "insights": _build_insights(summary),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Pantauan Pemilik (Mode Owner) — SATU endpoint gabungan, BACA-SAJA.
+# ---------------------------------------------------------------------------
+
+# Batas jumlah baris yang dikirim untuk daftar (agar payload tetap ringan
+# ketika pemilik membuka halaman dari perangkat Android).
+OWNER_LIST_LIMIT = 200
+
+
+def _owner_period_bounds(
+    start: Optional[str],
+    end: Optional[str],
+    month: Optional[int],
+    year: Optional[int],
+):
+    """Rentang kalender WITA (inklusif) untuk Pantauan Pemilik.
+
+    Mendukung dua gaya filter yang dipakai halaman pemilik:
+    - ``month``/``year`` (filter **Bulan**), dan
+    - ``start``/``end`` (filter **Tanggal**).
+
+    Bila keduanya kosong, dipakai bulan berjalan menurut kalender WITA supaya
+    halaman selalu menampilkan periode yang bermakna.
+    """
+    if (month is None) != (year is None):
+        raise HTTPException(400, "Bulan dan tahun harus diisi bersama")
+    if start and month is not None:
+        raise HTTPException(400, "Gunakan rentang tanggal atau periode bulan, bukan keduanya")
+    if month is not None:
+        try:
+            month_value, year_value = int(month), int(year)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Bulan atau tahun tidak valid")
+        if not 1 <= month_value <= 12 or not 1 <= year_value <= 9999:
+            raise HTTPException(400, "Bulan atau tahun tidak valid")
+        first = date(year_value, month_value, 1)
+        last = date(
+            year_value + (1 if month_value == 12 else 0),
+            month_value % 12 + 1,
+            1,
+        ) - timedelta(days=1)
+        return first.isoformat(), last.isoformat()
+    if start or end:
+        if not start or not end:
+            raise HTTPException(400, "Tanggal mulai dan tanggal selesai harus diisi bersama")
+        start_day, end_day = _report_range_bounds(start, end)
+        return start_day.isoformat(), end_day.isoformat()
+    today = today_local()
+    first = today.replace(day=1)
+    next_month = date(today.year + (1 if today.month == 12 else 0), today.month % 12 + 1, 1)
+    return first.isoformat(), (next_month - timedelta(days=1)).isoformat()
+
+
+def _owner_omzet(txs) -> dict:
+    """Ringkasan omzet dari daftar transaksi (total, jumlah nota, item, AOV)."""
+    total_revenue = 0.0
+    total_items = 0.0
+    for tx in txs:
+        total_revenue += float(tx.get("total") or 0)
+        total_items += _tx_item_qty(tx)
+    count = len(txs)
+    return {
+        "total_revenue": round(total_revenue, 2),
+        "transaction_count": count,
+        "total_items": int(total_items) if float(total_items).is_integer() else round(total_items, 2),
+        "average_order_value": round(total_revenue / count, 2) if count else 0.0,
+    }
+
+
+def _owner_open_bills(bills, table_names) -> dict:
+    """Jumlah + total nilai open bill yang belum dibayar (BACA-SAJA)."""
+    items = []
+    total_value = 0.0
+    for bill in bills[:OWNER_LIST_LIMIT]:
+        total = float(bill.get("total") or 0)
+        total_value += total
+        items.append({
+            "id": bill.get("_id"),
+            "timestamp": bill.get("timestamp"),
+            "date": to_local_date(bill["timestamp"]).isoformat() if bill.get("timestamp") else "",
+            "type": bill.get("type") or "",
+            "table_id": bill.get("tableId"),
+            "table_name": table_names.get(bill.get("tableId")) or "",
+            "customer_name": (bill.get("customerName") or "").strip(),
+            "waiter_name": (bill.get("waiterName") or "").strip(),
+            "item_count": int(_tx_item_qty(bill)),
+            "total": round(total, 2),
+        })
+    return {
+        "count": len(bills),
+        "total_value": round(total_value, 2),
+        "items": items,
+        "truncated": len(bills) > OWNER_LIST_LIMIT,
+    }
+
+
+def _owner_inventory(stocks) -> dict:
+    """Stok bahan mentah + penanda stok menipis (BACA-SAJA)."""
+    items = []
+    stock_value = 0.0
+    low_stock_count = 0
+    for raw in stocks:
+        stock = float(raw.get("stock") or 0)
+        cost = float(raw.get("cost_per_unit") or 0)
+        min_stock = float(raw.get("min_stock") or 0)
+        is_low = min_stock > 0 and stock <= min_stock
+        if is_low:
+            low_stock_count += 1
+        stock_value += stock * cost
+        items.append({
+            "id": raw.get("_id"),
+            "name": raw.get("name") or "",
+            "type": raw.get("type") or "",
+            "stock": stock,
+            "unit": raw.get("unit") or "",
+            "cost_per_unit": round(cost, 2),
+            "min_stock": min_stock,
+            "stock_value": round(stock * cost, 2),
+            "is_low": is_low,
+        })
+    return {
+        "count": len(items),
+        "low_stock_count": low_stock_count,
+        "total_stock_value": round(stock_value, 2),
+        "items": items[:OWNER_LIST_LIMIT],
+        "truncated": len(items) > OWNER_LIST_LIMIT,
+    }
+
+
+def _owner_shift_activity(shift, txs) -> dict:
+    """Item terjual, void, promo, dan poin untuk SATU shift pelayan aktif.
+
+    Promo & poin dihitung dari transaksi pelayan tersebut sejak shift dibuka
+    (``transactions.waiterId`` + waktu pembayaran >= ``openedAt``), karena
+    ``transactions.shiftId`` menunjuk shift KASIR sehingga tidak dapat dipakai
+    untuk atribusi shift pelayan.
+    """
+    opened_at = _parse_iso_local(shift.get("openedAt"))
+    promo_count = 0
+    promo_discount = 0.0
+    redemption_count = 0
+    points_redeemed = 0.0
+    points_discount = 0.0
+    for tx in txs:
+        if tx.get("waiterId") != shift.get("userId"):
+            continue
+        paid_at = _parse_iso_local(tx.get("date"))
+        if opened_at is not None and (paid_at is None or paid_at < opened_at):
+            continue
+        promo_value = float(tx.get("promoDiscount") or 0)
+        if promo_value > 0:
+            promo_count += 1
+            promo_discount += promo_value
+        points_value = float(tx.get("pointsRedeemed") or 0)
+        if points_value > 0:
+            redemption_count += 1
+            points_redeemed += points_value
+            points_discount += float(tx.get("pointsDiscount") or 0)
+    return {
+        "promo_count": promo_count,
+        "promo_discount": round(promo_discount, 2),
+        "redemption_count": redemption_count,
+        "points_redeemed": int(points_redeemed) if float(points_redeemed).is_integer() else points_redeemed,
+        "points_discount": round(points_discount, 2),
+    }
+
+
+@router.get("/reports/owner-monitor")
+async def owner_monitor_report(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    _: User = Depends(ADMIN),
+):
+    """Pantauan pemilik (mode Owner) — gabungan 5 bagian, BACA-SAJA.
+
+    Endpoint ini **hanya membaca**. Tidak ada penulisan, perubahan, void,
+    penutupan shift, maupun opname — sehingga mode Owner tidak dapat mengubah
+    data apa pun.
+
+    Bagian yang dikembalikan:
+    - ``omzet``: total omzet + jumlah nota + item + rata-rata nilai nota.
+    - ``open_bills``: jumlah dan total nilai open bill yang belum dibayar.
+    - ``inventory``: stok bahan mentah (dengan penanda stok menipis).
+    - ``active_shifts``: shift pelayan yang sedang aktif beserta nama pelayan,
+      total item terjual, total void, pemakaian promo, dan penukaran poin.
+    - ``profit_loss``: ringkasan laba-rugi (pendapatan, potongan penjualan,
+      HPP, beban, laba bersih) dari modul finance.
+
+    Filter periode memakai kalender Asia/Makassar (WITA): ``month``/``year``
+    (filter Bulan) atau ``start``/``end`` (filter Tanggal).
+    """
+    period_start, period_end = _owner_period_bounds(start, end, month, year)
+
+    # --- Omzet: memakai waktu PEMBAYARAN (kolom ``date``) agar konsisten
+    # dengan /reports/summary dan laporan laba-rugi (transaction_date).
+    txs = await db.transactions.find(date_range_query(period_start, period_end)).to_list(None)
+
+    # --- Open bill: hitung seluruh bill terbuka (tanpa filter tanggal).
+    bills = await db.open_bills.find().sort("timestamp", -1).to_list(None)
+    bill_table_ids = list({b.get("tableId") for b in bills if b.get("tableId")})
+    bill_table_names = {}
+    if bill_table_ids:
+        for t in await db.tables.find({"_id": {"$in": bill_table_ids}}).to_list(None):
+            bill_table_names[t["_id"]] = t.get("name") or ""
+
+    # --- Stok bahan: seluruh item inventaris, urut nama.
+    stocks = await db.inventory.find().sort("name", 1).to_list(None)
+
+    # --- Shift pelayan yang sedang aktif.
+    active_shifts = []
+    for shift in await db.waiter_shifts.find({"status": "open"}).sort("openedAt", 1).to_list(None):
+        logs = await db.order_logs.find({"shiftId": shift.get("_id")}).to_list(None)
+        item_totals = {}
+        order_ids = set()
+        void_ids = set()
+        for log in logs:
+            source = log.get("source")
+            if source not in ("bill_create", "bill_update", "void", "direct"):
+                continue
+            if source in ("bill_create", "direct") and log.get("refId"):
+                order_ids.add(log["refId"])
+            if source == "void" and log.get("refId"):
+                void_ids.add(log["refId"])
+            key = (log.get("productId"), log.get("variantName") or "", log.get("variantId"))
+            item_totals[key] = item_totals.get(key, 0) + float(log.get("qty") or 0)
+
+        total_items_sold = sum(qty for qty in item_totals.values() if qty > 0)
+        orders = [
+            {
+                "variant_name": (key[1] or key[2] or "Menu"),
+                "qty": int(qty) if float(qty).is_integer() else qty,
+            }
+            for key, qty in sorted(item_totals.items(), key=lambda entry: (entry[0][1] or "").casefold())
+            if qty > 0
+        ]
+
+        void_logs = (
+            await db.void_logs.find({"billId": {"$in": list(void_ids)}}).to_list(None)
+            if void_ids
+            else []
+        )
+        void_details = [
+            {
+                "qty": int(item.get("qty") or 0),
+                "name": item.get("variantName") or item.get("productName") or "Menu",
+                "reason": void.get("reason") or "-",
+            }
+            for void in void_logs
+            for item in (void.get("items_json") or [])
+        ]
+        void_value = sum(
+            float(item.get("subtotal") if item.get("subtotal") is not None else (float(item.get("price") or 0) * float(item.get("qty") or 0)))
+            for void in void_logs
+            for item in (void.get("items_json") or [])
+        )
+
+        activity = _owner_shift_activity(shift, txs)
+        active_shifts.append({
+            "shift_id": shift.get("_id"),
+            "waiter_id": shift.get("userId"),
+            "waiter_name": shift.get("userName") or "",
+            "opened_at": shift.get("openedAt"),
+            "total_orders": len(order_ids),
+            "total_items_sold": int(total_items_sold) if float(total_items_sold).is_integer() else total_items_sold,
+            "total_voids": len(void_logs),
+            "void_qty": sum(int(item.get("qty") or 0) for void in void_logs for item in (void.get("items_json") or [])),
+            "void_value": round(void_value, 2),
+            "void_details": void_details,
+            "orders": orders,
+            "promo_usage": {"count": activity["promo_count"], "discount": activity["promo_discount"]},
+            "redeem_points": {
+                "count": activity["redemption_count"],
+                "points": activity["points_redeemed"],
+                "discount": activity["points_discount"],
+            },
+        })
+
+    # --- Laba-rugi: memakai modul finance yang sama dengan /finance/profit-loss
+    # (read-only; batas atas eksklusif sehingga ditambah satu hari).
+    start_day = date.fromisoformat(period_start)
+    end_day_exclusive = date.fromisoformat(period_end) + timedelta(days=1)
+    await db.connect()
+    profit_loss = await get_profit_and_loss_report(db.pool, start_day, end_day_exclusive)
+    pl_summary = profit_loss.get("summary") or {}
+
+    return {
+        "period": {
+            "start": period_start,
+            "end": period_end,
+            "month": start_day.month,
+            "year": start_day.year,
+            "label": f"{period_start} s.d. {period_end}",
+            "generated_at": now_local().isoformat(),
+        },
+        "readonly": True,
+        "omzet": _owner_omzet(txs),
+        "open_bills": _owner_open_bills(bills, bill_table_names),
+        "inventory": _owner_inventory(stocks),
+        "active_shifts": active_shifts,
+        "profit_loss": {
+            "revenue": float(pl_summary.get("revenue") or 0),
+            "sales_discount": float(pl_summary.get("sales_discount") or 0),
+            "hpp": float(pl_summary.get("hpp") or 0),
+            "expenses": float(pl_summary.get("expenses") or 0),
+            "net_profit": float(pl_summary.get("net_profit") or 0),
+        },
     }

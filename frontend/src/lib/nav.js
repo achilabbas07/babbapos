@@ -1,5 +1,5 @@
 import {
-  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart, Ban, Gift, TicketPercent,
+  ShoppingCart, LayoutGrid, ReceiptText, History, Users, UtensilsCrossed, Boxes, Truck, Wallet, BarChart3, UserCog, ClipboardList, Target, Store, BookOpen, Tags, LineChart, Ban, Gift, TicketPercent, Eye,
 } from "lucide-react";
 
 const ALL = ["admin", "kasir", "waiter"];
@@ -97,10 +97,37 @@ export const OPERATIONAL_NAV = [
   },
 ];
 
+// Menu khusus "Mode Owner" (APK pemilik). Sengaja DIPISAH dari NAV/FINANCE_NAV/
+// OPERATIONAL_NAV supaya struktur sidebar operasional tidak berubah sama sekali.
+// Halaman ini tetap dibuat route-nya pada build operasional maupun build Owner
+// agar tautan lama tidak "yatim"; penyembunyian menu dilakukan di runtime.
+export const OWNER_NAV = [
+  { to: "/owner", label: "Pantauan Pemilik", shortLabel: "Pantauan", icon: Eye, roles: ADMIN },
+];
+
+// Daftar path yang BOLEH tampil pada Mode Owner — seluruhnya halaman baca-saja
+// (pemantauan & laporan). Tidak ada kasir, meja, open bill, pengeluaran, jurnal,
+// pengguna, promo, dsb., sehingga tidak ada aksi yang memutasi data.
+export const OWNER_MODE_ALLOWED_PATHS = [
+  "/owner",
+  "/reports",
+  "/reports/product-sales",
+  "/reports/void-sales",
+  "/reports/waiter-sales-target",
+  "/reports/point-reward",
+  "/reports/customer-behavior",
+  "/reports/promo",
+  "/transactions",
+  "/shifts",
+  "/admin/dashboard-keuangan",
+  "/admin/arus-kas",
+  "/admin/laba-rugi",
+];
+
 // Lookup so the grouped sidebar reuses the exact same objects (path, label, icon, roles)
 // that App.js uses to generate routes. Nothing is duplicated or re-declared.
 const NAV_BY_PATH = Object.fromEntries(
-  [...NAV, ...FINANCE_NAV, ...OPERATIONAL_NAV].map((item) => [item.to, item]),
+  [...NAV, ...FINANCE_NAV, ...OPERATIONAL_NAV, ...OWNER_NAV].map((item) => [item.to, item]),
 );
 
 const pick = (...paths) => paths.map((path) => NAV_BY_PATH[path]).filter(Boolean);
@@ -167,3 +194,33 @@ export const filterNavItemsByRole = (items, role) =>
   (items || [])
     .map((item) => (item.items ? { ...item, items: filterNavItemsByRole(item.items, role) } : item))
     .filter((item) => (item.roles ? item.roles.includes(role) : item.items && item.items.length > 0));
+
+// --- Mode Owner (baca-saja) -------------------------------------------------
+
+// Sidebar versi Mode Owner: satu grup yang hanya berisi halaman pantauan dan
+// laporan baca-saja. Tidak ada menu transaksional sama sekali.
+export const OWNER_MODE_GROUPS = [
+  {
+    id: "owner-pantauan",
+    label: "Pantauan Pemilik",
+    alwaysOpen: true,
+    items: pick(...OWNER_MODE_ALLOWED_PATHS),
+  },
+];
+
+// Saring daftar item sidebar agar hanya menyisakan path yang boleh pada Mode
+// Owner. Mendukung item biasa (`to`) maupun grup nested (`items`) secara rekursif
+// sehingga sub-menu laporan baca-saja tetap tampil apa adanya.
+export const filterOwnerModeItems = (items) =>
+  (items || [])
+    .map((item) => (item.items
+      ? { ...item, items: filterOwnerModeItems(item.items) }
+      : item))
+    .filter((item) => (item.items ? item.items.length > 0 : OWNER_MODE_ALLOWED_PATHS.includes(item.to)));
+
+// Saring daftar grup sidebar agar hanya menyisakan path yang boleh pada Mode
+// Owner. Grup yang habis difilter otomatis dibuang supaya tidak ada bagian kosong.
+export const filterOwnerModeGroups = (groups) =>
+  (groups || [])
+    .map((group) => ({ ...group, items: filterOwnerModeItems(group.items) }))
+    .filter((group) => group.items.length > 0);
