@@ -1,7 +1,7 @@
+import { api, errMsg, fmtDate, rp, todayStr, dateTimeToIso } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
-import { api, errMsg, fmtDate, rp, todayStr, dateToIso } from "@/lib/api";
 import { CACHE_KEYS } from "@/lib/localStore";
 import { loadWithCache, rangeCacheKey } from "@/lib/offlineRead";
 import { PageHeader, StatCard, Empty } from "@/components/PageHeader";
@@ -55,7 +55,9 @@ export default function Expenses() {
 
   const save = async (f) => {
     if (!f.category_id) throw new Error("Pilih kategori pengeluaran terlebih dahulu");
-    await api.post("/expenses", { date: dateToIso(f.date), category_id: Number(f.category_id), description: f.description || "", amount: Number(f.amount) || 0 });
+    // Catat jam penginputan AKTUAL (bukan `T12:00:00` hardcoded) pada kalender
+    // bisnis WITA. `f.date` tetap menentukan tanggal kalender yang dipilih.
+    await api.post("/expenses", { date: dateTimeToIso(f.date), category_id: Number(f.category_id), description: f.description || "", amount: Number(f.amount) || 0 });
     toast.success("Pengeluaran tercatat");
     load();
   };

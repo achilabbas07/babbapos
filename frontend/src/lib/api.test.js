@@ -1,4 +1,6 @@
-import { errMsg, errorCode, getBackendConfigError, isFetchNetworkError, isNetworkError, NETWORK_ERROR_MESSAGE, rp } from "./api";
+import fs from "fs";
+import path from "path";
+import { dateTimeToIso, dateToIso, errMsg, errorCode, getBackendConfigError, isFetchNetworkError, isNetworkError, NETWORK_ERROR_MESSAGE, rp } from "./api";
 
 describe("errMsg", () => {
   it("uses backend error messages from 500 responses", () => {
@@ -116,4 +118,49 @@ describe("rp", () => {
       expect(rp(value)).toBe("Rp 0");
     }
   );
+});
+
+describe("dateTimeToIso — stempel waktu penginputan WITA", () => {
+  it("memakai jam input aktual (jam dinding WITA) dengan offset +08:00", () => {
+    // 2026-03-01T03:04:05Z == 2026-03-01T11:04:05 WITA.
+    const iso = dateTimeToIso("2026-03-01", new Date("2026-03-01T03:04:05Z"));
+    expect(iso).toBe("2026-03-01T11:04:05+08:00");
+  });
+
+  it("mempertahankan tanggal kalender yang dipilih, bukan tanggal hari ini", () => {
+    const iso = dateTimeToIso("2026-02-10", new Date("2026-03-01T03:04:05Z"));
+    expect(iso.startsWith("2026-02-10T")).toBe(true);
+    expect(iso.endsWith("+08:00")).toBe(true);
+  });
+
+  it("memakai tanggal WITA hari ini bila `dateStr` kosong/tidak valid", () => {
+    // 2026-02-28T17:00:00Z == 2026-03-01T01:00:00 WITA (dini hari -> hari esok).
+    const iso = dateTimeToIso("", new Date("2026-02-28T17:00:00Z"));
+    expect(iso).toBe("2026-03-01T01:00:00+08:00");
+  });
+
+  it("TIDAK pernah menulis jam 12:00 hardcoded", () => {
+    const iso = dateTimeToIso("2026-03-01", new Date("2026-03-01T03:15:00Z"));
+    expect(iso).not.toContain("T12:00:00");
+  });
+});
+
+// Regresi bug jam 12:00: form Pengeluaran dulu mengirim `dateToIso`
+// (`new Date(`${d}T12:00:00`)`) sehingga jam tercatat selalu 12:00, bukan jam
+// penginputan. Sekarang harus memakai `dateTimeToIso` (jam WITA aktual).
+describe("Expenses.jsx — mencatat jam penginputan aktual", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "pages", "Expenses.jsx"),
+    "utf8"
+  );
+
+  it("memakai `dateTimeToIso` untuk field date, bukan `dateToIso`", () => {
+    expect(source).toContain("dateTimeToIso(f.date)");
+    expect(source).not.toContain("dateToIso(");
+  });
+
+  it("helper lama `dateToIso` tetap ada untuk pemakaian lain (Pembelian)", () => {
+    expect(typeof dateToIso).toBe("function");
+    expect(dateToIso("2026-03-01")).toContain("T");
+  });
 });

@@ -155,5 +155,27 @@ export const dayRange = (from, to) => {
 };
 export const dateToIso = (d) => (d ? new Date(`${d}T12:00:00`).toISOString() : null);
 
+// Warkop Babba mencatat waktu pada kalender bisnis WITA (Asia/Makassar, UTC+8,
+// tanpa DST). Perangkat pengguna bisa di-set ke zona lain, jadi jam dinding WITA
+// dihitung dari instant UTC + 8 jam, BUKAN dari waktu lokal perangkat.
+export const WITA_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+// Timestamp ISO ber-offset WITA (+08:00) untuk penginputan yang hanya memilih
+// TANGGAL (tanpa jam). Tanggal kalender diambil dari `dateStr` (YYYY-MM-DD),
+// sedangkan jam/menit/detik diambil dari WAKTU SAAT INI (jam dinding WITA).
+//
+// Ini menggantikan `dateToIso` pada form Pengeluaran yang dulu memakai
+// `T12:00:00` hardcoded, sehingga pengeluaran selalu tercatat jam 12:00. Tanggal
+// kalender tetap sama, jadi `entry_date` jurnal dan laporan per tanggal tidak
+// berubah -- hanya jam penginputan yang kini aktual.
+export const dateTimeToIso = (dateStr, now = new Date()) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  const wita = new Date(now.getTime() + WITA_OFFSET_MS);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))
+    ? dateStr
+    : `${wita.getUTCFullYear()}-${pad(wita.getUTCMonth() + 1)}-${pad(wita.getUTCDate())}`;
+  return `${day}T${pad(wita.getUTCHours())}:${pad(wita.getUTCMinutes())}:${pad(wita.getUTCSeconds())}+08:00`;
+};
+
 export const ROLE_LABEL = { admin: "Admin", kasir: "Kasir", waiter: "Waiter" };
 export const PRODUCT_TYPE_LABEL = { both: "Dine In & Takeaway", dine_in: "Dine In saja", takeaway: "Takeaway saja" };
