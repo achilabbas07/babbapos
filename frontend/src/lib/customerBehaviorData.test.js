@@ -1,11 +1,15 @@
 import {
+  DEFAULT_SPEND_DROP_THRESHOLD,
   filterSpendAlerts,
   findPeakAndQuietHours,
   formatHour,
+  formatSpendRange,
   groupChannels,
   isDrasticSpendDrop,
+  limitSpendAlerts,
   normalizeCustomerBehaviorReport,
   normalizeCustomerSpendAlerts,
+  SPEND_ALERTS_LIMIT,
   sortSpendAlerts,
   witaDateStr,
   witaDaysAgoStr,
@@ -134,19 +138,25 @@ const SPEND_ALERTS = [
     customer_id: "CUST-1",
     customer_name: "Budi",
     identity: "customerId",
-    baseline_tx_count: 5,
-    baseline_aov: 50000,
-    baseline_avg_items: 3,
+    baseline_tx_count: 3,
+    baseline_total: 60000,
+    baseline_aov: 60000,
+    baseline_avg_items: 3.33,
+    prev_tx_count: 3,
+    prev_total_min: 50000,
+    prev_total_max: 70000,
+    last_total: 30000,
+    last_items: 1,
+    last_time: "11:00",
     recent_tx_count: 1,
-    recent_aov: 20000,
+    recent_aov: 30000,
     recent_avg_items: 1,
-    aov_change_pct: -60,
-    aov_drop_pct: 60,
-    items_change_pct: -66.67,
-    items_drop_pct: 66.67,
-    drop_pct: 66.67,
+    change_pct: -50,
+    aov_change_pct: -50,
+    aov_drop_pct: 50,
+    drop_pct: 50,
     is_drastic_drop: true,
-    last_cashier: "Kasir A",
+    last_cashier: "Waiters A",
     last_shift_id: "SHIFT-9",
     last_visit: "2026-11-20",
   },
@@ -154,17 +164,23 @@ const SPEND_ALERTS = [
     customer_id: null,
     customer_name: "Sari",
     identity: "customerName",
-    baseline_tx_count: 4,
-    baseline_aov: 30000,
+    baseline_tx_count: 3,
+    baseline_total: 29000,
+    baseline_aov: 29000,
     baseline_avg_items: 2,
-    recent_tx_count: 2,
-    recent_aov: 28000,
+    prev_tx_count: 3,
+    prev_total_min: 28000,
+    prev_total_max: 30000,
+    last_total: 26000,
+    last_items: 2,
+    last_time: "18:30",
+    recent_tx_count: 1,
+    recent_aov: 26000,
     recent_avg_items: 2,
-    aov_change_pct: -6.67,
-    aov_drop_pct: 6.67,
-    items_change_pct: 0,
-    items_drop_pct: 0,
-    drop_pct: 6.67,
+    change_pct: -10.34,
+    aov_change_pct: -10.34,
+    aov_drop_pct: 10.34,
+    drop_pct: 10.34,
     is_drastic_drop: false,
     last_cashier: "",
     last_shift_id: null,
@@ -179,14 +195,26 @@ describe("normalizeCustomerSpendAlerts", () => {
     expect(alerts[0]).toMatchObject({
       key: "CUST-1",
       customerName: "Budi",
-      baselineAov: 50000,
-      recentAov: 20000,
-      dropPct: 66.67,
+      baselineTotal: 60000,
+      baselineAov: 60000,
+      prevTxCount: 3,
+      prevTotalMin: 50000,
+      prevTotalMax: 70000,
+      lastTotal: 30000,
+      lastItems: 1,
+      lastTime: "11:00",
+      recentAov: 30000,
+      changePct: -50,
+      aovChangePct: -50,
+      dropPct: 50,
       isDrasticDrop: true,
-      lastCashier: "Kasir A",
+      lastCashier: "Waiters A",
       lastShiftId: "SHIFT-9",
     });
     expect(alerts[1].customerId).toBe("");
+    expect(alerts[1].lastTotal).toBe(26000);
+    expect(alerts[1].prevTotalMin).toBe(28000);
+    expect(alerts[1].prevTotalMax).toBe(30000);
     expect(alerts[1].isDrasticDrop).toBe(false);
   });
 
@@ -195,20 +223,79 @@ describe("normalizeCustomerSpendAlerts", () => {
     expect(normalizeCustomerSpendAlerts(undefined)).toEqual([]);
   });
 
+  it("mendukung field lama (baseline_aov/recent_aov) sebagai fallback", () => {
+    const legacy = normalizeCustomerSpendAlerts([
+      { customer_name: "Legacy", baseline_aov: 40000, recent_aov: 20000, aov_change_pct: -50, drop_pct: 50 },
+    ]);
+    expect(legacy[0].baselineTotal).toBe(40000);
+    expect(legacy[0].lastTotal).toBe(20000);
+    expect(legacy[0].changePct).toBe(-50);
+  });
+
   it("menyertakan spendAlerts pada normalisasi laporan dan aman saat null", () => {
     const report = normalizeCustomerBehaviorReport({
       ...PAYLOAD,
       spend_alerts: SPEND_ALERTS,
       spend_drop_threshold: 40,
-      baseline: { start: "2026-08-03", end: "2026-10-31", days: 90, min_baseline_tx: 2 },
+      spend_alerts_limit: 20,
+      baseline: {
+        start: "2026-10-02",
+        end: "2026-10-31",
+        days: 30,
+        min_baseline_tx: 2,
+        max_prev_tx: 3,
+        limit: 20,
+      },
     });
     expect(report.spendAlerts).toHaveLength(2);
     expect(report.spendDropThreshold).toBe(40);
-    expect(report.baseline).toMatchObject({ days: 90, minBaselineTx: 2 });
+    expect(report.spendAlertsLimit).toBe(20);
+    expect(report.baseline).toMatchObject({ days: 30, minBaselineTx: 2, maxPrevTx: 3, limit: 20 });
 
     const empty = normalizeCustomerBehaviorReport(null);
     expect(empty.spendAlerts).toEqual([]);
     expect(empty.spendDropThreshold).toBe(40);
+    expect(empty.spendAlertsLimit).toBe(20);
+  });
+});
+
+describe("formatSpendRange", () => {
+  const rp = (v) => `Rp ${Number(v).toLocaleString("id-ID")}`;
+
+  it("memformat rentang min-max 2-3 transaksi sebelumnya", () => {
+    expect(formatSpendRange(50000, 70000, rp)).toBe("Rp 50.000 – Rp 70.000");
+  });
+
+  it("menampilkan satu nilai bila min == max", () => {
+    expect(formatSpendRange(100000, 100000, rp)).toBe("Rp 100.000");
+    expect(formatSpendRange(130000, 130000, rp)).toBe("Rp 130.000");
+  });
+
+  it("aman tanpa fungsi format (mengembalikan angka apa adanya)", () => {
+    expect(formatSpendRange(100000, 130000)).toBe("100000 – 130000");
+    expect(formatSpendRange(undefined, undefined)).toBe("0");
+  });
+});
+
+describe("limitSpendAlerts", () => {
+  const rows = (n) =>
+    Array.from({ length: n }, (_, i) => ({ customer_name: `C-${i}`, drop_pct: n - i }));
+
+  it("membatasi daftar pelanggan maksimal 20 (default)", () => {
+    const limited = limitSpendAlerts(rows(25));
+    expect(limited).toHaveLength(20);
+    expect(SPEND_ALERTS_LIMIT).toBe(20);
+  });
+
+  it("menerima batas kustom dan tidak mengubah array asli", () => {
+    const source = rows(3);
+    expect(limitSpendAlerts(source, 2)).toHaveLength(2);
+    expect(limitSpendAlerts(source, 0)).toHaveLength(3);
+    expect(source).toHaveLength(3);
+  });
+
+  it("aman untuk input tidak valid", () => {
+    expect(limitSpendAlerts(null)).toEqual([]);
   });
 });
 
@@ -219,16 +306,18 @@ describe("filterSpendAlerts / isDrasticSpendDrop", () => {
     expect(filterSpendAlerts(alerts, true).map((a) => a.customerName)).toEqual(["Budi"]);
     expect(isDrasticSpendDrop(alerts[0])).toBe(true);
     expect(isDrasticSpendDrop(alerts[1])).toBe(false);
-    // Ambang diturunkan -> Sari (6.67%) seharusnya ikut bila ambang 5%.
+    // Ambang diturunkan -> Sari (10.34%) seharusnya ikut bila ambang 10%.
     expect(isDrasticSpendDrop(alerts[1], 5)).toBe(true);
+    expect(isDrasticSpendDrop(alerts[1], DEFAULT_SPEND_DROP_THRESHOLD)).toBe(false);
   });
 });
 
 describe("sortSpendAlerts", () => {
-  it("mengurutkan berdasar penurunan, AOV terakhir, dan nama", () => {
+  it("mengurutkan berdasar penurunan, belanja terakhir, dan nama", () => {
     const alerts = normalizeCustomerSpendAlerts(SPEND_ALERTS);
     expect(sortSpendAlerts(alerts, "drop")[0].customerName).toBe("Budi");
-    expect(sortSpendAlerts(alerts, "aov")[0].customerName).toBe("Sari");
+    // Belanja terakhir: Budi 30.000 > Sari 26.000.
+    expect(sortSpendAlerts(alerts, "aov")[0].customerName).toBe("Budi");
     expect(sortSpendAlerts(alerts, "name")[0].customerName).toBe("Budi");
     // Tidak mengubah array asli (imutabilitas).
     expect(alerts.map((a) => a.customerName)).toEqual(["Budi", "Sari"]);

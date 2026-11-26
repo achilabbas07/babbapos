@@ -7,8 +7,11 @@ import { PageHeader, StatCard, Empty } from "@/components/PageHeader";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   filterSpendAlerts,
+  formatSpendRange,
   formatHour,
+  limitSpendAlerts,
   normalizeCustomerBehaviorReport,
+  SPEND_ALERTS_LIMIT,
   sortSpendAlerts,
   witaDaysAgoStr,
   witaTodayStr,
@@ -76,14 +79,16 @@ export default function CustomerBehaviorReport() {
   const hours = useMemo(() => report?.hours || [], [report]);
   const insights = useMemo(() => report?.insights || [], [report]);
   const spendAlerts = useMemo(() => report?.spendAlerts || [], [report]);
+  // Batas tampilan pelanggan (default 20) — backend juga sudah membatasi.
+  const spendAlertsLimit = report?.spendAlertsLimit || SPEND_ALERTS_LIMIT;
 
   const drasticCount = useMemo(
     () => filterSpendAlerts(spendAlerts, true).length,
     [spendAlerts],
   );
   const visibleAlerts = useMemo(
-    () => sortSpendAlerts(filterSpendAlerts(spendAlerts, dropOnly), sortMode),
-    [spendAlerts, dropOnly, sortMode],
+    () => limitSpendAlerts(sortSpendAlerts(filterSpendAlerts(spendAlerts, dropOnly), sortMode), spendAlertsLimit),
+    [spendAlerts, dropOnly, sortMode, spendAlertsLimit],
   );
 
   const maxChannelRevenue = useMemo(
@@ -362,8 +367,8 @@ export default function CustomerBehaviorReport() {
             title="Pemantauan Perubahan Belanja Pelanggan"
             hint={
               report?.baseline?.start
-                ? `Dibandingkan kebiasaan ${num(report.baseline.days)} hari sebelumnya (${report.baseline.start} s/d ${report.baseline.end}). Penurunan ≥ ${num(report.spendDropThreshold)}% dari kebiasaan pelanggan sendiri ditandai "Drastis".`
-                : "Perbandingan belanja terakhir vs kebiasaan historis tiap pelanggan."
+                ? `Transaksi terakhir tiap pelanggan dibandingkan 2–3 transaksi sebelumnya dalam window ${num(report.baseline.days)} hari (${report.baseline.start} s/d ${report.baseline.end}). Penurunan ≥ ${num(report.spendDropThreshold)}% dari acuan median ditandai "Drastis". Maksimal ${num(spendAlertsLimit)} pelanggan ditampilkan.`
+                : "Perbandingan transaksi terakhir vs 2–3 transaksi sebelumnya tiap pelanggan."
             }
             testid="customer-behavior-spend-alerts"
           >
@@ -413,11 +418,11 @@ export default function CustomerBehaviorReport() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Pelanggan</TableHead>
-                      <TableHead className="text-right">AOV Historis</TableHead>
-                      <TableHead className="text-right">AOV Terakhir</TableHead>
+                      <TableHead className="text-right">2–3 Transaksi Sebelumnya</TableHead>
+                      <TableHead className="text-right">Transaksi Terakhir</TableHead>
                       <TableHead className="text-right">Perubahan</TableHead>
                       <TableHead className="text-right">Trx</TableHead>
-                      <TableHead>Kasir / Shift Terakhir</TableHead>
+                      <TableHead>Waiters</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -434,31 +439,41 @@ export default function CustomerBehaviorReport() {
                           </div>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {a.customerId ? `ID ${a.customerId}` : "Nama bebas (tanpa ID)"}
-                            {a.lastVisit ? ` · kunjungan terakhir ${a.lastVisit}` : ""}
+                            {a.lastVisit
+                              ? ` · kunjungan terakhir ${a.lastVisit}${a.lastTime ? ` ${a.lastTime}` : ""}`
+                              : ""}
                           </p>
                         </TableCell>
-                        <TableCell className="text-right font-mono text-muted-foreground">
-                          {rp(a.baselineAov)}
-                          <span className="block text-xs">{a.baselineTxCount} trx</span>
+                        <TableCell
+                          className="text-right font-mono text-muted-foreground"
+                          data-testid={`customer-behavior-alert-range-${a.key}`}
+                        >
+                          {formatSpendRange(a.prevTotalMin, a.prevTotalMax, rp)}
+                          <span className="block text-xs">{a.prevTxCount} trx</span>
                         </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {rp(a.recentAov)}
-                          <span className="block text-xs text-muted-foreground">{a.recentTxCount} trx</span>
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          <span className={a.aovChangePct < 0 ? "font-semibold text-red-600" : "text-emerald-600"}>
-                            {a.aovChangePct > 0 ? "+" : ""}
-                            {a.aovChangePct.toFixed(1)}%
-                          </span>
+                        <TableCell
+                          className="text-right font-mono"
+                          data-testid={`customer-behavior-alert-last-${a.key}`}
+                        >
+                          {rp(a.lastTotal)}
                           <span className="block text-xs text-muted-foreground">
-                            item {a.itemsChangePct > 0 ? "+" : ""}
-                            {a.itemsChangePct.toFixed(1)}%
+                            {num(a.lastItems)} item{a.lastTime ? ` · ${a.lastTime}` : ""}
                           </span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          <span className={a.changePct < 0 ? "font-semibold text-red-600" : "text-emerald-600"}>
+                            {a.changePct > 0 ? "+" : ""}
+                            {a.changePct.toFixed(1)}%
+                          </span>
+                          <span className="block text-xs text-muted-foreground">vs acuan median</span>
                         </TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">
                           {num(a.recentTxCount)}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell
+                          className="text-xs text-muted-foreground"
+                          data-testid={`customer-behavior-alert-waiters-${a.key}`}
+                        >
                           {a.lastCashier || "—"}
                           {a.lastShiftId ? ` · ${a.lastShiftId}` : ""}
                         </TableCell>

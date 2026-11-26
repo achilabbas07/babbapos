@@ -463,8 +463,15 @@ def _payment_legs(tx):
 
 
 DEFAULT_SPEND_DROP_THRESHOLD = 40.0
-DEFAULT_SPEND_BASELINE_DAYS = 90
+# Window pembanding (2-3 transaksi sebelum transaksi terakhir) default 30 hari.
+DEFAULT_SPEND_BASELINE_DAYS = 30
+# Minimal transaksi SEBELUM transaksi terakhir agar penurunan dinilai adil.
+# Pelanggan dengan kurang dari 2 transaksi sebelumnya dilewati.
 DEFAULT_SPEND_MIN_BASELINE_TX = 2
+# Maksimal transaksi sebelumnya yang dipakai sebagai pembanding rentang.
+SPEND_PREV_MAX_TX = 3
+# Batas jumlah pelanggan yang dikembalikan/ditampilkan (prioritas penurunan).
+SPEND_ALERTS_LIMIT = 20
 
 
 def _tx_customer_identity(tx):
@@ -496,103 +503,127 @@ def _tx_customer_identity(tx):
 
 
 def _customer_spend_alerts(txs, baseline_txs, threshold, min_baseline_tx):
-    """Bandingkan belanja periode terakhir vs kebiasaan historis per pelanggan.
+    """Bandingkan TRANSAKSI TERAKHIR vs 2-3 transaksi sebelumnya per pelanggan.
 
     Murni agregasi Python atas transaksi yang SUDAH dibaca dari DB (read-only).
-    ``baseline_txs`` berisi transaksi di luar rentang (window sebelum rentang)
-    yang dipakai sebagai "kebiasaan". Hanya pelanggan dengan minimal
-    ``min_baseline_tx`` transaksi historis yang dievaluasi agar sinyal tidak
-    berasal dari satu transaksi tunggal.
-    """
-    baseline = {}
-    for tx in baseline_txs:
-        ident = _tx_customer_identity(tx)
-        if not ident:
-            continue
-        row = baseline.setdefault(ident["key"], {
-            "customer_id": ident["customer_id"],
-            "name": ident["name"],
-            "identity": ident["identity"],
-            "tx_count": 0,
-            "total_spend": 0.0,
-            "total_items": 0.0,
-        })
-        row["tx_count"] += 1
-        row["total_spend"] += float(tx.get("total") or 0)
-        row["total_items"] += _tx_item_qty(tx)
+    ``txs`` berisi transaksi pada rentang terpilih, ``baseline_txs`` berisi
+    transaksi window sebelum rentang (``baseline_days``).
 
-    recent = {}
-    for tx in txs:
-        ident = _tx_customer_identity(tx)
-        if not ident:
-            continue
-        row = recent.setdefault(ident["key"], {
-            "customer_id": ident["customer_id"],
-            "name": ident["name"],
-            "identity": ident["identity"],
-            "tx_count": 0,
-            "total_spend": 0.0,
-            "total_items": 0.0,
-            "last_cashier": "",
-            "last_shift_id": None,
-            "last_order": None,
-        })
-        row["tx_count"] += 1
-        row["total_spend"] += float(tx.get("total") or 0)
-        row["total_items"] += _tx_item_qty(tx)
-        # Simpan transaksi terakhir untuk konteks kasir/shift.
-        parsed = _parse_iso_local(tx.get("orderTime") or tx.get("date"))
-        if parsed is not None and (row["last_order"] is None or parsed > row["last_order"]):
-            row["last_order"] = parsed
-            row["last_cashier"] = str(tx.get("userName") or "").strip()
-            row["last_shift_id"] = tx.get("shiftId")
+    Untuk tiap pelanggan: ambil transaksi terakhir (``last_tx``) pada rentang
+    terpilih, lalu maksimal 3 transaksi tepat sebelumnya (``prev_txs``) dari
+    awal window sampai sebelum ``last_tx``. Ringkasan rentang nilai transaksi
+    sebelumnya dibentuk dari nilai MINIMUM & MAKSIMUM (``prev_total_min`` /
+    ``prev_total_max``) sebagai acuan pembanding; ``drop_pct`` = persentase
+    penurunan nilai transaksi terakhir terhadap acuan median 2-3 transaksi
+    sebelumnya. Pelanggan dengan kurang dari ``min_baseline_tx`` (default 2)
+    transaksi sebelumnya dilewati. Hasil dibatasi maksimal
+    ``SPEND_ALERTS_LIMIT`` (20) pelanggan, diurutkan penurunan terbesar agar
+    20 teratas paling relevan.
+    """
+
+    def _total(tx):
+        return float(tx.get("total") or 0)
+
+    def _when(tx):
+        return _parse_iso_local(tx.get("orderTime") or tx.get("date"))
+
+    buckets = {}
+    for source in (baseline_txs, txs):
+        for tx in source or []:
+            ident = _tx_customer_identity(tx)
+            if not ident:
+                continue
+            when = _when(tx)
+            if when is None:
+                # Tanpa stempel waktu, transaksi tidak dapat diurutkan.
+                continue
+            row = buckets.setdefault(ident["key"], {
+                "customer_id": ident["customer_id"],
+                "name": ident["name"],
+                "identity": ident["identity"],
+                "recent": [],
+                "previous": [],
+            })
+            record = {
+                "when": when,
+                "total": _total(tx),
+                "items": _tx_item_qty(tx),
+                "user_name": str(tx.get("userName") or "").strip(),
+                "shift_id": tx.get("shiftId"),
+            }
+            if source is txs:
+                row["recent"].append(record)
+            else:
+                row["previous"].append(record)
 
     alerts = []
-    for key, recent_row in recent.items():
-        base_row = baseline.get(key)
-        if not base_row or base_row["tx_count"] < min_baseline_tx:
-            # Tanpa baseline memadai, penurunan tidak dapat dinilai secara adil.
+    for row in buckets.values():
+        recent = sorted(row["recent"], key=lambda r: r["when"])
+        if not recent:
+            # Pelanggan hanya muncul di window kebiasaan -> tidak ada
+            # transaksi terakhir untuk dibandingkan.
             continue
-        base_aov = base_row["total_spend"] / base_row["tx_count"]
-        recent_aov = recent_row["total_spend"] / recent_row["tx_count"]
-        base_items = base_row["total_items"] / base_row["tx_count"]
-        recent_items = recent_row["total_items"] / recent_row["tx_count"]
+        last_tx = recent[-1]
+        # 2-3 transaksi tepat SEBELUM transaksi terakhir, dari seluruh window
+        # (kebiasaan + periode terpilih), maksimal ``SPEND_PREV_MAX_TX``.
+        candidates = [
+            r for r in (row["previous"] + recent[:-1]) if r["when"] < last_tx["when"]
+        ]
+        candidates.sort(key=lambda r: r["when"])
+        prev_txs = candidates[-SPEND_PREV_MAX_TX:]
+        if len(prev_txs) < min_baseline_tx:
+            # Tanpa 2 transaksi sebelumnya, penurunan tidak dinilai adil.
+            continue
 
-        def _change(new, old):
-            if old <= 0:
-                return None
-            return round((new - old) / old * 100, 2)
+        prev_totals = sorted(float(r["total"]) for r in prev_txs)
+        prev_items = [float(r["items"]) for r in prev_txs]
+        n = len(prev_totals)
+        prev_min = prev_totals[0]
+        prev_max = prev_totals[-1]
+        # Acuan = median nilai 2-3 transaksi sebelumnya.
+        if n % 2:
+            baseline_total = prev_totals[n // 2]
+        else:
+            baseline_total = (prev_totals[n // 2 - 1] + prev_totals[n // 2]) / 2
+        baseline_items = sum(prev_items) / n
+        last_total = float(last_tx["total"])
+        last_items = float(last_tx["items"])
 
-        aov_change = _change(recent_aov, base_aov)
-        items_change = _change(recent_items, base_items)
-        aov_drop = round(-aov_change, 2) if aov_change is not None and aov_change < 0 else 0.0
-        items_drop = round(-items_change, 2) if items_change is not None and items_change < 0 else 0.0
-        drop_pct = max(aov_drop, items_drop)
+        change = None
+        if baseline_total > 0:
+            change = round((last_total - baseline_total) / baseline_total * 100, 2)
+        drop_pct = round(-change, 2) if change is not None and change < 0 else 0.0
 
         alerts.append({
-            "customer_id": recent_row["customer_id"] or base_row["customer_id"],
-            "customer_name": recent_row["name"] or base_row["name"],
-            "identity": recent_row["identity"],
-            "baseline_tx_count": base_row["tx_count"],
-            "baseline_aov": round(base_aov, 2),
-            "baseline_avg_items": round(base_items, 2),
-            "recent_tx_count": recent_row["tx_count"],
-            "recent_aov": round(recent_aov, 2),
-            "recent_avg_items": round(recent_items, 2),
-            "aov_change_pct": aov_change,
-            "aov_drop_pct": aov_drop,
-            "items_change_pct": items_change,
-            "items_drop_pct": items_drop,
+            "customer_id": row["customer_id"],
+            "customer_name": row["name"],
+            "identity": row["identity"],
+            "baseline_tx_count": n,
+            "baseline_total": round(baseline_total, 2),
+            "baseline_aov": round(baseline_total, 2),
+            "baseline_avg_items": round(baseline_items, 2),
+            "prev_tx_count": n,
+            "prev_total_min": round(prev_min, 2),
+            "prev_total_max": round(prev_max, 2),
+            "last_total": round(last_total, 2),
+            "recent_tx_count": 1,
+            "recent_aov": round(last_total, 2),
+            "recent_avg_items": round(last_items, 2),
+            "change_pct": change,
+            "aov_change_pct": change,
             "drop_pct": round(drop_pct, 2),
             "is_drastic_drop": drop_pct >= threshold,
-            "last_cashier": recent_row["last_cashier"],
-            "last_shift_id": recent_row["last_shift_id"],
-            "last_visit": recent_row["last_order"].date().isoformat() if recent_row["last_order"] else "",
+            "last_items": round(last_items, 2),
+            "last_visit": last_tx["when"].date().isoformat(),
+            "last_time": last_tx["when"].strftime("%H:%M"),
+            "last_cashier": last_tx["user_name"],
+            "last_shift_id": last_tx["shift_id"],
         })
 
-    # Urutkan: penurunan terbesar dulu, lalu pelanggan dengan belanja terbesar.
-    alerts.sort(key=lambda a: (-a["drop_pct"], -a["recent_aov"], a["customer_name"]))
-    return alerts
+    # Urutkan penurunan terbesar dulu, lalu belanja terakhir terbesar, dan
+    # batasi 20 pelanggan teratas agar daftar tetap relevan.
+    alerts.sort(key=lambda a: (-a["drop_pct"], -a["last_total"], a["customer_name"]))
+    return alerts[:SPEND_ALERTS_LIMIT]
 
 
 def _build_insights(summary) -> list:
@@ -676,9 +707,12 @@ async def customer_behavior_report(
     - ``basket``: statistik ukuran keranjang (item per transaksi).
     - ``hours``: distribusi transaksi per jam + ``peak_hour`` / ``quiet_hour``.
     - ``spend_alerts``: pemantauan perubahan perilaku belanja per pelanggan —
-        AOV & rata-rata item periode terakhir dibandingkan kebiasaan historis
-        pelanggan itu sendiri (``baseline_days`` hari sebelum rentang), lengkap
-        dengan ``drop_pct`` dan penanda ``is_drastic_drop`` (penurunan drastis).
+        transaksi TERAKHIR pelanggan pada rentang terpilih dibandingkan 2-3
+        transaksi sebelumnya (dalam window ``baseline_days`` hari sebelum
+        rentang), lengkap dengan rentang nilai transaksi sebelumnya
+        (``prev_total_min`` / ``prev_total_max``), ``drop_pct``, dan penanda
+        ``is_drastic_drop`` (penurunan drastis). Maksimal 20 pelanggan
+        (``SPEND_ALERTS_LIMIT``) diurutkan penurunan terbesar.
     - ``insights``: wawasan ringkas berbasis aturan lokal.
     """
     # Kontrak utama memakai ``start_date``/``end_date``; ``start``/``end`` tetap
@@ -701,9 +735,9 @@ async def customer_behavior_report(
         if order_day is not None and start_day <= order_day.date() <= end_day:
             txs.append(tx)
 
-    # Window "kebiasaan": ``baseline_days`` hari tepat sebelum rentang. Dipakai
-    # sebagai pembanding AOV/ukuran keranjang tiap pelanggan terhadap perilaku
-    # historisnya sendiri (bukan dibanding rata-rata seluruh pelanggan).
+    # Window pembanding: ``baseline_days`` hari tepat sebelum rentang. Dipakai
+    # sebagai sumber 2-3 transaksi sebelumnya per pelanggan (bukan rata-rata
+    # seluruh pelanggan).
     baseline_days = max(1, min(int(baseline_days or DEFAULT_SPEND_BASELINE_DAYS), 365))
     baseline_start = (start_day - timedelta(days=baseline_days)).isoformat()
     baseline_end = (start_day - timedelta(days=1)).isoformat()
@@ -819,8 +853,11 @@ async def customer_behavior_report(
             "end": baseline_end,
             "days": baseline_days,
             "min_baseline_tx": DEFAULT_SPEND_MIN_BASELINE_TX,
+            "max_prev_tx": SPEND_PREV_MAX_TX,
+            "limit": SPEND_ALERTS_LIMIT,
         },
         "spend_drop_threshold": DEFAULT_SPEND_DROP_THRESHOLD,
+        "spend_alerts_limit": SPEND_ALERTS_LIMIT,
         "spend_alerts": spend_alerts,
         "basket": {
             "average_items": average_basket_size,

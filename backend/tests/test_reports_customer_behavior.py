@@ -327,14 +327,17 @@ def test_customer_behavior_requires_dates():
 
 # --- Pemantauan perubahan perilaku belanja per pelanggan -------------------
 #
-# Rentang laporan default ``2026-11-01`` s/d ``2026-11-30``; window kebiasaan
-# default 90 hari tepat sebelumnya (``2026-08-03`` s/d ``2026-10-31``).
+# Rentang laporan default ``2026-11-01`` s/d ``2026-11-30``; window pembanding
+# default 30 hari tepat sebelumnya (``2026-10-02`` s/d ``2026-10-31``).
+#
+# Kontrak baru: transaksi TERAKHIR pelanggan pada rentang dibandingkan 2-3
+# transaksi tepat sebelumnya (rentang min-max + acuan median), bukan rata-rata.
 
 SPEND_TRANSACTIONS = [
-    # Budi (punya customerId) — kebiasaan belanja 50.000 x 3 transaksi.
+    # Budi (punya customerId) — 3 transaksi sebelumnya: 50.000 / 60.000 / 70.000.
     {
-        "_id": "TRX-20260905-0001",
-        "date": "2026-09-05T03:00:00+00:00",
+        "_id": "TRX-20261005-0001",
+        "date": "2026-10-05T03:00:00+00:00",
         "type": "Dine In",
         "method": "Cash",
         "total": 50000,
@@ -343,11 +346,11 @@ SPEND_TRANSACTIONS = [
         "items_json": [{"qty": 3}],
     },
     {
-        "_id": "TRX-20260910-0001",
-        "date": "2026-09-10T03:00:00+00:00",
+        "_id": "TRX-20261010-0001",
+        "date": "2026-10-10T03:00:00+00:00",
         "type": "Dine In",
         "method": "Cash",
-        "total": 50000,
+        "total": 60000,
         "customerId": "CUST-1",
         "customerName": "Budi",
         "items_json": [{"qty": 3}],
@@ -357,49 +360,49 @@ SPEND_TRANSACTIONS = [
         "date": "2026-10-15T03:00:00+00:00",
         "type": "Dine In",
         "method": "Cash",
-        "total": 50000,
+        "total": 70000,
         "customerId": "CUST-1",
         "customerName": "Budi",
-        "items_json": [{"qty": 3}],
+        "items_json": [{"qty": 4}],
     },
-    # Budi pada periode terakhir: hanya 10.000 (turun 80%) -> drastis.
+    # Budi transaksi TERAKHIR: 30.000 vs acuan median 60.000 -> turun 50%.
     {
         "_id": "TRX-20261105-0001",
         "date": "2026-11-05T03:00:00+00:00",
         "type": "Dine In",
         "method": "Cash",
-        "total": 10000,
+        "total": 30000,
         "customerId": "CUST-1",
         "customerName": "Budi",
         "userName": "Kasir A",
         "shiftId": "SHIFT-9",
         "items_json": [{"qty": 1}],
     },
-    # Sari (hanya nama, tanpa customerId) — kebiasaan 30.000 x 4 transaksi.
+    # Sari (hanya nama, tanpa customerId) — 4 transaksi sebelumnya.
     {
-        "_id": "TRX-20260906-0001",
-        "date": "2026-09-06T03:00:00+00:00",
+        "_id": "TRX-20261003-0001",
+        "date": "2026-10-03T03:00:00+00:00",
         "type": "Takeaway",
         "method": "Cash",
-        "total": 30000,
+        "total": 27000,
         "customerName": "sari",
         "items_json": [{"qty": 2}],
     },
     {
-        "_id": "TRX-20260911-0001",
-        "date": "2026-09-11T03:00:00+00:00",
+        "_id": "TRX-20261008-0001",
+        "date": "2026-10-08T03:00:00+00:00",
         "type": "Takeaway",
         "method": "Cash",
-        "total": 30000,
+        "total": 28000,
         "customerName": "Sari ",
         "items_json": [{"qty": 2}],
     },
     {
-        "_id": "TRX-20261001-0001",
-        "date": "2026-10-01T03:00:00+00:00",
+        "_id": "TRX-20261015-0001",
+        "date": "2026-10-15T03:00:00+00:00",
         "type": "Takeaway",
         "method": "Cash",
-        "total": 30000,
+        "total": 29000,
         "customerName": "SARI",
         "items_json": [{"qty": 2}],
     },
@@ -412,22 +415,14 @@ SPEND_TRANSACTIONS = [
         "customerName": "Sari",
         "items_json": [{"qty": 2}],
     },
-    # Sari pada periode terakhir: 28.000 x 2 (turun ~6.7%) -> tidak drastis.
+    # Sari transaksi TERAKHIR: 26.000 vs median 3 transaksi terakhir
+    # (28.000/29.000/30.000 -> 29.000) = turun ~10.3% -> tidak drastis.
     {
         "_id": "TRX-20261110-0001",
         "date": "2026-11-10T03:00:00+00:00",
         "type": "Takeaway",
         "method": "Cash",
-        "total": 28000,
-        "customerName": "Sari",
-        "items_json": [{"qty": 2}],
-    },
-    {
-        "_id": "TRX-20261112-0001",
-        "date": "2026-11-12T03:00:00+00:00",
-        "type": "Takeaway",
-        "method": "Cash",
-        "total": 28000,
+        "total": 26000,
         "customerName": "Sari",
         "items_json": [{"qty": 2}],
     },
@@ -443,7 +438,7 @@ SPEND_TRANSACTIONS = [
 ]
 
 
-def _run_with_baseline(fake_db, baseline_days=90, start="2026-11-01", end="2026-11-30"):
+def _run_with_baseline(fake_db, baseline_days=30, start="2026-11-01", end="2026-11-30"):
     original = reports.db
     reports.db = fake_db
     try:
@@ -469,13 +464,20 @@ def test_customer_behavior_spend_alerts_compares_against_own_history():
     budi = alerts["Budi"]
     assert budi["customer_id"] == "CUST-1"
     assert budi["identity"] == "customerId"
+    # 3 transaksi sebelumnya (50k/60k/70k) -> rentang min-max + median 60k.
     assert budi["baseline_tx_count"] == 3
-    assert budi["baseline_aov"] == 50000
+    assert budi["prev_total_min"] == 50000
+    assert budi["prev_total_max"] == 70000
+    assert budi["baseline_total"] == 60000
+    # Transaksi terakhir 30.000 vs acuan 60.000 -> turun 50%.
+    assert budi["last_total"] == 30000
     assert budi["recent_tx_count"] == 1
-    assert budi["recent_aov"] == 10000
-    assert budi["aov_change_pct"] == -80.0
-    assert budi["aov_drop_pct"] == 80.0
+    assert budi["recent_aov"] == 30000
+    assert budi["change_pct"] == -50.0
+    assert budi["drop_pct"] == 50.0
     assert budi["is_drastic_drop"] is True
+    assert budi["last_items"] == 1
+    assert budi["last_time"] == "11:00"
     assert budi["last_cashier"] == "Kasir A"
     assert budi["last_shift_id"] == "SHIFT-9"
     assert budi["last_visit"] == "2026-11-05"
@@ -486,11 +488,14 @@ def test_customer_behavior_spend_alerts_falls_back_to_normalized_name():
     sari = next(a for a in report["spend_alerts"] if a["identity"] == "customerName")
 
     # "sari", "Sari ", "SARI", "Sari" harus dikelompokkan jadi satu pelanggan.
-    assert sari["baseline_tx_count"] == 4
-    assert sari["baseline_aov"] == 30000
-    assert sari["recent_tx_count"] == 2
-    assert sari["recent_aov"] == 28000
-    assert sari["aov_change_pct"] == -6.67
+    # Hanya 3 transaksi tepat sebelumnya dipakai (28k/29k/30k).
+    assert sari["baseline_tx_count"] == 3
+    assert sari["prev_total_min"] == 28000
+    assert sari["prev_total_max"] == 30000
+    assert sari["baseline_total"] == 29000
+    assert sari["last_total"] == 26000
+    assert sari["recent_tx_count"] == 1
+    assert sari["change_pct"] == -10.34
     assert sari["is_drastic_drop"] is False
 
 
@@ -500,11 +505,14 @@ def test_customer_behavior_spend_alerts_sorted_by_biggest_drop():
     assert drops == sorted(drops, reverse=True)
     assert report["spend_alerts"][0]["customer_name"] == "Budi"
     # Transaksi walk-in tanpa identitas tidak dilaporkan.
-    assert all(a["recent_tx_count"] >= 1 for a in report["spend_alerts"])
+    assert all(a["recent_tx_count"] == 1 for a in report["spend_alerts"])
     assert report["spend_drop_threshold"] == 40.0
-    assert report["baseline"]["days"] == 90
-    assert report["baseline"]["start"] == "2026-08-03"
+    assert report["baseline"]["days"] == 30
+    assert report["baseline"]["start"] == "2026-10-02"
     assert report["baseline"]["end"] == "2026-10-31"
+    assert report["baseline"]["max_prev_tx"] == 3
+    assert report["baseline"]["limit"] == 20
+    assert report["spend_alerts_limit"] == 20
 
 
 def test_customer_behavior_spend_alerts_respects_baseline_window():
@@ -523,3 +531,80 @@ def test_customer_behavior_reads_baseline_window_from_db():
     assert len(fake.transactions.filters) == 2
     for flt in fake.transactions.filters:
         assert "$or" in flt
+
+
+def test_customer_behavior_spend_alerts_skips_insufficient_history():
+    """Pelanggan dengan kurang dari 2 transaksi sebelumnya dilewati."""
+    rows = [
+        # Hanya SATU transaksi sebelumnya -> dilewati.
+        {
+            "_id": "TRX-20261005-0001",
+            "date": "2026-10-20T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 80000,
+            "customerId": "CUST-NEW",
+            "customerName": "Andi",
+            "items_json": [{"qty": 2}],
+        },
+        {
+            "_id": "TRX-20261105-0001",
+            "date": "2026-11-05T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 20000,
+            "customerId": "CUST-NEW",
+            "customerName": "Andi",
+            "items_json": [{"qty": 1}],
+        },
+    ]
+    report = _run_with_baseline(FakeDB(rows))
+    assert report["spend_alerts"] == []
+
+
+def test_customer_behavior_spend_alerts_limits_top_20():
+    """Daftar dibatasi 20 pelanggan dengan penurunan terbesar di urutan depan."""
+    rows = []
+    for i in range(25):
+        cid = f"CUST-{i:02d}"
+        # Dua transaksi sebelumnya (100.000) lalu transaksi terakhir yang
+        # semakin kecil -> drop berbeda per pelanggan (i=0 turun paling besar).
+        rows.append({
+            "_id": f"TRX-20261005-{i:04d}",
+            "date": "2026-10-05T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 100000,
+            "customerId": cid,
+            "customerName": cid,
+            "items_json": [{"qty": 2}],
+        })
+        rows.append({
+            "_id": f"TRX-20261006-{i:04d}",
+            "date": "2026-10-06T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 100000,
+            "customerId": cid,
+            "customerName": cid,
+            "items_json": [{"qty": 2}],
+        })
+        rows.append({
+            "_id": f"TRX-20261105-{i:04d}",
+            "date": "2026-11-05T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 100000 - i * 1000,
+            "customerId": cid,
+            "customerName": cid,
+            "items_json": [{"qty": 2}],
+        })
+    report = _run_with_baseline(FakeDB(rows))
+    alerts = report["spend_alerts"]
+    assert len(alerts) == 20
+    # Urutan penurunan terbesar: CUST-00 (100.000 -> 100.000 = 0%) ... semua
+    # memiliki acuan sama, jadi pelanggan dengan last_total terkecil dulu.
+    drops = [a["drop_pct"] for a in alerts]
+    assert drops == sorted(drops, reverse=True)
+    assert alerts[0]["customer_id"] == "CUST-24"
+    assert all(a["customer_id"] != "CUST-00" for a in alerts)

@@ -39,37 +39,85 @@ export const witaDaysAgoStr = (n, base = new Date()) => {
 // Ambang penurunan drastis (persen) bila backend tidak mengirimkannya.
 export const DEFAULT_SPEND_DROP_THRESHOLD = 40;
 
+// Batas jumlah pelanggan yang ditampilkan pada panel peringatan belanja.
+// Backend sudah membatasi 20; ini jaring pengaman di sisi UI.
+export const SPEND_ALERTS_LIMIT = 20;
+
 /**
  * Normalisasi daftar ``spend_alerts`` dari backend (pemantauan perubahan
  * perilaku belanja per pelanggan). Menjamin tipe angka & boolean aman serta
  * menyediakan label identitas yang ramah ditampilkan.
+ *
+ * Tiap baris membandingkan TRANSAKSI TERAKHIR pelanggan dengan 2-3 transaksi
+ * sebelumnya (rentang ``prevTotalMin``/``prevTotalMax`` + acuan median
+ * ``baselineTotal``), bukan rata-rata. Field lama (``baselineAov``,
+ * ``recentAov``, ``aovChangePct``) dipertahankan sebagai alias agar komponen
+ * lama tetap kompatibel.
  */
 export const normalizeCustomerSpendAlerts = (rows) => {
   if (!Array.isArray(rows)) return [];
   return rows.map((row, index) => {
     const name = String(row?.customer_name || row?.customer_id || "Tanpa nama").trim();
+    const baselineTotal = toNumber(row?.baseline_total, toNumber(row?.baseline_aov));
+    const lastTotal = toNumber(row?.last_total, toNumber(row?.recent_aov));
+    const changePct =
+      row?.change_pct === undefined || row?.change_pct === null
+        ? toNumber(row?.aov_change_pct)
+        : toNumber(row?.change_pct);
+    const dropPct = toNumber(row?.drop_pct, toNumber(row?.aov_drop_pct));
     return {
       key: row?.customer_id || `row-${index}`,
       customerId: row?.customer_id || "",
       customerName: name,
       identity: row?.identity || (row?.customer_id ? "customerId" : "customerName"),
       baselineTxCount: toNumber(row?.baseline_tx_count),
-      baselineAov: toNumber(row?.baseline_aov),
+      baselineTotal,
+      baselineAov: baselineTotal,
       baselineAvgItems: toNumber(row?.baseline_avg_items),
+      // Rentang nilai 2-3 transaksi sebelumnya (min-max).
+      prevTxCount: toNumber(row?.prev_tx_count, toNumber(row?.baseline_tx_count)),
+      prevTotalMin: toNumber(row?.prev_total_min),
+      prevTotalMax: toNumber(row?.prev_total_max),
+      // Transaksi terakhir pelanggan.
+      lastTotal,
+      lastItems: toNumber(row?.last_items, toNumber(row?.recent_avg_items)),
+      lastTime: String(row?.last_time || ""),
       recentTxCount: toNumber(row?.recent_tx_count),
-      recentAov: toNumber(row?.recent_aov),
+      recentAov: lastTotal,
       recentAvgItems: toNumber(row?.recent_avg_items),
-      aovChangePct: toNumber(row?.aov_change_pct),
-      aovDropPct: toNumber(row?.aov_drop_pct),
+      changePct,
+      aovChangePct: changePct,
+      aovDropPct: dropPct,
       itemsChangePct: toNumber(row?.items_change_pct),
       itemsDropPct: toNumber(row?.items_drop_pct),
-      dropPct: toNumber(row?.drop_pct),
+      dropPct,
       isDrasticDrop: Boolean(row?.is_drastic_drop),
       lastCashier: String(row?.last_cashier || "").trim(),
       lastShiftId: row?.last_shift_id || "",
       lastVisit: row?.last_visit || "",
     };
   });
+};
+
+/**
+ * Format rentang nilai transaksi sebelumnya (min-max) dalam Rupiah.
+ * ``formatValue`` biasanya fungsi ``rp`` dari ``@/lib/api``; bila tidak
+ * diberikan, nilai dikembalikan sebagai angka apa adanya. Bila min == max
+ * hanya satu nilai ditampilkan (contoh: ``Rp 100.000``), selain itu dipisah
+ * tanda hubung (contoh: ``Rp 100.000 – Rp 130.000``).
+ */
+export const formatSpendRange = (min, max, formatValue) => {
+  const fmt = typeof formatValue === "function" ? formatValue : (v) => String(toNumber(v));
+  const lo = toNumber(min);
+  const hi = toNumber(max);
+  return lo === hi ? fmt(lo) : `${fmt(lo)} – ${fmt(hi)}`;
+};
+
+/** Batasi daftar alert agar tidak melebihi ``limit`` pelanggan. */
+export const limitSpendAlerts = (alerts, limit = SPEND_ALERTS_LIMIT) => {
+  const list = Array.isArray(alerts) ? alerts : [];
+  const cap = toNumber(limit, SPEND_ALERTS_LIMIT);
+  return cap > 0 ? list.slice(0, cap) : list;
 };
 
 /** Apakah satu pelanggan turun drastis dari kebiasaannya sendiri. */
@@ -84,17 +132,25 @@ export const filterSpendAlerts = (alerts, onlyDrastic = false) => {
 
 /**
  * Urutkan daftar alert. ``mode``: "drop" (penurunan terbesar, default),
- * "aov" (belanja terakhir terbesar), "name" (alfabetis).
+ * "aov" (belanja/transaksi terakhir terbesar), "name" (alfabetis).
  */
 export const sortSpendAlerts = (alerts, mode = "drop") => {
   const list = [...(Array.isArray(alerts) ? alerts : [])];
   if (mode === "aov") {
-    return list.sort((a, b) => b.recentAov - a.recentAov || a.customerName.localeCompare(b.customerName));
+    return list.sort(
+      (a, b) =>
+        toNumber(b.lastTotal, b.recentAov) - toNumber(a.lastTotal, a.recentAov) ||
+        a.customerName.localeCompare(b.customerName),
+    );
   }
   if (mode === "name") {
     return list.sort((a, b) => a.customerName.localeCompare(b.customerName));
   }
-  return list.sort((a, b) => b.dropPct - a.dropPct || b.recentAov - a.recentAov);
+  return list.sort(
+    (a, b) =>
+      toNumber(b.dropPct) - toNumber(a.dropPct) ||
+      toNumber(b.lastTotal, b.recentAov) - toNumber(a.lastTotal, a.recentAov),
+  );
 };
 
 /**
@@ -153,11 +209,14 @@ export const normalizeCustomerBehaviorReport = (data) => {
     insights,
     spendAlerts: normalizeCustomerSpendAlerts(data?.spend_alerts),
     spendDropThreshold: toNumber(data?.spend_drop_threshold, 40),
+    spendAlertsLimit: toNumber(data?.spend_alerts_limit, toNumber(data?.baseline?.limit, SPEND_ALERTS_LIMIT)),
     baseline: {
       start: data?.baseline?.start || "",
       end: data?.baseline?.end || "",
       days: toNumber(data?.baseline?.days),
       minBaselineTx: toNumber(data?.baseline?.min_baseline_tx),
+      maxPrevTx: toNumber(data?.baseline?.max_prev_tx),
+      limit: toNumber(data?.baseline?.limit, SPEND_ALERTS_LIMIT),
     },
     transactionCount: toNumber(data?.transaction_count),
     totalRevenue: toNumber(data?.total_revenue),
