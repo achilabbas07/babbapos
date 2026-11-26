@@ -374,6 +374,10 @@ SPEND_TRANSACTIONS = [
         "total": 30000,
         "customerId": "CUST-1",
         "customerName": "Budi",
+        # Pelayan (field terpisah) berbeda dari kasir pembayar supaya kolom
+        # "Waiters" dapat diuji memprioritaskan pelayan.
+        "waiterName": "Pelayan B",
+        "waiterId": "W-7",
         "userName": "Kasir A",
         "shiftId": "SHIFT-9",
         "items_json": [{"qty": 1}],
@@ -478,6 +482,8 @@ def test_customer_behavior_spend_alerts_compares_against_own_history():
     assert budi["is_drastic_drop"] is True
     assert budi["last_items"] == 1
     assert budi["last_time"] == "11:00"
+    # Kolom "Waiters" memprioritaskan PELAYAN (waiterName), kasir tetap terpisah.
+    assert budi["last_waiter"] == "Pelayan B"
     assert budi["last_cashier"] == "Kasir A"
     assert budi["last_shift_id"] == "SHIFT-9"
     assert budi["last_visit"] == "2026-11-05"
@@ -513,6 +519,91 @@ def test_customer_behavior_spend_alerts_sorted_by_biggest_drop():
     assert report["baseline"]["max_prev_tx"] == 3
     assert report["baseline"]["limit"] == 20
     assert report["spend_alerts_limit"] == 20
+
+
+def test_customer_behavior_waiters_fall_back_to_item_waiter_name():
+    """Pelayan level transaksi kosong -> pakai waiterName baris item pertama."""
+    rows = [
+        {
+            "_id": "TRX-20261005-0001",
+            "date": "2026-10-05T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 80000,
+            "customerId": "CUST-ITM",
+            "customerName": "Citra",
+            "userName": "Kasir A",
+            "items_json": [{"qty": 2}],
+        },
+        {
+            "_id": "TRX-20261006-0001",
+            "date": "2026-10-06T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 80000,
+            "customerId": "CUST-ITM",
+            "customerName": "Citra",
+            "userName": "Kasir A",
+            "items_json": [{"qty": 2}],
+        },
+        {
+            "_id": "TRX-20261105-0001",
+            "date": "2026-11-05T03:00:00+00:00",
+            "type": "Dine In",
+            "method": "Cash",
+            "total": 20000,
+            "customerId": "CUST-ITM",
+            "customerName": "Citra",
+            # Tidak ada waiterName level transaksi, hanya per baris item.
+            "userName": "Kasir A",
+            "items_json": [{"qty": 1}, {"qty": 1, "waiterName": "Pelayan C"}],
+        },
+    ]
+    alert = _run_with_baseline(FakeDB(rows))["spend_alerts"][0]
+    assert alert["last_waiter"] == "Pelayan C"
+    assert alert["last_cashier"] == "Kasir A"
+
+
+def test_customer_behavior_waiters_fall_back_to_cashier_when_no_waiter():
+    """Tanpa data pelayan sama sekali -> last_waiter kosong (UI pakai kasir)."""
+    rows = [
+        {
+            "_id": "TRX-20261005-0001",
+            "date": "2026-10-05T03:00:00+00:00",
+            "type": "Take Away",
+            "method": "Cash",
+            "total": 70000,
+            "customerId": "CUST-NW",
+            "customerName": "Dewi",
+            "userName": "Kasir Z",
+            "items_json": [{"qty": 2}],
+        },
+        {
+            "_id": "TRX-20261006-0001",
+            "date": "2026-10-06T03:00:00+00:00",
+            "type": "Take Away",
+            "method": "Cash",
+            "total": 70000,
+            "customerId": "CUST-NW",
+            "customerName": "Dewi",
+            "userName": "Kasir Z",
+            "items_json": [{"qty": 2}],
+        },
+        {
+            "_id": "TRX-20261105-0001",
+            "date": "2026-11-05T03:00:00+00:00",
+            "type": "Take Away",
+            "method": "Cash",
+            "total": 10000,
+            "customerId": "CUST-NW",
+            "customerName": "Dewi",
+            "userName": "Kasir Z",
+            "items_json": [{"qty": 1}],
+        },
+    ]
+    alert = _run_with_baseline(FakeDB(rows))["spend_alerts"][0]
+    assert alert["last_waiter"] == ""
+    assert alert["last_cashier"] == "Kasir Z"
 
 
 def test_customer_behavior_spend_alerts_respects_baseline_window():

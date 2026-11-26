@@ -156,6 +156,7 @@ const SPEND_ALERTS = [
     aov_drop_pct: 50,
     drop_pct: 50,
     is_drastic_drop: true,
+    last_waiter: "Pelayan B",
     last_cashier: "Waiters A",
     last_shift_id: "SHIFT-9",
     last_visit: "2026-11-20",
@@ -182,6 +183,7 @@ const SPEND_ALERTS = [
     aov_drop_pct: 10.34,
     drop_pct: 10.34,
     is_drastic_drop: false,
+    last_waiter: "",
     last_cashier: "",
     last_shift_id: null,
     last_visit: "2026-11-19",
@@ -208,7 +210,9 @@ describe("normalizeCustomerSpendAlerts", () => {
       aovChangePct: -50,
       dropPct: 50,
       isDrasticDrop: true,
+      lastWaiter: "Pelayan B",
       lastCashier: "Waiters A",
+      lastStaff: "Pelayan B",
       lastShiftId: "SHIFT-9",
     });
     expect(alerts[1].customerId).toBe("");
@@ -216,11 +220,26 @@ describe("normalizeCustomerSpendAlerts", () => {
     expect(alerts[1].prevTotalMin).toBe(28000);
     expect(alerts[1].prevTotalMax).toBe(30000);
     expect(alerts[1].isDrasticDrop).toBe(false);
+    // Tanpa pelayan -> UI jatuh ke kasir (lastStaff = lastCashier).
+    expect(alerts[1].lastWaiter).toBe("");
+    expect(alerts[1].lastStaff).toBe("");
   });
 
   it("mengembalikan array kosong untuk input tidak valid", () => {
     expect(normalizeCustomerSpendAlerts(null)).toEqual([]);
     expect(normalizeCustomerSpendAlerts(undefined)).toEqual([]);
+  });
+
+  it("memprioritaskan pelayan dan jatuh ke kasir bila pelayan kosong", () => {
+    const [waiter, cashier] = normalizeCustomerSpendAlerts([
+      { customer_name: "A", last_waiter: "Pelayan X", last_cashier: "Kasir Y" },
+      { customer_name: "B", last_waiter: "", last_cashier: "Kasir Y" },
+    ]);
+    expect(waiter.lastWaiter).toBe("Pelayan X");
+    expect(waiter.lastStaff).toBe("Pelayan X");
+    expect(cashier.lastWaiter).toBe("");
+    expect(cashier.lastCashier).toBe("Kasir Y");
+    expect(cashier.lastStaff).toBe("Kasir Y");
   });
 
   it("mendukung field lama (baseline_aov/recent_aov) sebagai fallback", () => {

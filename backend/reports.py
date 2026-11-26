@@ -502,6 +502,26 @@ def _tx_customer_identity(tx):
     return None
 
 
+def _tx_waiter_name(tx):
+    """Nama PELAYAN satu transaksi (field terpisah), bukan kasir.
+
+    Transaksi menyimpan pelayan pada ``waiterName`` (level transaksi) dan,
+    untuk atribusi per baris item (mis. bill digabung / pelayan diganti saat
+    "tambah order"), pada ``items_json[].waiterName``. Prioritas: ``waiterName``
+    transaksi, lalu pelayan pertama yang tercatat pada baris item. Mengembalikan
+    string kosong bila transaksi memang tidak punya data pelayan (mis. pesanan
+    langsung tanpa pelayan) sehingga UI dapat jatuh ke ``userName`` kasir.
+    """
+    name = str(tx.get("waiterName") or "").strip()
+    if name:
+        return name
+    for item in tx.get("items_json") or []:
+        item_name = str((item or {}).get("waiterName") or "").strip()
+        if item_name:
+            return item_name
+    return ""
+
+
 def _customer_spend_alerts(txs, baseline_txs, threshold, min_baseline_tx):
     """Bandingkan TRANSAKSI TERAKHIR vs 2-3 transaksi sebelumnya per pelanggan.
 
@@ -548,6 +568,9 @@ def _customer_spend_alerts(txs, baseline_txs, threshold, min_baseline_tx):
                 "when": when,
                 "total": _total(tx),
                 "items": _tx_item_qty(tx),
+                # Pelayan (bila ada field terpisah) dan kasir pembayar disimpan
+                # berdampingan supaya UI dapat memprioritaskan PELAYAN.
+                "waiter_name": _tx_waiter_name(tx),
                 "user_name": str(tx.get("userName") or "").strip(),
                 "shift_id": tx.get("shiftId"),
             }
@@ -616,6 +639,7 @@ def _customer_spend_alerts(txs, baseline_txs, threshold, min_baseline_tx):
             "last_items": round(last_items, 2),
             "last_visit": last_tx["when"].date().isoformat(),
             "last_time": last_tx["when"].strftime("%H:%M"),
+            "last_waiter": last_tx["waiter_name"],
             "last_cashier": last_tx["user_name"],
             "last_shift_id": last_tx["shift_id"],
         })

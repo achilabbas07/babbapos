@@ -92,7 +92,12 @@ export const normalizeCustomerSpendAlerts = (rows) => {
       itemsDropPct: toNumber(row?.items_drop_pct),
       dropPct,
       isDrasticDrop: Boolean(row?.is_drastic_drop),
+      // Pelayanan transaksi terakhir: PELAYAN (waiterName) bila tersedia,
+      // jika kosong jatuh ke kasir pembayar (userName). ``lastStaff`` adalah
+      // nilai prioritas siap tampil untuk kolom "Waiters".
+      lastWaiter: String(row?.last_waiter || "").trim(),
       lastCashier: String(row?.last_cashier || "").trim(),
+      lastStaff: String(row?.last_waiter || "").trim() || String(row?.last_cashier || "").trim(),
       lastShiftId: row?.last_shift_id || "",
       lastVisit: row?.last_visit || "",
     };

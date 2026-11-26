@@ -474,8 +474,13 @@ export default function CustomerBehaviorReport() {
                           className="text-xs text-muted-foreground"
                           data-testid={`customer-behavior-alert-waiters-${a.key}`}
                         >
-                          {a.lastCashier || "—"}
-                          {a.lastShiftId ? ` · ${a.lastShiftId}` : ""}
+                          {a.lastStaff || "—"}
+                          {a.lastShiftId ? <span className="block">{a.lastShiftId}</span> : null}
+                          {a.lastStaff ? (
+                            <span className="block text-[11px] opacity-70">
+                              {a.lastWaiter ? "Pelayan" : "Kasir"}
+                            </span>
+                          ) : null}
                         </TableCell>
                       </TableRow>
                     ))}
