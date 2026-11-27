@@ -209,6 +209,7 @@ class PurchaseIn(BaseModel):
     items: List[PurchaseItemIn] = Field(min_length=1)
     metode_pembayaran: Literal["cash", "credit"] = "cash"
     sumber_dana_akun: Optional[str] = Field(None, min_length=1, max_length=32)
+    discount_amount: float = Field(0, ge=0)
 
     @model_validator(mode="after")
     def require_funding_account_for_cash(self):
@@ -1191,7 +1192,13 @@ async def create_purchase(body: PurchaseIn, user: User = Depends(ADMIN)):
         raise HTTPException(404, f"Bahan tidak ditemukan: {', '.join(missing)}")
     items = [{"inventoryId": i.inventoryId, "name": inv[i.inventoryId]["name"], "unit": inv[i.inventoryId]["unit"],
               "qty": i.qty, "cost_per_unit": i.cost_per_unit, "subtotal": i.qty * i.cost_per_unit} for i in body.items]
-    total_cost = int(round(sum(i["subtotal"] for i in items)))
+    gross_total = int(round(sum(i["subtotal"] for i in items)))
+    discount_amount = int(round(body.discount_amount or 0))
+    if discount_amount < 0 or discount_amount > gross_total:
+        raise HTTPException(400, "Potongan pembelian tidak boleh melebihi total pembelian.")
+    if discount_amount >= gross_total:
+        discount_amount = max(gross_total - 1, 0)
+    total_cost = gross_total - discount_amount
     purchase = Purchase(id=await next_id(f"PO-{local_date_str()}"),
                         date=to_utc_iso(body.date) if body.date else now_iso(),
                         supplier=supplier["nama_supplier"], supplier_id=supplier["id"],

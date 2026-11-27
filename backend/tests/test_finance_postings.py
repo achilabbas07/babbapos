@@ -246,6 +246,38 @@ def test_vercel_mirror_endpoints_match_server_implementation():
         )
 
 
+def test_purchase_discount_is_optional_and_rejects_negative_values():
+    """Regresi: `PurchaseIn` menerima potongan nota opsional (default 0) dan
+    menolak nilai negatif, tanpa mengubah struktur item pembelian."""
+    import pytest
+
+    import server
+
+    base = {
+        "supplier_id": 1,
+        "sumber_dana_akun": "1-10001",
+        "items": [{"inventoryId": "INV-1", "qty": 2, "cost_per_unit": 5000}],
+    }
+    assert server.PurchaseIn(**base).discount_amount == 0
+    assert server.PurchaseIn(**{**base, "discount_amount": 1500}).discount_amount == 1500
+    with pytest.raises(Exception):
+        server.PurchaseIn(**{**base, "discount_amount": -1})
+
+
+def test_purchase_discount_reduces_net_total_cost_in_both_sources():
+    """Regresi: potongan nota dihitung sebagai `gross_total - discount_amount`
+    dan nilai bersih itulah yang dipakai sebagai `total_cost`. Kedua sumber
+    (server.py dan api/index.py) wajib memuat perhitungan yang sama."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    for relative in ("backend/server.py", "api/index.py"):
+        text = (root / relative).read_text(encoding="utf-8")
+        assert "gross_total = int(round(sum(i[\"subtotal\"] for i in items)))" in text, relative
+        assert "total_cost = gross_total - discount_amount" in text, relative
+        assert "discount_amount: float = Field(0, ge=0)" in text, relative
+
+
 def test_checkout_journal_gate_allows_discount_only_transactions_in_both_sources():
     """Regresi: penjurnalan checkout harus tetap berjalan saat `total == 0`
     namun ada diskon (promo komplimen `COMP`), baik di `backend/server.py`

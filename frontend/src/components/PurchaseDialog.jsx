@@ -18,6 +18,7 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [fundingAccount, setFundingAccount] = useState("");
   const [lines, setLines] = useState([]);
+  const [discount, setDiscount] = useState(0);
   const [saving, setSaving] = useState(false);
 
   const loadSuppliers = useCallback(async () => {
@@ -60,6 +61,7 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
       setPaymentMethod("cash");
       setFundingAccount("");
       setLines([{ inventoryId: "", qty: 1, total_price: 0, cost_per_unit: 0 }]);
+      setDiscount(0);
     }
   }, [open, loadSuppliers]);
 
@@ -86,6 +88,9 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
     i === idx ? { ...line, total_price: totalPrice, cost_per_unit: unitCost(totalPrice, line.qty) } : line
   )));
   const total = lines.reduce((sum, line) => sum + (Number(line.total_price) || 0), 0);
+  const grossTotal = Math.max(total, 0);
+  const discountValue = Math.min(Math.max(Number(discount) || 0, 0), grossTotal);
+  const netTotal = grossTotal - discountValue;
 
   const save = async () => {
     if (!supplierId) {
@@ -96,6 +101,10 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
       toast.error("Tidak ada akun kas atau bank yang tersedia sebagai sumber dana.");
       return;
     }
+    if (!(netTotal >= 1)) {
+      toast.error("Total bersih pembelian minimal Rp1.");
+      return;
+    }
     setSaving(true);
     try {
       await api.post("/purchases", {
@@ -103,6 +112,7 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
         date: dateToIso(date),
         metode_pembayaran: paymentMethod,
         ...(paymentMethod === "cash" ? { sumber_dana_akun: fundingAccount } : {}),
+        discount_amount: Math.round(discountValue),
         items: lines.filter((l) => l.inventoryId).map((l) => ({ inventoryId: l.inventoryId, qty: Number(l.qty), cost_per_unit: Number(l.cost_per_unit) })),
       });
       toast.success(paymentMethod === "credit"
@@ -202,10 +212,29 @@ export const PurchaseDialog = ({ open, onOpenChange, inventory, onSaved }) => {
           <button data-testid="purchase-add-line" onClick={() => setLines((ls) => [...ls, { inventoryId: "", qty: 1, total_price: 0, cost_per_unit: 0 }])} className="flex items-center gap-1.5 text-sm text-primary"><Plus className="h-4 w-4" />Tambah baris</button>
         </div>
         <p className="text-xs text-muted-foreground">Biaya per satuan bahan diperbarui ke harga beli terakhir, HPP produk terkait dihitung ulang.</p>
-        <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
-          <span className="text-sm text-muted-foreground">Total pembelian</span>
-          <span data-testid="purchase-total" className="font-mono text-lg font-semibold text-primary">{rp(total)}</span>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="purchase-discount" className="text-sm text-muted-foreground">Potongan / Diskon Nota</Label>
+          <Input
+            id="purchase-discount"
+            data-testid="purchase-discount"
+            type="number"
+            step="any"
+            min="0"
+            max={grossTotal}
+            value={discount}
+            onChange={(e) => setDiscount(e.target.value)}
+            className="w-40 font-mono"
+          />
         </div>
+        <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3">
+          <span className="text-sm text-muted-foreground">Total pembelian (bersih)</span>
+          <span data-testid="purchase-total" className="font-mono text-lg font-semibold text-primary">{rp(netTotal)}</span>
+        </div>
+        {discountValue > 0 && (
+          <p data-testid="purchase-discount-summary" className="text-xs text-muted-foreground">
+            Subtotal {rp(grossTotal)} − potongan {rp(discountValue)}
+          </p>
+        )}
         <DialogFooter><Button data-testid="purchase-save-button" onClick={save} disabled={saving || !supplierId || suppliers.length === 0}>{saving ? "Menyimpan..." : "Simpan Pembelian"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
