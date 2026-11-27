@@ -578,6 +578,24 @@ def _money(value: Any) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def exclude_void_transactions(txs: Sequence[Any]) -> list[Any]:
+    """Buang transaksi void dari agregasi laporan (pendapatan/HPP/metode/harian).
+
+    Transaksi dengan ``status == "void"`` penjualan + HPP-nya sudah dibalik oleh
+    entri jurnal pembalik (``reverse_checkout_journal_entries``), sehingga
+    membaca ulang transaksi tersebut dari tabel ``transactions`` akan menghitung
+    gandanya (pendapatan/HPP jadi terkoreksi dua kali). Agregasi berbasis buku
+    besar sudah bersih dengan sendirinya karena pembalik juga tercatat di
+    ``general_ledger``.
+
+    Fungsi murni (tanpa I/O) supaya bisa dipakai seragam oleh ``server.py``
+    (``report_summary``) dan ``reports.py``. Kolom ``status`` hanya muncul
+    setelah migrasi ``supabase/migrate_transaction_void_columns.sql``; sebelum
+    itu tidak ada transaksi yang terfilter sehingga perilaku lama tetap sama.
+    """
+    return [t for t in (txs or []) if str((t or {}).get("status") or "").strip().lower() != "void"]
+
+
 async def get_profit_and_loss_report(
     pool: Any,
     start_date: date,
@@ -909,6 +927,11 @@ async def get_profit_and_loss_report(
         from public.transactions
         where (date at time zone 'Asia/Makassar')::date >= $1::date
             and (date at time zone 'Asia/Makassar')::date < $2::date
+            -- Transaksi void dilewati: pendapatan + diskonnya sudah dibalik oleh
+            -- entri jurnal pembalik (reverse_checkout_journal_entries) sehingga
+            -- tidak boleh dihitung ganda. coalesce() menjaga perilaku lama bila
+            -- kolom `status` (migrate_transaction_void_columns.sql) belum ada.
+            and coalesce(status, 'paid') <> 'void'
             -- Diskon yang SUDAH punya jurnal (DEBIT "Diskon Penjualan")
             -- tidak dihitung lagi di sini karena sudah masuk lewat buku
             -- besar; sisanya (transaksi pra-backfill) tetap dibaca dari
@@ -955,6 +978,8 @@ async def get_profit_and_loss_report(
           ) as item(value)
                     where (trx.date at time zone 'Asia/Makassar')::date >= $1::date
                         and (trx.date at time zone 'Asia/Makassar')::date < $2::date
+                                                -- Transaksi void dilewati dari sumber HPP (snapshot hpp x qty).
+                                                and coalesce(trx.status, 'paid') <> 'void'
         ),
         variant_costs as (
           select
@@ -1334,6 +1359,76 @@ async def post_checkout_journal_entries(
         """,
         journal_entries,
     )
+
+
+async def reverse_checkout_journal_entries(
+    connection: Any,
+    transaction_id: str,
+    total_hpp: Any = None,
+) -> None:
+    """Membalik jurnal transaksi checkout yang sudah diposting.
+
+    Baris asal di ``public.jurnal_entries`` dibalik posisinya (DEBIT <-> KREDIT)
+    dan disimpan kembali dengan ``transaction_id`` yang sama. Jika ``total_hpp``
+    bernilai lebih dari 0, pasangan jurnal HPP pembalik juga dicatat ke
+    ``public.jurnal_transaksi``. Bila tidak ada baris asal, fungsi ini tidak
+    melakukan apa pun (tanpa error).
+    """
+    transaction_id = _required_journal_id(
+        {"transaction_id": transaction_id},
+        "transaction_id",
+        label="transaksi",
+    )
+
+    rows = await connection.fetch(
+        """
+        select account_code, position, amount
+        from public.jurnal_entries
+        where transaction_id = $1
+        """,
+        transaction_id,
+    )
+    if rows:
+        reversal_entries = []
+        for row in rows:
+            position = str(row["position"]).strip().upper()
+            reversed_position = "KREDIT" if position == "DEBIT" else "DEBIT"
+            reversal_entries.append(
+                (
+                    transaction_id,
+                    str(row["account_code"]),
+                    reversed_position,
+                    row["amount"],
+                )
+            )
+        await connection.executemany(
+            """
+            insert into public.jurnal_entries
+              (transaction_id, account_code, position, amount)
+            values ($1, $2, $3, $4)
+            """,
+            reversal_entries,
+        )
+
+    if total_hpp is not None:
+        hpp_amount = _positive_journal_amount(total_hpp, "HPP")
+        if hpp_amount > 0:
+            group_id = str(uuid4())
+            description = (
+                f"VOID HPP Checkout | Transaction: {transaction_id}"
+                f" | Group: {group_id}"
+            )
+            await connection.executemany(
+                """
+                insert into public.jurnal_transaksi
+                  (kode_akun, debit, kredit, keterangan)
+                values ($1, $2, $3, $4)
+                """,
+                [
+                    ("1-10003", hpp_amount, Decimal("0"), description),
+                    ("5-50000", Decimal("0"), hpp_amount, description),
+                ],
+            )
 
 
 def _transaction_amounts(total: Any, admin_fee: Any) -> tuple[Decimal, Decimal]:

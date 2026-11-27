@@ -164,3 +164,34 @@ describe("Expenses.jsx — mencatat jam penginputan aktual", () => {
     expect(dateToIso("2026-03-01")).toContain("T");
   });
 });
+
+// Regresi fitur void transaksi selesai di halaman Riwayat Transaksi: aksi void
+// wajib memakai AdminPinDialog (PIN + alasan) dan memanggil endpoint void, serta
+// menampilkan badge VOID + menonaktifkan tombol untuk transaksi yang sudah void.
+describe("Transactions.jsx — aksi Void transaksi selesai", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "pages", "Transactions.jsx"),
+    "utf8"
+  );
+
+  it("memakai AdminPinDialog dengan needPin + withReason", () => {
+    expect(source).toContain("AdminPinDialog");
+    expect(source).toMatch(/needPin\b/);
+    expect(source).toMatch(/withReason\b/);
+  });
+
+  it("mengirim POST ke /transactions/{id}/void dengan { adminPin, reason }", () => {
+    expect(source).toContain("`/transactions/${voidTarget?.id}/void`");
+    expect(source).toContain("{ adminPin: pin || null, reason }");
+  });
+
+  it("menampilkan badge VOID dan menonaktifkan tombol untuk transaksi void", () => {
+    expect(source).toContain("isVoidTx");
+    expect(source).toContain("VOID");
+    expect(source).toContain("disabled={!isAdmin}");
+  });
+
+  it("tetap memuat ulang daftar setelah void", () => {
+    expect(source).toContain("await load()");
+  });
+});

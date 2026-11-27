@@ -40,7 +40,7 @@ from core import (
     to_local_date,
     today_local,
 )
-from finance import get_profit_and_loss_report
+from finance import exclude_void_transactions, get_profit_and_loss_report
 
 router = APIRouter(prefix="/api")
 ADMIN = require_roles("admin")
@@ -58,6 +58,8 @@ async def product_sales_report(start: str, end: str, _: User = Depends(ADMIN)):
     # ke hari sebelumnya -- pola yang sama dipakai endpoint /transactions.
     query = date_range_query(start, end)
     txs = await db.transactions.find(query).to_list(None)
+    # Transaksi void tidak dihitung (penjualan + HPP-nya sudah dibalik jurnal).
+    txs = exclude_void_transactions(txs)
 
     items = {}
     total_qty = 0
@@ -214,6 +216,8 @@ async def point_reward_usage_report(start: str, end: str, _: User = Depends(ADMI
     # Filter penukaran poin dilakukan di Python agar payload ``transactions``
     # tetap dibaca lewat abstraksi yang sama dengan laporan operasional lain.
     txs = await db.transactions.find(query).sort("date", -1).to_list(None)
+    # Transaksi void tidak dihitung (penjualan + HPP-nya sudah dibalik jurnal).
+    txs = exclude_void_transactions(txs)
 
     rows = []
     total_points = 0.0
@@ -269,6 +273,8 @@ async def promo_usage_report(start: str, end: str, _: User = Depends(ADMIN)):
     # Filter promo dilakukan di Python agar payload ``transactions`` tetap
     # dibaca lewat abstraksi yang sama dengan laporan operasional lain.
     txs = await db.transactions.find(query).sort("date", -1).to_list(None)
+    # Transaksi void tidak dihitung (nilai + diskonnya sudah dibalik jurnal).
+    txs = exclude_void_transactions(txs)
 
     rows = []
     promo_map = {}
@@ -760,6 +766,8 @@ async def customer_behavior_report(
     start_day, end_day = _report_range_bounds(start, end)
     query = _report_date_query(start, end)
     raw_txs = await db.transactions.find(query).to_list(None)
+    # Transaksi void tidak dihitung (pendapatan/metodenya sudah dibalik jurnal).
+    raw_txs = exclude_void_transactions(raw_txs)
     txs = []
     for tx in raw_txs:
         order_day = _tx_order_datetime(tx)
@@ -779,6 +787,7 @@ async def customer_behavior_report(
         baseline_raw = await db.transactions.find(
             _report_date_query(baseline_start, baseline_end)
         ).to_list(None)
+        baseline_raw = exclude_void_transactions(baseline_raw)
         for tx in baseline_raw:
             order_day = _tx_order_datetime(tx)
             if order_day is not None and baseline_start_day <= order_day.date() <= baseline_end_day:
@@ -1098,6 +1107,8 @@ async def owner_monitor_report(
     # --- Omzet: memakai waktu PEMBAYARAN (kolom ``date``) agar konsisten
     # dengan /reports/summary dan laporan laba-rugi (transaction_date).
     txs = await db.transactions.find(date_range_query(period_start, period_end)).to_list(None)
+    # Transaksi void tidak dihitung (penjualan + HPP-nya sudah dibalik jurnal).
+    txs = exclude_void_transactions(txs)
 
     # --- Open bill: hitung seluruh bill terbuka (tanpa filter tanggal).
     bills = await db.open_bills.find().sort("timestamp", -1).to_list(None)

@@ -306,6 +306,11 @@ class Transaction(BaseDocument):
     # Kunci idempotensi klien (mis. dari antrean offline). Boleh kosong agar
     # transaksi lama / klien lama tetap kompatibel. Kolomnya unik di DB.
     client_request_id: Optional[str] = None
+    # Status transaksi. Hanya terisi oleh alur void (`status = "void"`); pada
+    # transaksi normal nilainya dikosongkan dari payload tulis sehingga default
+    # kolom DB ('paid') yang berlaku (kolom `status` baru ada setelah migrasi
+    # `supabase/migrate_transaction_void_columns.sql`).
+    status: Optional[str] = None
 
     def to_mongo(self) -> dict:
         data = super().to_mongo()
@@ -315,6 +320,11 @@ class Transaction(BaseDocument):
         # normal tidak bergantung pada kolom baru ini (kompatibilitas mundur).
         if not data.get("client_request_id"):
             data.pop("client_request_id", None)
+        # Kolom `status` juga hanya ditulis oleh alur void; bila kosong, buang
+        # dari payload agar checkout normal memakai default DB dan tidak gagal
+        # di skema yang belum dimigrasi (kolom belum ada -> ValueError pgdb).
+        if data.get("status") is None:
+            data.pop("status", None)
         return data
 
 

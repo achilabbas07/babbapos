@@ -14,6 +14,7 @@ from variants import (
     load_variants,
     check_materials,
     consume_checkout_stock,
+    restore_checkout_stock,
     product_num,
     variant_stock_by_product,
     variant_hpp,
@@ -26,6 +27,7 @@ from finance import (
     checkout_journal_account_codes,
     checkout_journal_lines,
     debt_payment_lines,
+    exclude_void_transactions,
     expense_account_codes,
     expense_lines,
     get_account_balances,
@@ -50,6 +52,7 @@ from finance import (
     post_purchase_journal,
     purchase_journal_lines,
     resolve_expense_account_code,
+    reverse_checkout_journal_entries,
     transaction_account_codes,
     transaction_lines,
 )
@@ -182,6 +185,11 @@ class MoveIn(BaseModel):
 class VoidIn(BaseModel):
     adminPin: Optional[str] = None
     reason: str = ""
+
+
+class VoidTransactionIn(BaseModel):
+    adminPin: str
+    reason: str
 
 
 class TableStatusIn(BaseModel):
@@ -1414,6 +1422,85 @@ async def get_transaction(tid: str, _: User = Depends(STAFF)):
     return Transaction.from_mongo(await get_or_404("transactions", tid, "Transaksi"))
 
 
+@api.post("/transactions/{tid}/void")
+async def void_transaction(tid: str, body: VoidTransactionIn, request: Request, user: User = Depends(STAFF)):
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "Alasan void wajib diisi")
+
+    # Void transaksi selesai WAJIB diotorisasi PIN admin (perilaku sama seperti
+    # `void_open_bill`): transaksi yang sudah dijurnal + stoknya terpakai tidak
+    # boleh dibatalkan tanpa verifikasi.
+    approver = (await check_pin(request, body.adminPin, "admin"))["name"]
+
+    doc = await get_or_404("transactions", tid, "Transaksi")
+    if doc.get("status") == "void":
+        raise HTTPException(400, "Transaksi sudah di-void.")
+
+    items = doc.get("items_json") or doc.get("items") or []
+    total_hpp = sum(
+        Decimal(str(item.get("hpp", 0) or 0)) * Decimal(str(item.get("qty", 0) or 0))
+        for item in items
+    )
+    voided_at = now_iso()
+    # Kolom void pada `transactions` (`status`/`voidedAt`/`voidedBy`/`voidReason`)
+    # dan kolom `void_logs.transactionId` belum ada di skema saat ini. Kolom yang
+    # BELUM dimigrasi dibuang secara dinamis dari payload (bukan di-catch setelah
+    # eksekusi) agar UPDATE/INSERT tidak memecah transaksi database -> restorasi
+    # stok + pembalik jurnal tetap atomik. Tambahkan kolom via migrasi bila ingin
+    # void ini terekam penuh (lihat catatan repo: jangan pakai join fiktif).
+    def _supported(coll_name: str, payload: dict) -> dict:
+        cols = db.columns.get(coll_name, {})
+        missing = [k for k in payload if k != "_id" and db[coll_name].col(k) not in cols]
+        if missing:
+            logger.warning(
+                "Void transaksi %s: kolom %s belum ada di tabel %s dan diabaikan.",
+                tid, ", ".join(missing), coll_name,
+            )
+        return {k: v for k, v in payload.items() if k == "_id" or db[coll_name].col(k) in cols}
+
+    trx_update = _supported("transactions", {
+        "status": "void",
+        "voidedAt": voided_at,
+        "voidedBy": approver,
+        "voidReason": reason,
+    })
+    void_doc = _supported("void_logs", {
+        "_id": await next_id("VOID"),
+        # `billId` dipertahankan terisi (untuk pembaca lama) sekaligus memuat
+        # `transactionId` sebagai tautan eksplisit ke transaksi yang di-void.
+        "billId": tid,
+        "transactionId": tid,
+        "timestamp": voided_at,
+        "tableId": doc.get("tableId"),
+        "total": doc.get("total", 0),
+        "items_json": items,
+        "reason": reason,
+        "requestedBy": user.name,
+        "authorizedBy": approver,
+    })
+
+    try:
+        await db.connect()
+        async with db.pool.acquire() as conn:
+            async with conn.transaction():
+                if items:
+                    await restore_checkout_stock(conn, items)
+                await reverse_checkout_journal_entries(conn, tid, total_hpp=total_hpp)
+                if trx_update:
+                    await db.transactions.update_one({"_id": tid}, {"$set": trx_update}, connection=conn)
+                await db.void_logs.insert_one(void_doc, connection=conn)
+    except asyncpg.PostgresError as err:
+        message = getattr(err, "message", None) or str(err)
+        raise HTTPException(400, f"Void gagal: {message}") from err
+    except ValueError as err:
+        raise HTTPException(400, f"Void gagal: {err}") from err
+
+    if items:
+        await log_order_diff(items, (doc.get("waiterId"), doc.get("waiterName", "")), [], (doc.get("waiterId"), ""), "void", tid)
+    return {"ok": True, "transactionId": tid, "authorizedBy": approver}
+
+
 @api.post("/transactions")
 async def create_transaction(body: TransactionIn, request: Request, user: User = Depends(STAFF)):
     # Idempotensi (Tahap 2 antrean offline): bila `client_request_id` yang sama
@@ -2470,6 +2557,12 @@ async def report_summary(start: str, end: str, tz_offset: int = -480, _: User = 
     # Default -480 agar bucket harian memakai tanggal kalender Asia/Makassar.
     rng = {"$gte": to_utc_iso(start), "$lt": to_utc_iso(end)}
     txs = await db.transactions.find({"date": rng}).to_list(None)
+    # Transaksi yang di-void dikeluarkan dari agregasi pendapatan/HPP/metode/
+    # harian: penjualan + HPP-nya sudah dibalik oleh entri jurnal pembalik
+    # (finance.reverse_checkout_journal_entries) sehingga tidak boleh ikut
+    # terhitung (akan dobel). Sebelum migrasi kolom `status`, tidak ada yang
+    # terfilter sehingga perilaku lama tetap sama.
+    txs = exclude_void_transactions(txs)
     exps = await db.expenses.find({"date": rng}).to_list(None)
     purchases = await db.purchases.find({"date": rng}).to_list(None)
 
