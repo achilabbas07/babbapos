@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import { useProfile } from "@/context/ProfileContext";
 import { api, errMsg, errorCode, fmtDate, itemKey, itemName, isNetworkError, isFetchNetworkError, NETWORK_ERROR_MESSAGE } from "@/lib/api";
 import { CACHE_KEYS, saveCache, readCacheData, variantsCacheKey, openBillCacheKey, enqueueTransaction, makeClientRequestId, countTransactionQueue, getTransactionQueue } from "@/lib/localStore";
 import { loadWithCache } from "@/lib/offlineRead";
@@ -54,6 +55,7 @@ const cartItemKey = (item) => `${itemKey(item)}:${item.id || ""}`;
 
 export default function POS() {
   const { user } = useAuth();
+  const { profile } = useProfile();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const [products, setProducts] = useState([]);
@@ -470,7 +472,7 @@ export default function POS() {
         canPay={user.role !== "waiter"} busy={busy} onQty={changeQty} onRemove={removeItem} isLocked={isLocked} onSaveBill={saveBill} onPay={() => setPayOpen(true)} onReset={reset}
       />
       <PayDialog open={payOpen} onOpenChange={setPayOpen} total={total} onPay={pay} busy={busy} customerId={order.customerId !== "none" ? order.customerId : null} />
-      <ReceiptDialog trx={receipt} onClose={() => setReceipt(null)} />
+      <ReceiptDialog trx={receipt} onClose={() => setReceipt(null)} autoPrint={!!profile.cetakOtomatis} />
       <AdminPinDialog open={!!pending} onClose={() => setPending(null)} testid="reduce-pin" needPin title="Otorisasi Admin"
         description="Item ini sudah tersimpan di bill. Mengurangi atau menghapus item butuh PIN admin."
         onSubmit={async ({ pin }) => { await api.post("/auth/verify-admin", { pin }); setAuthPin(pin); pending(); setPending(null); }} />

@@ -1,5 +1,5 @@
 import { Printer } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -49,10 +49,13 @@ const ThermalBusinessHeader = ({ testid }) => {
   );
 };
 
-export const ReceiptDialog = ({ trx, onClose }) => {
+export const ReceiptDialog = ({ trx, onClose, autoPrint = false }) => {
   const { profile } = useProfile();
   const [, setPrintRevision] = useState(0);
   const [printing, setPrinting] = useState(false);
+  // Dipakai untuk "Cetak Struk Otomatis (Kasir)": cetak sekali per transaksi
+  // begitu struk muncul, tanpa mengubah fungsi cetak yang sudah berjalan.
+  const autoPrintedRef = useRef(null);
   // Saldo poin terbaru pelanggan (best-effort) untuk ditampilkan di struk. Bila
   // gagal diambil, bagian ini dilewati tanpa mengganggu alur pembayaran.
   const [customerPoints, setCustomerPoints] = useState(null);
@@ -139,6 +142,16 @@ export const ReceiptDialog = ({ trx, onClose }) => {
       setPrinting(false);
     }
   };
+
+  // Cetak struk otomatis (bila diaktifkan di Profil Usaha). Memakai ulang
+  // handlePrint yang sama dengan tombol manual, jadi alur cetak tidak berubah.
+  useEffect(() => {
+    if (!autoPrint || !trx?.id || printing) return;
+    if (autoPrintedRef.current === trx.id) return;
+    autoPrintedRef.current = trx.id;
+    handlePrint();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPrint, trx?.id]);
 
   return (
     <Dialog open={!!trx} onOpenChange={(o) => !o && onClose()}>

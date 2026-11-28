@@ -17,8 +17,6 @@ const FIELDS = [
   { name: "address", label: "Alamat", textarea: true, maxLength: 500 },
   { name: "phone", label: "No. Telepon", type: "tel", placeholder: "08xx-xxxx-xxxx", maxLength: 50 },
   { name: "additional_info", label: "Keterangan Tambahan", textarea: true, hint: "Tampil di bagian bawah struk, misal info Wi-Fi atau jam buka.", maxLength: 1000 },
-  { name: "printerDapur", label: "Nama/Mac Printer Dapur", maxLength: 120 },
-  { name: "printerKasir", label: "Nama/Mac Printer Kasir", maxLength: 120 },
 ];
 
 const ProfileField = ({ f, value, onChange }) => {
@@ -89,6 +87,13 @@ export default function Profile() {
             <div className="border-y border-dashed border-border py-3 text-center text-xs text-muted-foreground">· · · item pesanan · · ·</div>
             <PrintFooter profile={form} paid />
           </div>
+        </div>
+      </div>
+      <div data-testid="profile-app-info" className="mt-6 flex justify-end">
+        <div className="text-right text-xs leading-relaxed text-muted-foreground">
+          <p data-testid="profile-app-version" className="font-semibold text-foreground">v1.1.1 / Build 11</p>
+          <p data-testid="profile-app-copyright">Copyright @warkopbabba.mks</p>
+          <p data-testid="profile-app-updated">Update terakhir: 28 Nov 2026</p>
         </div>
       </div>
     </div>
