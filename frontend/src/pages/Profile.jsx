@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { APP_VERSION_LABEL } from "@/lib/appVersion";
 
 const FIELDS = [
   { name: "app_name", label: "Nama Usaha", required: true, maxLength: 120 },
@@ -91,7 +92,7 @@ export default function Profile() {
       </div>
       <div data-testid="profile-app-info" className="mt-6 flex justify-end">
         <div className="text-right text-xs leading-relaxed text-muted-foreground">
-          <p data-testid="profile-app-version" className="font-semibold text-foreground">v1.1.2 / Build 12</p>
+          <p data-testid="profile-app-version" className="font-semibold text-foreground">{APP_VERSION_LABEL}</p>
           <p data-testid="profile-app-copyright">Copyright @warkopbabba.mks</p>
           <p data-testid="profile-app-updated">Update terakhir: 28 Nov 2026</p>
         </div>

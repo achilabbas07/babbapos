@@ -1,6 +1,37 @@
 // craco.config.js
 const path = require("path");
+const fs = require("fs");
+const webpack = require("webpack");
 const { GenerateSW } = require("workbox-webpack-plugin");
+
+// Satu sumber kebenaran untuk teks versi aplikasi di UI. Dibaca saat build dari
+// konfigurasi versi yang aktif, lalu di-inject sebagai konstanta global
+// (__APP_VERSION__ / __APP_BUILD__) yang dipakai `src/lib/appVersion.js`.
+function readAppVersions() {
+  let version = "0.0.0";
+  let build = "0";
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "package.json"), "utf8"),
+    );
+    if (pkg.version) version = String(pkg.version).trim();
+  } catch (err) {
+    console.warn("[app-version] gagal membaca package.json:", err.message);
+  }
+  try {
+    const gradle = fs.readFileSync(
+      path.join(__dirname, "android", "app", "build.gradle"),
+      "utf8",
+    );
+    const match = gradle.match(/versionCode\s+(\d+)/);
+    if (match) build = match[1];
+  } catch (err) {
+    console.warn("[app-version] gagal membaca build.gradle:", err.message);
+  }
+  return { version, build };
+}
+
+const appVersions = readAppVersions();
 
 // Load .env files in the SAME precedence order react-scripts uses, so that
 // environment-specific values (e.g. .env.production) win over the shared .env.
@@ -142,6 +173,16 @@ let webpackConfig = {
             '**/public/**',
         ],
       };
+
+      // Suntikkan versi aplikasi (package.json) + nomor build (build.gradle) ke
+      // bundle sebagai literal string sehingga `src/lib/appVersion.js` selalu
+      // sinkron dengan konfigurasi versi aktif tanpa hardcode di komponen.
+      webpackConfig.plugins.push(
+        new webpack.DefinePlugin({
+          __APP_VERSION__: JSON.stringify(appVersions.version),
+          __APP_BUILD__: JSON.stringify(appVersions.build),
+        }),
+      );
 
       // Add health check plugin to webpack if enabled
       if (config.enableHealthCheck && healthPluginInstance) {
