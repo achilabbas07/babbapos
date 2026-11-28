@@ -91,7 +91,7 @@ export default function Profile() {
       </div>
       <div data-testid="profile-app-info" className="mt-6 flex justify-end">
         <div className="text-right text-xs leading-relaxed text-muted-foreground">
-          <p data-testid="profile-app-version" className="font-semibold text-foreground">v1.1.1 / Build 11</p>
+          <p data-testid="profile-app-version" className="font-semibold text-foreground">v1.1.2 / Build 12</p>
           <p data-testid="profile-app-copyright">Copyright @warkopbabba.mks</p>
           <p data-testid="profile-app-updated">Update terakhir: 28 Nov 2026</p>
         </div>
