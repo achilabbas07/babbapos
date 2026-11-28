@@ -65,7 +65,9 @@ const ShiftPrintContent = ({ shift, onClose }) => {
               <Row label="Saldo akhir (seharusnya)" value={shift.expectedCash == null ? "—" : rp(shift.expectedCash)} bold />
               <Row label="Uang fisik" value={shift.countedCash == null ? "—" : rp(shift.countedCash)} />
               <Row label="Selisih" value={shift.difference == null ? "—" : rp(shift.difference)} bold />
-              {shift.note && <p className="pt-1 text-xs text-muted-foreground">Catatan: {shift.note}</p>}
+              {String(shift.note ?? "").trim() && (
+                <p className="pt-1 text-xs text-muted-foreground">Catatan: {String(shift.note).trim()}</p>
+              )}
             </div>
             <div className="no-print flex">
               <button data-testid="shift-bluetooth-reprint-button" onClick={reprint} disabled={printing}

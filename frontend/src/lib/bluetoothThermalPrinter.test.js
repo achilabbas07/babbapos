@@ -66,6 +66,31 @@ describe("Bluetooth ESC/POS receipts", () => {
     expect(openShiftLines.find(({ text }) => text.startsWith("Selisih"))?.text.trimEnd()).toMatch(/-$/);
   });
 
+  it("prints the close-shift note only when it has content", () => {
+    const base = {
+      id: "SHIFT-20261030-002",
+      userName: "Kasir Pagi",
+      trxCount: 1,
+      expectedCash: 100000,
+      countedCash: 100000,
+      difference: 0,
+    };
+
+    const withNote = buildBluetoothShiftReportLines({ ...base, note: "Laci kurang 5rb, sudah dicek CCTV" });
+    const withNoteTexts = withNote.map(({ text }) => text);
+    expect(withNoteTexts.some((text) => text.startsWith("Catatan:"))).toBe(true);
+    // Catatan ditampilkan setelah baris "Selisih".
+    expect(withNoteTexts.findIndex((text) => text.startsWith("Catatan:")))
+      .toBeGreaterThan(withNoteTexts.findIndex((text) => text.startsWith("Selisih")));
+    // Tidak ada baris yang melebihi lebar kertas.
+    expect(withNote.every(({ text }) => Array.from(text).length <= 32)).toBe(true);
+
+    const noNote = buildBluetoothShiftReportLines({ ...base, note: "" });
+    expect(noNote.some(({ text }) => text.includes("Catatan"))).toBe(false);
+    const blankNote = buildBluetoothShiftReportLines({ ...base, note: "   " });
+    expect(blankNote.some(({ text }) => text.includes("Catatan"))).toBe(false);
+  });
+
   it("justifies shift rows to the exact character width", () => {
     const line = printJustify("Penjualan non-tunai", "Rp   64.000");
     expect(Array.from(line)).toHaveLength(32);

@@ -382,6 +382,16 @@ export function buildBluetoothShiftReportLines(shift, { reprint = false } = {}) 
     ...shiftRow("Uang fisik", shift.countedCash == null ? "-" : shiftAmount(shift.countedCash)),
     ...shiftRow("Selisih", shift.difference == null ? "-" : shiftAmount(shift.difference)),
   ];
+  // Catatan opsional dari form Tutup Kasir. Ditampilkan hanya bila ada isinya,
+  // dilipat (wrapped) agar tetap muat pada lebar kertas 32 karakter.
+  const note = String(shift.note ?? "").trim();
+  if (note) {
+    lines.push({ type: "blank", text: "" });
+    lines.push({ type: "text", text: "-".repeat(LINE_WIDTH) });
+    lines.push(
+      ...wrapText(`Catatan: ${note}`).map((text) => ({ type: "text", text })),
+    );
+  }
   return lines;
 }
 
